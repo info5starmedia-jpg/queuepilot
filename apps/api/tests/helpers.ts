@@ -11,6 +11,14 @@ import { BrowserRunRepository } from "../src/application/lifecycle/browser-run.r
 import { BrowserLifecycleService } from "../src/application/lifecycle/browser.lifecycle.service.js";
 import { LaunchIdentityService } from "../src/application/lifecycle/launch-identity.service.js";
 import { FakeBrowserRuntime } from "../src/application/runtime/fake.browser-runtime.js";
+import {
+  ProfileProviderRepository,
+  ProxyProviderRepository,
+} from "../src/application/providers/provider.repository.js";
+import {
+  ProfileProviderService,
+  ProxyProviderService,
+} from "../src/application/providers/provider.service.js";
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/config.js";
 
@@ -21,6 +29,8 @@ export interface TestContext {
   profiles: ProfileService;
   proxies: ProxyService;
   snapshots: LaunchIdentityService;
+  profileProviders: ProfileProviderService;
+  proxyProviders: ProxyProviderService;
   dataDir: string;
 }
 
@@ -45,6 +55,12 @@ export function makeTestContext(): TestContext {
     dataDir,
     snapshots,
   );
+  const profileProviders = new ProfileProviderService(
+    new ProfileProviderRepository(db),
+    profileRepo,
+    identityRepo,
+  );
+  const proxyProviders = new ProxyProviderService(new ProxyProviderRepository(db), proxyRepo);
   const config: AppConfig = {
     port: 0,
     host: "127.0.0.1",
@@ -52,6 +68,6 @@ export function makeTestContext(): TestContext {
     runtime: "fake",
     dbPath: ":memory:",
   };
-  const app = buildApp({ config, profiles, proxies, lifecycle });
-  return { app, lifecycle, runtime, profiles, proxies, snapshots, dataDir };
+  const app = buildApp({ config, profiles, proxies, lifecycle, profileProviders, proxyProviders });
+  return { app, lifecycle, runtime, profiles, proxies, snapshots, profileProviders, proxyProviders, dataDir };
 }
