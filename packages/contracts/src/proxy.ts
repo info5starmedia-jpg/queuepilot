@@ -22,6 +22,10 @@ export const ProxySchema = z.object({
   host: HostSchema,
   port: z.number().int().min(1).max(65535),
   username: z.string().max(200).nullable(),
+  /** Optional timezone carried by the proxy (provider files' 6th column). */
+  timezone: z.string().nullable().default(null),
+  /** Importing provider, if any. */
+  providerId: z.string().uuid().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

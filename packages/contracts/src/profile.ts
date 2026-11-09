@@ -38,6 +38,17 @@ export const ProfileSchema = z.object({
   status: ProfileStatusSchema,
   notes: z.string().max(4000).default(""),
   tags: z.array(z.string().min(1).max(60)).max(24).default([]),
+  /** Login/contact email — required on provider-imported profiles. */
+  email: z.string().nullable().default(null),
+  /** Which provider imported this profile, and its stable key there. */
+  providerId: z.string().uuid().nullable().default(null),
+  providerKey: z.string().nullable().default(null),
+  /**
+   * Provider-imported data that doesn't map to core fields: address, DOB,
+   * phone, SMS numbers, passcodes, free columns, card sets, tab color, URL,
+   * timezone, favorite. Shape: ImportedProfile minus key/name/email.
+   */
+  extra: z.record(z.unknown()).default({}),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

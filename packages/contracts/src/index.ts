@@ -4,6 +4,7 @@ export * from "./browser-run.js";
 export * from "./launch-identity.js";
 export * from "./engine.js";
 export * from "./adspower.js";
+export * from "./providers.js";
 
 /**
  * Domain error codes shared across the API, the UI and automation clients.
@@ -12,6 +13,8 @@ export * from "./adspower.js";
 export const ErrorCodes = {
   PROFILE_NOT_FOUND: "PROFILE_NOT_FOUND",
   PROXY_NOT_FOUND: "PROXY_NOT_FOUND",
+  PROVIDER_NOT_FOUND: "PROVIDER_NOT_FOUND",
+  PROVIDER_SOURCE_UNREADABLE: "PROVIDER_SOURCE_UNREADABLE",
   RUN_NOT_FOUND: "RUN_NOT_FOUND",
   PROFILE_ALREADY_RUNNING: "PROFILE_ALREADY_RUNNING",
   PROFILE_NOT_RUNNING: "PROFILE_NOT_RUNNING",
