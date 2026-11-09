@@ -9,13 +9,17 @@
 - Next in this track: engine health probe endpoint (version, launch
   self-test); CLI `queuepilot engine install` wrapping the installer.
 
-## P1.5 — Jancy-parity core (next)
+## P1.5 — Jancy-parity core (IN PROGRESS — providers DONE v0.3.0)
 - Profile providers: CSV import with the full optional-column spec (groups,
-  tab color, address, DOB, phone, SMS numbers, passcodes, free columns,
-  per-profile proxy, notes, URL, timezone, credit-card sets), refreshable.
-- Proxy providers: delimited files (comma/tab/colon/semicolon), timezone
-  column, persist/start-over/random distribution, per-tab temp proxies.
-- Tab/partition model: related tabs share an isolated in-memory session.
+  tab color, address, DOB, phone, SMS numbers incl. country codes, passcodes,
+  free columns, per-profile proxy list, notes, URL, timezone, credit-card
+  sets), refreshable upserts that never churn identity or run state. ✅
+- Proxy providers: delimited files (comma/tab/colon/semicolon), optional
+  header, timezone column, persist/start-over/random distribution via
+  `POST /proxy-providers/:id/next`, refresh replaces the pool but refuses
+  while any of its proxies are attached. ✅
+- Next in this track: per-tab temp proxies; tab/partition model (related tabs
+  share an isolated in-memory session); Google Sheets providers (OAuth).
 
 ## P2 — Web dashboard
 - React console served by the API itself: profiles grid, proxy manager,
