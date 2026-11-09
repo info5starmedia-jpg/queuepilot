@@ -77,6 +77,47 @@ const MIGRATIONS: Migration[] = [
         WHERE status IN ('launching','running');
     `,
   },
+  {
+    id: "002-providers",
+    up: `
+      ALTER TABLE profiles ADD COLUMN provider_id TEXT;
+      ALTER TABLE profiles ADD COLUMN provider_key TEXT;
+      ALTER TABLE profiles ADD COLUMN email TEXT;
+      ALTER TABLE profiles ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';
+      -- One row per (provider, Profile-column key): refresh upserts on this.
+      CREATE UNIQUE INDEX provider_profile_key
+        ON profiles(provider_id, provider_key)
+        WHERE provider_id IS NOT NULL;
+
+      ALTER TABLE proxies ADD COLUMN timezone TEXT;
+      ALTER TABLE proxies ADD COLUMN provider_id TEXT;
+
+      CREATE TABLE profile_providers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('csv')),
+        source_path TEXT NOT NULL,
+        last_refreshed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE proxy_providers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('file')),
+        source_path TEXT NOT NULL,
+        delimiter TEXT NOT NULL DEFAULT ',',
+        has_header INTEGER NOT NULL DEFAULT 0,
+        distribution TEXT NOT NULL DEFAULT 'start-over'
+          CHECK (distribution IN ('persist','start-over','random')),
+        cursor INTEGER NOT NULL DEFAULT 0,
+        last_refreshed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {
