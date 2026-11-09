@@ -7,6 +7,14 @@ import { ProxyService } from "./application/proxies/proxy.service.js";
 import { BrowserRunRepository } from "./application/lifecycle/browser-run.repository.js";
 import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
+import {
+  ProfileProviderRepository,
+  ProxyProviderRepository,
+} from "./application/providers/provider.repository.js";
+import {
+  ProfileProviderService,
+  ProxyProviderService,
+} from "./application/providers/provider.service.js";
 import { FakeBrowserRuntime } from "./application/runtime/fake.browser-runtime.js";
 import { CamoufoxRuntime, defaultCamoufoxPath } from "./application/runtime/camoufox.runtime.js";
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
@@ -26,6 +34,12 @@ export async function main(): Promise<void> {
 
   const proxies = new ProxyService(proxyRepo);
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
+  const profileProviders = new ProfileProviderService(
+    new ProfileProviderRepository(db),
+    profileRepo,
+    identityRepo,
+  );
+  const proxyProviders = new ProxyProviderService(new ProxyProviderRepository(db), proxyRepo);
 
   const runtime: BrowserRuntime =
     config.runtime === "fake"
@@ -51,7 +65,7 @@ export async function main(): Promise<void> {
     );
   }
 
-  const app = buildApp({ config, profiles, proxies, lifecycle });
+  const app = buildApp({ config, profiles, proxies, lifecycle, profileProviders, proxyProviders });
   await app.listen({ port: config.port, host: config.host });
   console.log(
     `[queuepilot] API listening on http://${config.host}:${config.port} (runtime: ${runtime.kind})`,

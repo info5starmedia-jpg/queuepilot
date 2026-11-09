@@ -3,18 +3,25 @@ import type { AppConfig } from "./config/config.js";
 import type { ProfileService } from "./application/profiles/profile.service.js";
 import type { ProxyService } from "./application/proxies/proxy.service.js";
 import type { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
+import type {
+  ProfileProviderService,
+  ProxyProviderService,
+} from "./application/providers/provider.service.js";
 import { toHttpError } from "./http/error-mapper.js";
 import { registerProfileRoutes } from "./http/profiles.routes.js";
 import { registerProxyRoutes } from "./http/proxies.routes.js";
 import { registerRunRoutes } from "./http/runs.routes.js";
 import { registerAdsPowerRoutes } from "./http/adspower.routes.js";
 import { registerEventRoutes } from "./http/events.routes.js";
+import { registerProviderRoutes } from "./http/providers.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
   profiles: ProfileService;
   proxies: ProxyService;
   lifecycle: BrowserLifecycleService;
+  profileProviders: ProfileProviderService;
+  proxyProviders: ProxyProviderService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -42,6 +49,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerRunRoutes(app, deps.lifecycle);
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
+  registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
 
   return app;
 }

@@ -18,13 +18,16 @@ export function toHttpError(err: unknown): { status: number; body: { error: { co
     const status =
       err.code === ErrorCodes.PROFILE_NOT_FOUND ||
       err.code === ErrorCodes.PROXY_NOT_FOUND ||
-      err.code === ErrorCodes.RUN_NOT_FOUND
+      err.code === ErrorCodes.RUN_NOT_FOUND ||
+      err.code === ErrorCodes.PROVIDER_NOT_FOUND
         ? 404
         : err.code === ErrorCodes.PROFILE_ALREADY_RUNNING || err.code === ErrorCodes.CONFLICT
           ? 409
           : err.code === ErrorCodes.ENGINE_UNAVAILABLE
             ? 503
-            : 500;
+            : err.code === ErrorCodes.PROVIDER_SOURCE_UNREADABLE
+              ? 422
+              : 500;
     return { status, body: { error: { code: err.code, message: err.message } } };
   }
   return {
