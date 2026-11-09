@@ -16,8 +16,8 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.2.0` — foundation + Phase 1 (engine trust & launch identity). What works
-today, covered by 45 tests:
+`v0.3.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+providers. What works today, covered by 61 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -37,9 +37,17 @@ today, covered by 45 tests:
   `/api/v1/profile/list|create`.
 - Two engine runtimes: **fake** (deterministic, for tests/CI/demos) and
   **camoufox** (real fingerprint-patched Firefox; bring your own binary).
+- **Profile providers** — refreshable CSV imports following the familiar
+  column spec (`Profile`/`Name`/`Email` required; groups, tab color, address,
+  DOB, phone, multiple SMS numbers with country codes, passcodes, Free 1–10,
+  per-profile proxies, notes, URL, timezone, favorites, named credit-card
+  sets). Refresh upserts by key and never churns identity or run state.
+- **Proxy providers** — refreshable delimited files (comma/tab/colon/
+  semicolon, optional header, optional timezone column) with
+  persist / start-over / random distribution via `POST /proxy-providers/:id/next`.
 
-Not yet: web dashboard, profile providers (CSV/Sheets import), resolver/parser
-registries, plugin system, own Chromium engine build. See
+Not yet: web dashboard, Google Sheets providers, resolver/parser registries,
+tab/partition model, plugin system, own Chromium engine build. See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
 
 ## Quickstart
@@ -66,6 +74,16 @@ curl "http://127.0.0.1:50325/api/v1/browser/start?profile_id=<id>"
 
 curl -X POST http://127.0.0.1:50325/api/v1/browser/stop \
   -H 'content-type: application/json' -d '{"profile_id":"<id>"}'
+```
+
+### Import a profile CSV
+
+```bash
+curl -X POST http://127.0.0.1:50325/profile-providers \
+  -H 'content-type: application/json' \
+  -d '{"name":"my-sheet","sourcePath":"/path/to/profiles.csv"}'
+# -> {"provider":{...},"refresh":{"imported":N,"updated":M,"issues":[]}}
+# re-read the file later: POST /profile-providers/<id>/refresh
 ```
 
 ### Try it without a browser engine
