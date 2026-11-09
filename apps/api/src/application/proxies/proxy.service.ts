@@ -25,7 +25,6 @@ export class ProxyService {
       createdAt: now,
       updatedAt: now,
     };
-    this.profiles?.create?.(stored);
     this.proxies.create(stored);
     return publicProxy(stored);
   }
