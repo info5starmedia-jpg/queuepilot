@@ -17,7 +17,7 @@ export function registerAdsPowerRoutes(
   lifecycle: BrowserLifecycleService,
   profiles: ProfileService,
 ): void {
-  app.get("/status", async () => adsOk({ service: "queuepilot", version: "0.1.0" }));
+  app.get("/status", async () => adsOk({ service: "queuepilot", version: "0.3.0" }));
 
   app.post("/api/v1/browser/start", async (req, reply) => {
     const { profile_id } = (req.body ?? req.query) as { profile_id?: string };
