@@ -22,6 +22,8 @@ export class ProxyService {
       port: input.port,
       username: input.username ?? null,
       password: input.password ?? null,
+      timezone: null,
+      providerId: null,
       createdAt: now,
       updatedAt: now,
     };

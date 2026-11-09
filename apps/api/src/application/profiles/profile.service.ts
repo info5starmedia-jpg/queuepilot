@@ -38,6 +38,10 @@ export class ProfileService {
       status: "idle",
       notes: input.notes ?? "",
       tags: input.tags ?? [],
+      email: null,
+      providerId: null,
+      providerKey: null,
+      extra: {},
       createdAt: now,
       updatedAt: now,
     };
