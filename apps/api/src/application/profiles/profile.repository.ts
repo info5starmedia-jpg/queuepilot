@@ -11,6 +11,10 @@ interface ProfileRow {
   status: Profile["status"];
   notes: string;
   tags: string;
+  provider_id: string | null;
+  provider_key: string | null;
+  email: string | null;
+  extra: string;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +29,10 @@ function toProfile(r: ProfileRow): Profile {
     status: r.status,
     notes: r.notes,
     tags: JSON.parse(r.tags) as string[],
+    email: r.email ?? null,
+    providerId: r.provider_id ?? null,
+    providerKey: r.provider_key ?? null,
+    extra: JSON.parse(r.extra ?? "{}") as Record<string, unknown>,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -36,10 +44,10 @@ export class ProfileRepository {
   create(p: Profile): void {
     this.db
       .prepare(
-        `INSERT INTO profiles (id, name, grp, proxy_id, identity_id, status, notes, tags, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO profiles (id, name, grp, proxy_id, identity_id, status, notes, tags, provider_id, provider_key, email, extra, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.id, p.name, p.group, p.proxyId, p.identityId, p.status, p.notes, JSON.stringify(p.tags), p.createdAt, p.updatedAt);
+      .run(p.id, p.name, p.group, p.proxyId, p.identityId, p.status, p.notes, JSON.stringify(p.tags), p.providerId, p.providerKey, p.email, JSON.stringify(p.extra), p.createdAt, p.updatedAt);
   }
 
   get(id: string): Profile | null {
@@ -69,13 +77,28 @@ export class ProfileRepository {
   update(p: Profile): void {
     this.db
       .prepare(
-        `UPDATE profiles SET name=?, grp=?, proxy_id=?, identity_id=?, status=?, notes=?, tags=?, updated_at=? WHERE id=?`,
+        `UPDATE profiles SET name=?, grp=?, proxy_id=?, identity_id=?, status=?, notes=?, tags=?, provider_id=?, provider_key=?, email=?, extra=?, updated_at=? WHERE id=?`,
       )
-      .run(p.name, p.group, p.proxyId, p.identityId, p.status, p.notes, JSON.stringify(p.tags), p.updatedAt, p.id);
+      .run(p.name, p.group, p.proxyId, p.identityId, p.status, p.notes, JSON.stringify(p.tags), p.providerId, p.providerKey, p.email, JSON.stringify(p.extra), p.updatedAt, p.id);
   }
 
   delete(id: string): void {
     this.db.prepare("DELETE FROM profiles WHERE id = ?").run(id);
+  }
+
+  /** The profile a provider row maps to, if it was imported before. */
+  getByProviderKey(providerId: string, providerKey: string): Profile | null {
+    const row = this.db
+      .prepare("SELECT * FROM profiles WHERE provider_id = ? AND provider_key = ?")
+      .get(providerId, providerKey) as ProfileRow | undefined;
+    return row ? toProfile(row) : null;
+  }
+
+  /** Detach all profiles from a provider (used when the provider is deleted). */
+  detachProvider(providerId: string): void {
+    this.db
+      .prepare("UPDATE profiles SET provider_id = NULL, provider_key = NULL WHERE provider_id = ?")
+      .run(providerId);
   }
 }
 

@@ -14,6 +14,8 @@ interface ProxyRow {
   port: number;
   username: string | null;
   password: string | null;
+  timezone: string | null;
+  provider_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +29,8 @@ function toStored(r: ProxyRow): StoredProxy {
     port: r.port,
     username: r.username,
     password: r.password,
+    timezone: r.timezone ?? null,
+    providerId: r.provider_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -44,10 +48,10 @@ export class ProxyRepository {
   create(p: StoredProxy): void {
     this.db
       .prepare(
-        `INSERT INTO proxies (id, name, type, host, port, username, password, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO proxies (id, name, type, host, port, username, password, timezone, provider_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.createdAt, p.updatedAt);
+      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.createdAt, p.updatedAt);
   }
 
   get(id: string): StoredProxy | null {
@@ -62,9 +66,9 @@ export class ProxyRepository {
   update(p: StoredProxy): void {
     this.db
       .prepare(
-        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, updated_at=? WHERE id=?`,
+        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, timezone=?, provider_id=?, updated_at=? WHERE id=?`,
       )
-      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.updatedAt, p.id);
+      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.updatedAt, p.id);
   }
 
   delete(id: string): void {
@@ -77,5 +81,17 @@ export class ProxyRepository {
       .prepare("SELECT COUNT(*) AS n FROM profiles WHERE proxy_id = ?")
       .get(id) as { n: number };
     return r.n;
+  }
+
+  listByProvider(providerId: string): StoredProxy[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM proxies WHERE provider_id = ? ORDER BY created_at ASC")
+        .all(providerId) as ProxyRow[]
+    ).map(toStored);
+  }
+
+  deleteByProvider(providerId: string): void {
+    this.db.prepare("DELETE FROM proxies WHERE provider_id = ?").run(providerId);
   }
 }
