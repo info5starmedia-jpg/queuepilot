@@ -16,9 +16,9 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.5.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
-providers + temporary proxies + engine pre-flight + tab/partition model. What
-works today, covered by 89 tests:
+`v0.6.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+providers + temporary proxies + engine pre-flight + tab/partition model with
+engine-side routing. What works today, covered by 94 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -43,8 +43,11 @@ works today, covered by 89 tests:
 - **Tabs & session partitions** — open tabs inside a run
   (`POST /profiles/:id/tabs`); every tab lives in an isolated in-memory
   session partition, and tabs opened with `relatedTo` share the parent tab's
-  partition (the related-tabs model). Tab state is never written to disk and
-  dies with the run; `tab.opened`/`tab.closed` ride the SSE stream.
+  partition (the related-tabs model). Isolation is real on real engines too:
+  each partition maps to a CDP browser context (`Target.createBrowserContext`)
+  on camoufox — an engine that can't do that answers `TABS_UNSUPPORTED`
+  instead of silently sharing a session. Tab state is never written to disk
+  and dies with the run; `tab.opened`/`tab.closed` ride the SSE stream.
 - Proxies — full CRUD, TCP liveness test, credentials write-only over the API.
 - Browser lifecycle — start/stop/active/history, double-launch guard,
   crash detection, idempotent stop, boot-time recovery, lifecycle events (SSE).
@@ -62,8 +65,7 @@ works today, covered by 89 tests:
   persist / start-over / random distribution via `POST /proxy-providers/:id/next`.
 
 Not yet: web dashboard, Google Sheets providers, resolver/parser registries,
-plugin system, engine-side tab routing for camoufox (tab model works on the
-fake runtime today), own Chromium engine build. See
+plugin system, own Chromium engine build. See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
 
 ## Quickstart

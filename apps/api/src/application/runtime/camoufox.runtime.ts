@@ -6,7 +6,9 @@ import type {
   BrowserRuntime,
   BrowserSession,
   LaunchRequest,
+  OpenTabRequest,
 } from "./browser-runtime.js";
+import { CdpTabController } from "./cdp/cdp-tab-controller.js";
 
 /**
  * Camoufox engine adapter.
@@ -91,15 +93,29 @@ export class CamoufoxRuntime implements BrowserRuntime {
   }
 }
 
-class CamoufoxSession implements BrowserSession {
+export class CamoufoxSession implements BrowserSession {
   readonly exited: Promise<{ code: number | null; signal: string | null }>;
   readonly wsEndpoint: string;
+  /**
+   * Engine-side tab routing. The browser-level debugger URL is discovered
+   * from /json/version (it carries a session path); the bare ws://host:port
+   * is only the fallback.
+   */
+  private readonly tabs: CdpTabController;
 
   constructor(
     private readonly child: ChildProcess,
     readonly debugPort: number,
   ) {
     this.wsEndpoint = `ws://127.0.0.1:${debugPort}`;
+    this.tabs = new CdpTabController(this.wsEndpoint, async () => {
+      const res = await fetch(`http://127.0.0.1:${debugPort}/json/version`);
+      if (res.ok) {
+        const info = (await res.json()) as { webSocketDebuggerUrl?: string };
+        if (info.webSocketDebuggerUrl) return info.webSocketDebuggerUrl;
+      }
+      return this.wsEndpoint;
+    });
     this.exited = new Promise((resolve) => {
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
@@ -109,8 +125,18 @@ class CamoufoxSession implements BrowserSession {
     return this.child.pid ?? -1;
   }
 
+  async openTab(request: OpenTabRequest): Promise<{ engineTabId: string }> {
+    return this.tabs.openTab(request.url, request.partitionKey);
+  }
+
+  async closeTab(engineTabId: string): Promise<void> {
+    return this.tabs.closeTab(engineTabId);
+  }
+
   async stop(): Promise<void> {
     if (this.child.exitCode !== null || this.child.killed) return;
+    // Release browser contexts (the session partitions) before killing.
+    await this.tabs.dispose();
     this.child.kill("SIGTERM");
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("engine stop timeout")), 10_000),

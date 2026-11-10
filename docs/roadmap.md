@@ -33,9 +33,12 @@
   are refused, closes are idempotent, tab state dies with the run and is
   never persisted, and runtimes without tab support answer `501
 TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
-- Next in this track: engine-side tab routing for camoufox (CDP/Juggler
-  target management behind the existing `openTab` capability); Google Sheets
-  providers (OAuth).
+- Engine-side tab routing for camoufox: dependency-free CDP client
+  (`Target.createBrowserContext` per partition, `Target.createTarget` /
+  `Target.closeTarget` per tab), debugger URL discovered via `/json/version`,
+  contexts disposed on stop. Engines without browser contexts get
+  TABS_UNSUPPORTED — never a silently shared session. ✅ v0.6.0
+- Next in this track: Google Sheets providers (OAuth).
 
 ## P2 — Web dashboard
 
