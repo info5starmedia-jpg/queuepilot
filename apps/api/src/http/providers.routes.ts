@@ -17,11 +17,13 @@ export function registerProviderRoutes(
   profileProviders: ProfileProviderService,
   proxyProviders: ProxyProviderService,
 ): void {
-  app.get("/profile-providers", async () => ({ providers: profileProviders.list() }));
+  app.get("/profile-providers", async () => ({
+    providers: profileProviders.list(),
+  }));
 
   app.post("/profile-providers", async (req, reply) => {
     const input = CreateProfileProviderInputSchema.parse(req.body);
-    return reply.code(201).send(profileProviders.create(input));
+    return reply.code(201).send(await profileProviders.create(input));
   });
 
   app.get("/profile-providers/:id", async (req) => {
@@ -40,11 +42,13 @@ export function registerProviderRoutes(
     return reply.code(204).send();
   });
 
-  app.get("/proxy-providers", async () => ({ providers: proxyProviders.list() }));
+  app.get("/proxy-providers", async () => ({
+    providers: proxyProviders.list(),
+  }));
 
   app.post("/proxy-providers", async (req, reply) => {
     const input = CreateProxyProviderInputSchema.parse(req.body);
-    return reply.code(201).send(proxyProviders.create(input));
+    return reply.code(201).send(await proxyProviders.create(input));
   });
 
   app.get("/proxy-providers/:id", async (req) => {

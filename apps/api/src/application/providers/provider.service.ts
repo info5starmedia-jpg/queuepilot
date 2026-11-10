@@ -3,8 +3,9 @@ import fs from "node:fs";
 import {
   DomainError,
   ErrorCodes,
-  parseProfileCsv,
-  parseProxyFile,
+  parseCsv,
+  parseProfileRows,
+  parseProxyRows,
   type CreateProfileProviderInput,
   type CreateProxyProviderInput,
   type CsvImportIssue,
@@ -12,12 +13,22 @@ import {
   type ProfileProvider,
   type ProxyProvider,
 } from "@queuepilot/contracts";
-import type { ProfileProviderRepository, ProxyProviderRepository } from "./provider.repository.js";
-import type { ProfileRepository, FingerprintIdentityRepository } from "../profiles/profile.repository.js";
+import type {
+  ProfileProviderRepository,
+  ProxyProviderRepository,
+} from "./provider.repository.js";
+import type {
+  ProfileRepository,
+  FingerprintIdentityRepository,
+} from "../profiles/profile.repository.js";
 import { generateIdentity } from "../profiles/fingerprint-generator.js";
-import type { ProxyRepository, StoredProxy } from "../proxies/proxy.repository.js";
+import type {
+  ProxyRepository,
+  StoredProxy,
+} from "../proxies/proxy.repository.js";
 import type { Proxy } from "@queuepilot/contracts";
 import { publicProxy } from "../proxies/proxy.repository.js";
+import type { SheetReader } from "../google/sheets-client.js";
 
 export interface RefreshResult {
   imported: number;
@@ -25,9 +36,12 @@ export interface RefreshResult {
   issues: CsvImportIssue[];
 }
 
-function readSource(provider: { sourcePath: string; name: string }): string {
+function readSource(provider: {
+  sourcePath: string | null;
+  name: string;
+}): string {
   try {
-    return fs.readFileSync(provider.sourcePath, "utf8");
+    return fs.readFileSync(provider.sourcePath!, "utf8");
   } catch (err) {
     throw new DomainError(
       ErrorCodes.PROVIDER_SOURCE_UNREADABLE,
@@ -35,6 +49,9 @@ function readSource(provider: { sourcePath: string; name: string }): string {
     );
   }
 }
+
+/** Default range: all columns of the first sheet. */
+const DEFAULT_SHEET_RANGE = "A:ZZ";
 
 /**
  * Profile providers: refreshable external sources of profiles (CSV first).
@@ -50,29 +67,38 @@ export class ProfileProviderService {
     private readonly providers: ProfileProviderRepository,
     private readonly profiles: ProfileRepository,
     private readonly identities: FingerprintIdentityRepository,
+    private readonly sheets?: SheetReader,
   ) {}
 
-  create(input: CreateProfileProviderInput): { provider: ProfileProvider; refresh: RefreshResult } {
+  async create(
+    input: CreateProfileProviderInput,
+  ): Promise<{ provider: ProfileProvider; refresh: RefreshResult }> {
     const now = new Date().toISOString();
     const provider: ProfileProvider = {
       id: randomUUID(),
       name: input.name,
-      type: "csv",
-      sourcePath: input.sourcePath,
+      type: input.sheetId ? "googleSheet" : "csv",
+      sourcePath: input.sourcePath ?? null,
+      sheetId: input.sheetId ?? null,
+      sheetRange: input.sheetRange ?? null,
       lastRefreshedAt: null,
       createdAt: now,
       updatedAt: now,
     };
     // Validate before persisting: an unreadable source is a named error.
-    readSource(provider);
+    await this.readRows(provider);
     this.providers.create(provider);
-    const refresh = this.refresh(provider.id);
+    const refresh = await this.refresh(provider.id);
     return { provider: this.get(provider.id), refresh };
   }
 
   get(id: string): ProfileProvider {
     const p = this.providers.get(id);
-    if (!p) throw new DomainError(ErrorCodes.PROVIDER_NOT_FOUND, `profile provider ${id} not found`);
+    if (!p)
+      throw new DomainError(
+        ErrorCodes.PROVIDER_NOT_FOUND,
+        `profile provider ${id} not found`,
+      );
     return p;
   }
 
@@ -80,9 +106,11 @@ export class ProfileProviderService {
     return this.providers.list();
   }
 
-  refresh(id: string): RefreshResult {
+  async refresh(id: string): Promise<RefreshResult> {
     const provider = this.get(id);
-    const { profiles: imported, issues } = parseProfileCsv(readSource(provider));
+    const { profiles: imported, issues } = parseProfileRows(
+      await this.readRows(provider),
+    );
     let created = 0;
     let updated = 0;
     const now = new Date().toISOString();
@@ -123,7 +151,11 @@ export class ProfileProviderService {
       }
     }
 
-    this.providers.update({ ...provider, lastRefreshedAt: now, updatedAt: now });
+    this.providers.update({
+      ...provider,
+      lastRefreshedAt: now,
+      updatedAt: now,
+    });
     return { imported: created, updated, issues };
   }
 
@@ -132,6 +164,23 @@ export class ProfileProviderService {
     this.get(id);
     this.profiles.detachProvider(id);
     this.providers.delete(id);
+  }
+
+  /** Source rows: CSV file via the RFC-4180 reader, or a live Google Sheet. */
+  private async readRows(provider: ProfileProvider): Promise<string[][]> {
+    if (provider.type === "googleSheet") {
+      if (!this.sheets) {
+        throw new DomainError(
+          ErrorCodes.GOOGLE_NOT_CONNECTED,
+          "Google is not connected — visit /google/auth/url and complete the flow",
+        );
+      }
+      return this.sheets.getValues(
+        provider.sheetId!,
+        provider.sheetRange ?? DEFAULT_SHEET_RANGE,
+      );
+    }
+    return parseCsv(readSource(provider));
   }
 }
 
@@ -166,15 +215,20 @@ export class ProxyProviderService {
   constructor(
     private readonly providers: ProxyProviderRepository,
     private readonly proxies: ProxyRepository,
+    private readonly sheets?: SheetReader,
   ) {}
 
-  create(input: CreateProxyProviderInput): { provider: ProxyProvider; refresh: RefreshResult } {
+  async create(
+    input: CreateProxyProviderInput,
+  ): Promise<{ provider: ProxyProvider; refresh: RefreshResult }> {
     const now = new Date().toISOString();
     const provider: ProxyProvider = {
       id: randomUUID(),
       name: input.name,
-      type: "file",
-      sourcePath: input.sourcePath,
+      type: input.sheetId ? "googleSheet" : "file",
+      sourcePath: input.sourcePath ?? null,
+      sheetId: input.sheetId ?? null,
+      sheetRange: input.sheetRange ?? null,
       delimiter: input.delimiter ?? ",",
       hasHeader: input.hasHeader ?? false,
       distribution: input.distribution ?? "start-over",
@@ -183,15 +237,19 @@ export class ProxyProviderService {
       createdAt: now,
       updatedAt: now,
     };
-    readSource(provider);
+    await this.readRows(provider);
     this.providers.create(provider);
-    const refresh = this.refresh(provider.id);
+    const refresh = await this.refresh(provider.id);
     return { provider: this.get(provider.id), refresh };
   }
 
   get(id: string): ProxyProvider {
     const p = this.providers.get(id);
-    if (!p) throw new DomainError(ErrorCodes.PROVIDER_NOT_FOUND, `proxy provider ${id} not found`);
+    if (!p)
+      throw new DomainError(
+        ErrorCodes.PROVIDER_NOT_FOUND,
+        `proxy provider ${id} not found`,
+      );
     return p;
   }
 
@@ -199,12 +257,14 @@ export class ProxyProviderService {
     return this.providers.list();
   }
 
-  refresh(id: string): RefreshResult {
+  async refresh(id: string): Promise<RefreshResult> {
     const provider = this.get(id);
-    const { proxies: imported, issues } = parseProxyFile(readSource(provider), {
-      delimiter: provider.delimiter,
-      hasHeader: provider.hasHeader,
-    });
+    const { proxies: imported, issues } = parseProxyRows(
+      await this.readRows(provider),
+      {
+        hasHeader: provider.hasHeader,
+      },
+    );
 
     const existing = this.proxies.listByProvider(provider.id);
     for (const proxy of existing) {
@@ -235,7 +295,12 @@ export class ProxyProviderService {
       this.proxies.create(stored);
     }
 
-    this.providers.update({ ...provider, cursor: 0, lastRefreshedAt: now, updatedAt: now });
+    this.providers.update({
+      ...provider,
+      cursor: 0,
+      lastRefreshedAt: now,
+      updatedAt: now,
+    });
     return { imported: imported.length, updated: 0, issues };
   }
 
@@ -244,7 +309,10 @@ export class ProxyProviderService {
     const provider = this.get(id);
     const pool = this.proxies.listByProvider(provider.id);
     if (pool.length === 0) {
-      throw new DomainError(ErrorCodes.PROXY_NOT_FOUND, `provider ${provider.name} has no proxies — refresh it first`);
+      throw new DomainError(
+        ErrorCodes.PROXY_NOT_FOUND,
+        `provider ${provider.name} has no proxies — refresh it first`,
+      );
     }
     let picked: StoredProxy;
     if (provider.distribution === "random") {
@@ -277,5 +345,25 @@ export class ProxyProviderService {
     }
     this.proxies.deleteByProvider(id);
     this.providers.delete(id);
+  }
+
+  /** Source rows: delimited file, or a live Google Sheet. */
+  private async readRows(provider: ProxyProvider): Promise<string[][]> {
+    if (provider.type === "googleSheet") {
+      if (!this.sheets) {
+        throw new DomainError(
+          ErrorCodes.GOOGLE_NOT_CONNECTED,
+          "Google is not connected — visit /google/auth/url and complete the flow",
+        );
+      }
+      return this.sheets.getValues(
+        provider.sheetId!,
+        provider.sheetRange ?? DEFAULT_SHEET_RANGE,
+      );
+    }
+    return readSource(provider)
+      .split(/\r?\n/)
+      .filter((l) => l.trim() !== "")
+      .map((l) => l.split(provider.delimiter).map((c) => c.trim()));
   }
 }

@@ -13,7 +13,7 @@
 - CLI `queuepilot engine install --manifest <file> --yes` wrapping the
   installer; without `--yes` it prints the entry and refuses. ✅ v0.4.0
 
-## P1.5 — Jancy-parity core (IN PROGRESS — providers DONE v0.3.0, temp proxies v0.4.0)
+## P1.5 — Jancy-parity core (DONE — providers v0.3.0, temp proxies v0.4.0, tabs v0.5.0/v0.6.0, sheets v0.7.0)
 
 - Profile providers: CSV import with the full optional-column spec (groups,
   tab color, address, DOB, phone, SMS numbers incl. country codes, passcodes,
@@ -38,7 +38,10 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   `Target.closeTarget` per tab), debugger URL discovered via `/json/version`,
   contexts disposed on stop. Engines without browser contexts get
   TABS_UNSUPPORTED — never a silently shared session. ✅ v0.6.0
-- Next in this track: Google Sheets providers (OAuth).
+- Google Sheets providers: loopback OAuth flow (readonly Sheets scope, tokens
+  under the data dir), sheets feed the same row parsers as CSV/delimited
+  files, refresh upserts identically. ✅ v0.7.0
+- P1.5 COMPLETE. Next track: P2 web dashboard.
 
 ## P2 — Web dashboard
 

@@ -12,6 +12,8 @@ import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecyc
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
 import { EngineHealthService } from "./application/engine/engine-health.service.js";
 import { runEngineInstall } from "./cli/engine-install.js";
+import { GoogleAuthService } from "./application/google/google-auth.service.js";
+import { SheetsClient } from "./application/google/sheets-client.js";
 import {
   ProfileProviderRepository,
   ProxyProviderRepository,
@@ -56,14 +58,25 @@ export async function main(): Promise<void> {
 
   const proxies = new ProxyService(proxyRepo);
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
+
+  const google = new GoogleAuthService({
+    dataDir: config.dataDir,
+    clientId: config.googleClientId ?? null,
+    clientSecret: config.googleClientSecret ?? null,
+    redirectUri: `http://${config.host}:${config.port}/google/auth/callback`,
+  });
+  const sheets = new SheetsClient(google);
+
   const profileProviders = new ProfileProviderService(
     new ProfileProviderRepository(db),
     profileRepo,
     identityRepo,
+    sheets,
   );
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
     proxyRepo,
+    sheets,
   );
 
   const runtime: BrowserRuntime =
@@ -100,6 +113,7 @@ export async function main(): Promise<void> {
     profileProviders,
     proxyProviders,
     engineHealth,
+    google,
   });
   await app.listen({ port: config.port, host: config.host });
   console.log(

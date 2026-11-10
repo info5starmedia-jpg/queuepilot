@@ -118,6 +118,53 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "003-google-sheet-providers",
+    up: `
+      -- SQLite cannot widen a CHECK constraint; rebuild both provider tables
+      -- with the new source type and sheet columns, preserving all rows.
+      CREATE TABLE profile_providers_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('csv','googleSheet')),
+        source_path TEXT,
+        sheet_id TEXT,
+        sheet_range TEXT,
+        last_refreshed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO profile_providers_new
+        (id, name, type, source_path, sheet_id, sheet_range, last_refreshed_at, created_at, updated_at)
+        SELECT id, name, type, source_path, NULL, NULL, last_refreshed_at, created_at, updated_at
+        FROM profile_providers;
+      DROP TABLE profile_providers;
+      ALTER TABLE profile_providers_new RENAME TO profile_providers;
+
+      CREATE TABLE proxy_providers_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('file','googleSheet')),
+        source_path TEXT,
+        sheet_id TEXT,
+        sheet_range TEXT,
+        delimiter TEXT NOT NULL DEFAULT ',',
+        has_header INTEGER NOT NULL DEFAULT 0,
+        distribution TEXT NOT NULL DEFAULT 'start-over'
+          CHECK (distribution IN ('persist','start-over','random')),
+        cursor INTEGER NOT NULL DEFAULT 0,
+        last_refreshed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO proxy_providers_new
+        (id, name, type, source_path, sheet_id, sheet_range, delimiter, has_header, distribution, cursor, last_refreshed_at, created_at, updated_at)
+        SELECT id, name, type, source_path, NULL, NULL, delimiter, has_header, distribution, cursor, last_refreshed_at, created_at, updated_at
+        FROM proxy_providers;
+      DROP TABLE proxy_providers;
+      ALTER TABLE proxy_providers_new RENAME TO proxy_providers;
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {
@@ -134,16 +181,17 @@ export function migrate(db: Db): void {
     "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
   );
   const applied = new Set(
-    (db.prepare("SELECT id FROM schema_migrations").all() as { id: string }[]).map((r) => r.id),
+    (
+      db.prepare("SELECT id FROM schema_migrations").all() as { id: string }[]
+    ).map((r) => r.id),
   );
   for (const m of MIGRATIONS) {
     if (applied.has(m.id)) continue;
     db.transaction(() => {
       db.exec(m.up);
-      db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)").run(
-        m.id,
-        new Date().toISOString(),
-      );
+      db.prepare(
+        "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)",
+      ).run(m.id, new Date().toISOString());
     })();
   }
 }

@@ -15,26 +15,40 @@ import { z } from "zod";
  * and run state, only the data fields move.
  */
 
-export const ProfileProviderTypeSchema = z.enum(["csv"]);
+export const ProfileProviderTypeSchema = z.enum(["csv", "googleSheet"]);
 export type ProfileProviderType = z.infer<typeof ProfileProviderTypeSchema>;
 
 export const ProfileProviderSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(120),
   type: ProfileProviderTypeSchema,
-  /** Absolute path of the CSV file on this machine. */
-  sourcePath: z.string().min(1),
+  /** Absolute path of the CSV file on this machine (type=csv). */
+  sourcePath: z.string().min(1).nullable().default(null),
+  /** Google Sheet id (type=googleSheet). */
+  sheetId: z.string().min(1).nullable().default(null),
+  /** A1 range within the sheet; defaults to the first sheet's used range. */
+  sheetRange: z.string().min(1).nullable().default(null),
   lastRefreshedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 export type ProfileProvider = z.infer<typeof ProfileProviderSchema>;
 
-export const CreateProfileProviderInputSchema = z.object({
-  name: z.string().min(1).max(120),
-  sourcePath: z.string().min(1),
-});
-export type CreateProfileProviderInput = z.input<typeof CreateProfileProviderInputSchema>;
+/** Exactly one source: a local CSV path or a Google Sheet id. */
+export const CreateProfileProviderInputSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    sourcePath: z.string().min(1).optional(),
+    sheetId: z.string().min(1).optional(),
+    sheetRange: z.string().min(1).optional(),
+  })
+  .refine((v) => (v.sourcePath ? !v.sheetId : !!v.sheetId), {
+    message:
+      "provide exactly one of sourcePath (CSV) or sheetId (Google Sheet)",
+  });
+export type CreateProfileProviderInput = z.input<
+  typeof CreateProfileProviderInputSchema
+>;
 
 /** One parsed CSV row, keyed by the required `Profile` column. */
 export const ImportedProfileSchema = z.object({
@@ -56,7 +70,13 @@ export const ImportedProfileSchema = z.object({
   dob: z.string().nullable(),
   phone: z.string().nullable(),
   /** Multiple allowed: "SMS Number", "SMS Number 2", "SMS Number 3:44" (+44). */
-  smsNumbers: z.array(z.object({ label: z.string(), number: z.string(), countryCode: z.string().nullable() })),
+  smsNumbers: z.array(
+    z.object({
+      label: z.string(),
+      number: z.string(),
+      countryCode: z.string().nullable(),
+    }),
+  ),
   /** Multiple allowed: "Passcode", "Passcode2", ... (presale / verified-fan). */
   passcodes: z.array(z.string()),
   /** Free 1 … Free 10 arbitrary columns, referenceable by autofill later. */
@@ -167,7 +187,14 @@ const norm = (s: string | undefined): string | null => {
  * whole import; bad rows are reported per-line and skipped.
  */
 export function parseProfileCsv(text: string): ProfileCsvParseResult {
-  const rows = parseCsv(text);
+  return parseProfileRows(parseCsv(text));
+}
+
+/**
+ * The row-level core of profile imports, shared by CSV files and Google
+ * Sheets (whose API already returns string[][]). Row 1 is headers.
+ */
+export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
   const issues: CsvImportIssue[] = [];
   if (rows.length === 0) {
     return { profiles: [], issues: [{ line: 1, message: "file is empty" }] };
@@ -215,7 +242,10 @@ export function parseProfileCsv(text: string): ProfileCsvParseResult {
     const name = get("Name");
     const email = get("Email");
     if (!key || !name || !email) {
-      issues.push({ line, message: "row skipped: Profile, Name and Email are required" });
+      issues.push({
+        line,
+        message: "row skipped: Profile, Name and Email are required",
+      });
       continue;
     }
 
@@ -224,7 +254,9 @@ export function parseProfileCsv(text: string): ProfileCsvParseResult {
         const m = /^SMS Number(?: (\d+))?(?::(\d+))?$/.exec(h)!;
         const label = m[1] ? `SMS Number ${m[1]}` : "SMS Number";
         const value = norm(cells[idx]);
-        return value ? { label, number: value, countryCode: m[2] ?? null } : null;
+        return value
+          ? { label, number: value, countryCode: m[2] ?? null }
+          : null;
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
 
@@ -256,7 +288,10 @@ export function parseProfileCsv(text: string): ProfileCsvParseResult {
     const creditCards: ImportedProfile["creditCards"] = [];
     for (const [set, fields] of cardSets) {
       if (!fields["Number"] || !fields["CVV"]) {
-        issues.push({ line, message: `card set "${set}" skipped: CC Number:${set} and CC CVV:${set} are required` });
+        issues.push({
+          line,
+          message: `card set "${set}" skipped: CC Number:${set} and CC CVV:${set} are required`,
+        });
         continue;
       }
       creditCards.push({
@@ -275,7 +310,11 @@ export function parseProfileCsv(text: string): ProfileCsvParseResult {
     }
 
     const address =
-      get("Address") || get("Address 2") || get("City") || get("State") || get("Zip Code")
+      get("Address") ||
+      get("Address 2") ||
+      get("City") ||
+      get("State") ||
+      get("Zip Code")
         ? {
             line1: get("Address"),
             line2: get("Address 2"),
@@ -305,7 +344,10 @@ export function parseProfileCsv(text: string): ProfileCsvParseResult {
       creditCards,
     });
     if (!parsed.success) {
-      issues.push({ line, message: `row skipped: ${parsed.error.issues[0]?.message ?? "invalid"}` });
+      issues.push({
+        line,
+        message: `row skipped: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+      });
       continue;
     }
     profiles.push(parsed.data);
@@ -321,15 +363,21 @@ export const ProxyDelimiterSchema = z.enum([",", "\t", ":", ";"]);
 export type ProxyDelimiter = z.infer<typeof ProxyDelimiterSchema>;
 
 /** How a provider hands out proxies at assignment time. */
-export const ProxyDistributionSchema = z.enum(["persist", "start-over", "random"]);
+export const ProxyDistributionSchema = z.enum([
+  "persist",
+  "start-over",
+  "random",
+]);
 export type ProxyDistribution = z.infer<typeof ProxyDistributionSchema>;
 
 export const ProxyProviderSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(120),
-  /** "file" = a delimited local file; more source types plug in here later. */
-  type: z.enum(["file"]),
-  sourcePath: z.string().min(1),
+  /** "file" = a delimited local file; "googleSheet" = a Google Sheet. */
+  type: z.enum(["file", "googleSheet"]),
+  sourcePath: z.string().min(1).nullable().default(null),
+  sheetId: z.string().min(1).nullable().default(null),
+  sheetRange: z.string().min(1).nullable().default(null),
   delimiter: ProxyDelimiterSchema,
   hasHeader: z.boolean(),
   distribution: ProxyDistributionSchema.default("start-over"),
@@ -341,14 +389,23 @@ export const ProxyProviderSchema = z.object({
 });
 export type ProxyProvider = z.infer<typeof ProxyProviderSchema>;
 
-export const CreateProxyProviderInputSchema = z.object({
-  name: z.string().min(1).max(120),
-  sourcePath: z.string().min(1),
-  delimiter: ProxyDelimiterSchema.default(","),
-  hasHeader: z.boolean().default(false),
-  distribution: ProxyDistributionSchema.default("start-over"),
-});
-export type CreateProxyProviderInput = z.input<typeof CreateProxyProviderInputSchema>;
+export const CreateProxyProviderInputSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    sourcePath: z.string().min(1).optional(),
+    sheetId: z.string().min(1).optional(),
+    sheetRange: z.string().min(1).optional(),
+    delimiter: ProxyDelimiterSchema.default(","),
+    hasHeader: z.boolean().default(false),
+    distribution: ProxyDistributionSchema.default("start-over"),
+  })
+  .refine((v) => (v.sourcePath ? !v.sheetId : !!v.sheetId), {
+    message:
+      "provide exactly one of sourcePath (file) or sheetId (Google Sheet)",
+  });
+export type CreateProxyProviderInput = z.input<
+  typeof CreateProxyProviderInputSchema
+>;
 
 /** One parsed proxy line. Column order: name,host,port,username,password[,timezone]. */
 export const ImportedProxySchema = z.object({
@@ -377,16 +434,34 @@ export function parseProxyFile(
   text: string,
   opts: { delimiter: ProxyDelimiter; hasHeader: boolean },
 ): ProxyFileParseResult {
+  const rows = text
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "")
+    .map((l) => l.split(opts.delimiter).map((c) => c.trim()));
+  return parseProxyRows(rows, opts);
+}
+
+/**
+ * The row-level core of proxy imports, shared by delimited files and Google
+ * Sheets. Column order is fixed (name,host,port,username,password[,timezone]).
+ */
+export function parseProxyRows(
+  rows: string[][],
+  opts: { hasHeader: boolean },
+): ProxyFileParseResult {
   const issues: CsvImportIssue[] = [];
   const proxies: ImportedProxy[] = [];
-  const lines = text.split(/\r?\n/);
   const start = opts.hasHeader ? 1 : 0;
-  for (let i = start; i < lines.length; i++) {
-    const raw = lines[i]!;
-    if (raw.trim() === "") continue;
-    const cells = raw.split(opts.delimiter).map((c) => c.trim());
+  for (let i = start; i < rows.length; i++) {
+    const cells = rows[i]!;
+    if (cells.every((c) => c.trim() === "")) continue;
+    const line = i + 1;
     if (cells.length < 5) {
-      issues.push({ line: i + 1, message: "skipped: expected at least 5 columns (name,host,port,username,password)" });
+      issues.push({
+        line,
+        message:
+          "skipped: expected at least 5 columns (name,host,port,username,password)",
+      });
       continue;
     }
     const port = Number(cells[2]);
@@ -399,7 +474,10 @@ export function parseProxyFile(
       timezone: norm(cells[5]),
     });
     if (!parsed.success) {
-      issues.push({ line: i + 1, message: `skipped: ${parsed.error.issues[0]?.message ?? "invalid"}` });
+      issues.push({
+        line,
+        message: `skipped: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+      });
       continue;
     }
     proxies.push(parsed.data);

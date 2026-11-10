@@ -35,9 +35,12 @@ export function toHttpError(err: unknown): {
             ? 503
             : err.code === ErrorCodes.TABS_UNSUPPORTED
               ? 501
-              : err.code === ErrorCodes.PROVIDER_SOURCE_UNREADABLE
-                ? 422
-                : 500;
+              : err.code === ErrorCodes.GOOGLE_NOT_CONFIGURED ||
+                  err.code === ErrorCodes.GOOGLE_NOT_CONNECTED
+                ? 400
+                : err.code === ErrorCodes.PROVIDER_SOURCE_UNREADABLE
+                  ? 422
+                  : 500;
     return {
       status,
       body: { error: { code: err.code, message: err.message } },

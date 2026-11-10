@@ -23,8 +23,27 @@ import {
   ProfileProviderService,
   ProxyProviderService,
 } from "../src/application/providers/provider.service.js";
+import { GoogleAuthService } from "../src/application/google/google-auth.service.js";
+import type { SheetReader } from "../src/application/google/sheets-client.js";
+import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/config.js";
+
+/** In-memory SheetReader: tests seed rows per sheetId, no network involved. */
+export class FakeSheets implements SheetReader {
+  readonly sheets = new Map<string, string[][]>();
+
+  async getValues(sheetId: string, _range: string): Promise<string[][]> {
+    const rows = this.sheets.get(sheetId);
+    if (!rows) {
+      throw new DomainError(
+        ErrorCodes.PROVIDER_SOURCE_UNREADABLE,
+        `sheet ${sheetId} not found`,
+      );
+    }
+    return rows;
+  }
+}
 
 export interface TestContext {
   app: FastifyInstance;
@@ -35,6 +54,8 @@ export interface TestContext {
   snapshots: LaunchIdentityService;
   profileProviders: ProfileProviderService;
   proxyProviders: ProxyProviderService;
+  google: GoogleAuthService;
+  sheets: FakeSheets;
   dataDir: string;
 }
 
@@ -60,14 +81,23 @@ export function makeTestContext(
     dataDir,
     snapshots,
   );
+  const sheets = new FakeSheets();
+  const google = new GoogleAuthService({
+    dataDir,
+    clientId: "test-client-id",
+    clientSecret: "test-client-secret",
+    redirectUri: "http://127.0.0.1:0/google/auth/callback",
+  });
   const profileProviders = new ProfileProviderService(
     new ProfileProviderRepository(db),
     profileRepo,
     identityRepo,
+    sheets,
   );
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
     proxyRepo,
+    sheets,
   );
   const config: AppConfig = {
     port: 0,
@@ -84,6 +114,7 @@ export function makeTestContext(
     profileProviders,
     proxyProviders,
     engineHealth: new EngineHealthService(runtime, dataDir),
+    google,
   });
   return {
     app,
@@ -94,6 +125,8 @@ export function makeTestContext(
     snapshots,
     profileProviders,
     proxyProviders,
+    google,
+    sheets,
     dataDir,
   };
 }

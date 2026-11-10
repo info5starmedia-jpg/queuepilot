@@ -16,9 +16,10 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.6.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
-providers + temporary proxies + engine pre-flight + tab/partition model with
-engine-side routing. What works today, covered by 94 tests:
+`v0.7.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+providers (CSV _and_ Google Sheets) + temporary proxies + engine pre-flight +
+tab/partition model with engine-side routing. What works today, covered by
+103 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -59,13 +60,15 @@ engine-side routing. What works today, covered by 94 tests:
   column spec (`Profile`/`Name`/`Email` required; groups, tab color, address,
   DOB, phone, multiple SMS numbers with country codes, passcodes, Free 1–10,
   per-profile proxies, notes, URL, timezone, favorites, named credit-card
-  sets). Refresh upserts by key and never churns identity or run state.
+  sets), **or the same columns straight from a Google Sheet**. Refresh upserts
+  by key and never churns identity or run state.
 - **Proxy providers** — refreshable delimited files (comma/tab/colon/
-  semicolon, optional header, optional timezone column) with
-  persist / start-over / random distribution via `POST /proxy-providers/:id/next`.
+  semicolon, optional header, optional timezone column) **or a Google Sheet**
+  with the same columns, persist / start-over / random distribution via
+  `POST /proxy-providers/:id/next`.
 
-Not yet: web dashboard, Google Sheets providers, resolver/parser registries,
-plugin system, own Chromium engine build. See
+Not yet: web dashboard, resolver/parser registries, plugin system, own
+Chromium engine build. See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
 
 ## Quickstart
@@ -152,6 +155,23 @@ curl -X POST http://127.0.0.1:50325/profile-providers \
 # re-read the file later: POST /profile-providers/<id>/refresh
 ```
 
+### Import from Google Sheets
+
+Set `SPECTRA_GOOGLE_CLIENT_ID` / `SPECTRA_GOOGLE_CLIENT_SECRET` (a Google Cloud
+project with the Sheets API enabled), then connect once:
+
+```bash
+curl http://127.0.0.1:50325/google/auth/url     # open the returned URL in your browser
+# after consent, Google redirects back and the token is stored under <dataDir>/google/
+curl http://127.0.0.1:50325/google/auth/status  # {"configured":true,"connected":true,...}
+
+# same column spec as CSV, straight from a sheet
+curl -X POST http://127.0.0.1:50325/profile-providers \
+  -H 'content-type: application/json' \
+  -d '{"name":"my-sheet","sheetId":"<sheet-id>","sheetRange":"A:ZZ"}'
+# proxy providers work the same way: {"name":"pool","sheetId":"...","hasHeader":true}
+```
+
 ### Try it without a browser engine
 
 ```bash
@@ -171,13 +191,15 @@ QueuePilot never downloads code silently: install Camoufox yourself and either s
 
 All config is environment variables:
 
-| Variable            | Default         | Purpose                                                                    |
-| ------------------- | --------------- | -------------------------------------------------------------------------- |
-| `SPECTRA_PORT`      | `50325`         | API port                                                                   |
-| `SPECTRA_HOST`      | `127.0.0.1`     | Bind address (loopback by default, on purpose)                             |
-| `SPECTRA_DATA_DIR`  | `~/.queuepilot` | SQLite + profile data                                                      |
-| `SPECTRA_RUNTIME`   | `camoufox`      | `camoufox` or `fake`                                                       |
-| `SPECTRA_API_TOKEN` | unset           | If set, every route except `/health` needs `Authorization: Bearer <token>` |
+| Variable                       | Default         | Purpose                                                                    |
+| ------------------------------ | --------------- | -------------------------------------------------------------------------- |
+| `SPECTRA_PORT`                 | `50325`         | API port                                                                   |
+| `SPECTRA_HOST`                 | `127.0.0.1`     | Bind address (loopback by default, on purpose)                             |
+| `SPECTRA_DATA_DIR`             | `~/.queuepilot` | SQLite + profile data                                                      |
+| `SPECTRA_RUNTIME`              | `camoufox`      | `camoufox` or `fake`                                                       |
+| `SPECTRA_API_TOKEN`            | unset           | If set, every route except `/health` needs `Authorization: Bearer <token>` |
+| `SPECTRA_GOOGLE_CLIENT_ID`     | unset           | Google Cloud OAuth client id (Sheets API) for Google Sheets providers      |
+| `SPECTRA_GOOGLE_CLIENT_SECRET` | unset           | Google Cloud OAuth client secret                                           |
 
 ## Development
 

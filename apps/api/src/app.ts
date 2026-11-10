@@ -17,6 +17,8 @@ import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
+import { registerGoogleRoutes } from "./http/google.routes.js";
+import type { GoogleAuthService } from "./application/google/google-auth.service.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -26,6 +28,7 @@ export interface AppDeps {
   profileProviders: ProfileProviderService;
   proxyProviders: ProxyProviderService;
   engineHealth: EngineHealthService;
+  google: GoogleAuthService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -58,6 +61,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
+  registerGoogleRoutes(app, deps.google);
 
   return app;
 }
