@@ -24,13 +24,14 @@ interface EvaluateResult {
  */
 export async function captureFingerprintViaCdp(
   wsEndpoint: string,
+  pageUrl = "about:blank",
 ): Promise<ObservedFingerprint> {
   const conn = await CdpConnection.connect(wsEndpoint);
   let targetId: string | null = null;
   let sessionId: string | null = null;
   try {
     const created = await conn.call<CreateTargetResult>("Target.createTarget", {
-      url: "about:blank",
+      url: pageUrl,
     });
     targetId = created.targetId;
     const attached = await conn.call<AttachResult>("Target.attachToTarget", {
@@ -93,11 +94,18 @@ export async function captureFingerprintViaDebugPort(
   fallbackWs: string,
 ): Promise<ObservedFingerprint> {
   try {
-    const res = await fetch(`http://127.0.0.1:${debugPort}/json/version`);
+    // Probe on the engine's own loopback debug page: 127.0.0.1 is a secure
+    // context, so navigator.userAgentData / deviceMemory actually exist there
+    // (about:blank silently hides them).
+    const pageUrl = `http://127.0.0.1:${debugPort}/json/version`;
+    const res = await fetch(pageUrl);
     const info = res.ok
       ? ((await res.json()) as { webSocketDebuggerUrl?: string })
       : {};
-    return await captureFingerprintViaCdp(info.webSocketDebuggerUrl ?? fallbackWs);
+    return await captureFingerprintViaCdp(
+      info.webSocketDebuggerUrl ?? fallbackWs,
+      pageUrl,
+    );
   } catch (err) {
     if (err instanceof DomainError) throw err;
     throw attestationUnsupported(kind, err);

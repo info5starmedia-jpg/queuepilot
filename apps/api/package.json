@@ -1,6 +1,6 @@
 {
   "name": "@queuepilot/api",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -8,7 +8,9 @@
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && node --input-type=module -e \"import fs from 'node:fs'; fs.cpSync('src/dashboard', 'dist/dashboard', { recursive: true })\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify": "tsx verify/run.ts",
+    "verify:calibrate": "tsx verify/calibrate-stock-chrome.ts"
   },
   "dependencies": {
     "@queuepilot/client": "*",

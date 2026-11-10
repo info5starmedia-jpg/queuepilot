@@ -79,9 +79,19 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   Chromium core (checksummed, consent-gated install; persona JSON delivered
   via inherited HANDLE per the BSD patch contract). Validated live on
   Windows: install → launch → attestation `match` → isolated tabs → clean
-  stop. Remaining P4: claim-based probe suite, detection CI (CreepJS/
-  sannysoft-class surfaces) on every engine bump, then the default-engine
-  decision.
+  stop.
+- P4b claim suite (DONE v0.11.0): `apps/api/verify/` — 10 static detection
+  claims (webdriver, UA shape, UA-CH brands, `window.chrome` stock surface,
+  automation traces, plugins, permissions, worker consistency, canvas
+  determinism, WebGL coherence) plus persona-bound expectation claims
+  (platform, cores, screen, timezone, locale), probed over CDP against a
+  throwaway loopback page. Claims calibrated against stock Chrome ground
+  truth (`npm run verify:calibrate`), not detector folklore — e.g. modern
+  stock Chrome does NOT expose `chrome.runtime` to web pages. Live result:
+  16/16 PASS on fury-core (Chrome 157). Run: `npm run verify --workspace
+  apps/api -- --engine fury`. Remaining P4: external checker pass (CreepJS/
+  sannysoft-class surfaces, deliberately manual) on every engine bump, then
+  the default-engine decision.
 
 ## P5 — Team mode
 
@@ -102,4 +112,5 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 - **D-004**: RESOLVED (ADR-0006): dual engine — Fury's prebuilt BSD Chromium
   core as a second runtime (kind `fury`) via our checksummed installer,
   camoufox stays default until attestation + detection probes say otherwise.
-  Spike plan in ADR-0006 (P4a). Detection CI still owed either way.
+  Spike plan in ADR-0006 (P4a). Claim-based detection suite done (P4b,
+  v0.11.0); external checker pass (CreepJS/sannysoft) still owed, manual.

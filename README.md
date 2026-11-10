@@ -16,10 +16,11 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.8.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+`v0.11.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
 providers (CSV _and_ Google Sheets) + temporary proxies + engine pre-flight +
-tab/partition model with engine-side routing + web dashboard. What works
-today, covered by 106 tests:
+tab/partition model with engine-side routing + web dashboard + dual engines
+(camoufox / fury-core) + fingerprint attestation + detection claim suite.
+What works today, covered by 138 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -58,8 +59,10 @@ today, covered by 106 tests:
   profiles grid (start/stop, fingerprint regen, drift badges, tab counts),
   proxy manager with liveness tests, live lifecycle feed over SSE. No separate
   hosting, no CDN, works offline on loopback.
-- Two engine runtimes: **fake** (deterministic, for tests/CI/demos) and
-  **camoufox** (real fingerprint-patched Firefox; bring your own binary).
+- Two engine runtimes behind the same API: **camoufox** (C++-patched
+  Firefox; bring your own binary) and **fury** (Fury's BSD-3-Clause patched
+  Chromium core, installed via the checksummed installer), plus **fake**
+  (deterministic, for tests/CI/demos).
 - **Profile providers** — refreshable CSV imports following the familiar
   column spec (`Profile`/`Name`/`Email` required; groups, tab color, address,
   DOB, phone, multiple SMS numbers with country codes, passcodes, Free 1–10,
@@ -71,8 +74,9 @@ today, covered by 106 tests:
   with the same columns, persist / start-over / random distribution via
   `POST /proxy-providers/:id/next`.
 
-Not yet: web dashboard, resolver/parser registries, plugin system, own
-Chromium engine build. See
+Not yet: resolver/parser registries, plugin system, warmup recorder,
+external checker sweeps (CreepJS/sannysoft — deliberately manual), team
+mode. See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
 
 ## Quickstart
@@ -145,6 +149,26 @@ SPECTRA_RUNTIME=fury npm start
 
 Persona config is handed to the core as an inherited file handle (never in
 argv); `GET /profiles/:id/attest` verifies what actually materialized.
+
+### Detection claim verification
+
+Beyond per-profile attestation, a claim suite states what must be true about
+ANY page the engine touches — webdriver hidden, UA stock-shaped, UA-CH
+brands consistent, `window.chrome` stock surface, no automation traces,
+plugins present, permissions coherent, worker/main-world agreement, canvas
+determinism, WebGL coherence — plus persona-bound expectations (platform,
+cores, screen, timezone, locale). Claims are calibrated against stock Chrome
+ground truth, not detector folklore:
+
+```bash
+# engine resolution: SPECTRA_FURY_PATH, else newest verified install under <dataDir>/engines/fury-core/
+npm run verify --workspace apps/api -- --engine fury --data-dir <your-data-dir>
+npm run verify:calibrate --workspace apps/api                 # probe stock Chrome as baseline
+```
+
+Live result on fury-core (Chrome 157): 16/16 claims hold. External checkers
+(CreepJS/sannysoft) stay a deliberate manual pass — a gate must never depend
+on a third-party site's mood.
 
 ### Fingerprint attestation
 
