@@ -86,3 +86,10 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   (Windows: process creation time; Linux: `/proc/<pid>/stat` starttime) so
   recovery can prove identity, not just liveness.
 - **D-003**: Proxy rotation links (per-launch endpoint refresh) — design owed.
+- **D-004**: Engine base — camoufox (Firefox) today vs a Chromium fork built
+  on Fury's BSD-3-Clause patch series (canvas/audio/fonts/WebGPU in C++, per
+  build-plan §7.2). The patches are Chromium-only, so P4 forces the choice:
+  switch engine base, port the concepts to Firefox patches ourselves, or
+  support both. Build-plan ordering intended the patched-engine spike before
+  the workflow layers; we sequenced workflow first. Detection CI
+  (CreepJS/sannysoft probes on every engine bump) is owed either way.
