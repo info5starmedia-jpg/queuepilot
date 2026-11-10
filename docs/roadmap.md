@@ -53,7 +53,9 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   is local-first with no bundler; the dashboard ships as static assets in the
   repo, works offline on loopback, and honors the API bearer token. If the
   console outgrows it, a React app can replace `src/dashboard/` without
-  touching the API.
+  touching the API. Audited in ADR-0005: vanilla holds through P3/P4; the
+  console migrates to React 19 + Vite (`apps/web/`, built to static assets
+  the API serves) at the start of the console-depth track.
 
 ## P3 — Automation depth
 
