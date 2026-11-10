@@ -19,6 +19,13 @@ export interface ClaimResult {
   id: string;
   pass: boolean;
   detail: string;
+  /**
+   * True when the claim could not be evaluated in this context (e.g. the
+   * probe page is not a secure context in proxy mode, so userAgentData is
+   * spec-absent). A skip is not a pass and not a fail — the claim must be
+   * covered by another run. Skip, never fake.
+   */
+  skipped?: boolean;
 }
 
 export interface Claim {

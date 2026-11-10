@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { FingerprintIdentity } from "@queuepilot/contracts";
+import { ErrorCodes, type FingerprintIdentity, type Profile } from "@queuepilot/contracts";
 import {
+  FuryCoreRuntime,
   personaConfig,
   resolveFuryBinary,
 } from "../src/application/runtime/fury-core.runtime.js";
@@ -73,6 +74,51 @@ describe("personaConfig", () => {
 
   it("declares only the schema version when there is no identity", () => {
     expect(personaConfig(null)).toEqual({ schema_version: 1 });
+  });
+});
+
+describe("launch proxy handling (P0 — never silently direct)", () => {
+  const profile: Profile = {
+    id: "00000000-0000-4000-8000-000000000000",
+    name: "p",
+    group: "test",
+    proxyId: null,
+    identityId: null,
+    status: "idle",
+    notes: "",
+    tags: [],
+    email: null,
+    providerId: null,
+    providerKey: null,
+    extra: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  it("refuses to launch with a proxy scheme the relay cannot honor", async () => {
+    // process.execPath exists, so the binary check passes and the proxy
+    // validation is what must throw — BEFORE any process is spawned.
+    const runtime = new FuryCoreRuntime(process.execPath);
+    await expect(
+      runtime.launch({
+        profile,
+        identity: null,
+        proxyUrl: "socks5://127.0.0.1:1080",
+        profileDataDir: fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-fury-launch-")),
+      }),
+    ).rejects.toMatchObject({ code: ErrorCodes.PROXY_UNSUPPORTED });
+  });
+
+  it("refuses to launch with an unparseable proxy URL", async () => {
+    const runtime = new FuryCoreRuntime(process.execPath);
+    await expect(
+      runtime.launch({
+        profile,
+        identity: null,
+        proxyUrl: "::::",
+        profileDataDir: fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-fury-launch-")),
+      }),
+    ).rejects.toMatchObject({ code: ErrorCodes.PROXY_UNSUPPORTED });
   });
 });
 

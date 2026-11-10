@@ -156,6 +156,11 @@ SPECTRA_RUNTIME=fury npm start
 Persona config is handed to the core as an inherited file handle (never in
 argv); `GET /profiles/:id/attest` verifies what actually materialized.
 
+Proxies on fury go through an auth-injecting loopback relay
+(Chromium strips credentials from `--proxy-server`, so the relay injects
+`Proxy-Authorization` itself and fails closed). http/https upstreams today;
+socks5 is refused loudly with `PROXY_UNSUPPORTED`, never silently bypassed.
+
 **The patchset is ours.** Fury's BSD-licensed patch series and build chain
 are vendored in [`engine/`](engine/) — we can rebase, extend and build our
 own Chromium (ritual in `engine/README.md`); the prebuilt upstream binary
@@ -174,10 +179,13 @@ ground truth, not detector folklore:
 ```bash
 # engine resolution: SPECTRA_FURY_PATH, else newest verified install under <dataDir>/engines/fury-core/
 npm run verify --workspace apps/api -- --engine fury --data-dir <your-data-dir>
+npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <your-data-dir>  # + egress-via-proxy proof
 npm run verify:calibrate --workspace apps/api                 # probe stock Chrome as baseline
 ```
 
-Live result on fury-core (Chrome 157): 16/16 claims hold. External checkers
+Live results on fury-core (Chrome 157): 16/16 claims hold direct; 16/17 hold
+with `--proxy` (`uach-consistent` honestly skipped — a LAN-HTTP page is not a
+secure context; `egress-via-proxy` PASS). External checkers
 (CreepJS/sannysoft) stay a deliberate manual pass — a gate must never depend
 on a third-party site's mood.
 

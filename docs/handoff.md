@@ -46,9 +46,11 @@ source — never copy code that doesn't exist to copy).
   `SetHandleInformation(handle, 1, 1)` is required (.NET handles are not
   inheritable); mask the IntPtr to the 32-bit handle value.
 - Upstream marked the Windows HANDLE half "never run" — we ran it; it works.
-- **P0 OPEN BUG**: `fury-core.runtime.ts` silently ignores `proxyUrl` — a
-  profile with a proxy browses on the real IP. Fix is task #1 (see
-  `docs/parity.md` §2).
+- **P0 proxy leak (found in the P4 audit): FIXED v0.12.0.** The fury runtime
+  now fronts every configured proxy with an auth-injecting loopback relay
+  (`apps/api/src/application/runtime/proxy-relay.ts`), refuses loudly
+  (PROXY_UNSUPPORTED) what it cannot honor (socks5), and the
+  `egress-via-proxy` claim proves the chain live (`--proxy` mode).
 - Git pushes: if `git push` hangs (Credential Manager), use
   `powershell.exe -File ../spike/push-with-cred.ps1 "<repo abs path>"`.
 
@@ -60,11 +62,13 @@ npm test            # all green
 npm run build       # clean
 # engine/runtime changes also:
 npm run verify --workspace apps/api -- --engine fury --data-dir <dir>   # all PASS
+npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <dir>  # + egress proof
 ```
 
 ## Repo map
 
-- `apps/api/src/` — API, runtimes (`application/runtime/`), lifecycle, CDP
+- `apps/api/src/` — API, runtimes (`application/runtime/`, incl.
+  `proxy-relay.ts`), lifecycle, CDP
 - `apps/api/verify/` — detection claim suite (`claims.ts`, `run.ts`,
   `calibrate-stock-chrome.ts`)
 - `apps/api/src/dashboard/` — zero-build vanilla console (React migration is
@@ -75,10 +79,8 @@ npm run verify --workspace apps/api -- --engine fury --data-dir <dir>   # all PA
 
 ## Next tasks, in order (detail in docs/parity.md §4)
 
-1. **P0: proxy leak fix** — auth-injecting loopback relay, fury wiring,
-   refuse-loudly, `egress-via-proxy` claim
-2. **P4c: first own build** — `engine/README.md` ritual, overnight build,
+1. **P4c: first own build** — `engine/README.md` ritual, overnight build,
    verify harness + claims on our binary
-3. Claim coverage sweep (WebRTC first, then audio/fonts/WebGPU/battery/…)
-4. Lifecycle P1s (admission slots, window-fit, session bundles)
-5. React console when workflow depth demands it
+2. Claim coverage sweep (WebRTC first, then audio/fonts/WebGPU/battery/…)
+3. Lifecycle P1s (admission slots, window-fit, session bundles)
+4. React console when workflow depth demands it

@@ -92,10 +92,11 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   apps/api -- --engine fury`. Remaining P4: external checker pass (CreepJS/
   sannysoft-class surfaces, deliberately manual) on every engine bump, then
   the default-engine decision.
-- **P0 (found in P4 audit 2026-11-10): fury runtime silently drops
-  `proxyUrl`** — a profile with a proxy browses on the real IP. Fix =
-  auth-injecting loopback relay + refuse-loudly + `egress-via-proxy` claim.
-  See docs/parity.md §2. NEXT TASK.
+- **P0 (found in P4 audit 2026-11-10, FIXED v0.12.0): the fury runtime used
+  to silently drop `proxyUrl`.** Now every configured proxy is fronted by an
+  auth-injecting loopback relay, unsupported schemes refuse loudly
+  (PROXY_UNSUPPORTED), and the `egress-via-proxy` claim proves the chain
+  live: `npm run verify --workspace apps/api -- --engine fury --proxy`.
 - P4c own build (OPEN, approved 2026-11-10): Fury's BSD patchset + build
   chain vendored into `engine/` (provenance, license and the engine-bump
   ritual in `engine/README.md`). First overnight build on the reference

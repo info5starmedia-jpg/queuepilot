@@ -97,34 +97,40 @@ trust in the binary — acceptable short-term, tracked below to close.
 | Temporary (one-shot) proxies | ✅ | ✅ | ✅ |
 | Proxy providers (CSV/Sheets, rotation) | ✅ | ✅ | ✅ |
 | Tab/session partition isolation | ✅ | ✅ CDP browser contexts | ✅ |
-| **Proxy actually applied on EVERY engine** | ✅ auth-injecting local relay | 🟡 **camoufox yes; fury silently IGNORES proxyUrl** | ❌ **P0 — leak** |
+| **Proxy actually applied on EVERY engine** | ✅ auth-injecting local relay | ✅ camoufox native; fury via auth-injecting loopback relay | ✅ v0.12.0 |
 | Host-wide lifecycle admission slots (concurrency guard) | ✅ | 🟡 per-profile double-launch guard only | ❌ P1 |
 | Window fit (window ≤ claimed screen) | ✅ `window-fit.ts` | 🟡 we set `--window-size` only | ❌ P1 |
 | Session bundle export/import (cookies via CDP, roaming) | ✅ | ❌ | ❌ P1 |
-| Egress diagnostics (per-profile exit IP/geo proof) | ✅ | ❌ | ❌ P2 |
+| Egress diagnostics (per-profile exit IP/geo proof) | ✅ | 🟡 harness-level `egress-via-proxy` claim; no per-profile API yet | ❌ P2 |
 | Per-profile extensions registry | ✅ | ❌ | ❌ P2 |
 | TOTP 2FA per profile | ✅ | ❌ | ❌ P2 |
 | Portable profile bundles (cross-machine) | ✅ (needs os-crypt wiring) | ❌ | ❌ P2 |
 | xlsx import, trash/undo | ✅ | ❌ | ❌ P3 |
+| socks5 upstream proxies | ✅ | ❌ refused loudly (PROXY_UNSUPPORTED), never bypassed | ❌ P2 |
 
-### P0 — the proxy leak (found in this audit, 2026-11-10)
+### P0 — the proxy leak (found in this audit 2026-11-10, FIXED v0.12.0)
 
-`fury-core.runtime.ts` builds `engineArgs` with no `--proxy-server` at all;
-`request.proxyUrl` is accepted and silently dropped. A profile configured
-with a proxy launches on the operator's real IP. This is the single worst
-failure mode an anti-detect product can have.
+`fury-core.runtime.ts` used to build `engineArgs` with no `--proxy-server` at
+all; `request.proxyUrl` was accepted and silently dropped. A profile
+configured with a proxy browsed on the operator's real IP — the single worst
+failure mode this product can have. Fixed and **proven live**:
+`npm run verify --workspace apps/api -- --engine fury --proxy` routes the
+probe through a recording fake upstream; the `egress-via-proxy` claim PASSes
+(credentials injected by the relay, zero bypass). 16/17 claims hold with
+proxy on (`uach-consistent` honestly skipped — a LAN-HTTP page is not a
+secure context; covered by the standard loopback run).
 
 Fix shape (AliasMode's proven pattern, re-implemented):
-1. Local auth-injecting relay: launch per-session loopback proxy, pass
-   `--proxy-server=http://127.0.0.1:<port>` to the engine; the relay
-   forwards to the upstream proxy and injects `Proxy-Authorization`
-   (Chromium ignores credentials embedded in the flag).
-2. `fury` runtime must refuse to launch with a configured proxy it cannot
-   honor — loud error, never silent fallback to direct.
-3. Verification: new claim `egress-via-proxy` — the probe page is served by
-   the harness, which records the connecting IP; assert it is the relay's,
-   not the host's. Plus a live check against an echo endpoint when a real
-   proxy is configured (manual gate).
+1. Auth-injecting loopback relay
+   (`apps/api/src/application/runtime/proxy-relay.ts`): per-session, binds
+   127.0.0.1 only; the engine gets `--proxy-server=http://127.0.0.1:<port>`;
+   the relay injects `Proxy-Authorization` (Chromium strips credentials from
+   the flag). Fails closed: upstream refusals reach the client verbatim.
+2. `fury` refuses to launch with a proxy the relay cannot honor — loud
+   PROXY_UNSUPPORTED (socks5 today), never silent direct.
+3. Verification: `egress-via-proxy` in the verify runner (`--proxy` mode) —
+   the probe page is served on the LAN IP, a recording upstream must see the
+   request with the injected credential, or the run exits 1.
 
 ---
 
@@ -147,7 +153,8 @@ Fix shape (AliasMode's proven pattern, re-implemented):
 
 ## 4. Ordered next tasks (each ships as its own commit)
 
-1. **P0 proxy leak fix** — relay + fury wiring + refuse-loudly + egress claim
+1. ~~**P0 proxy leak fix**~~ — DONE v0.12.0 (relay + refuse-loudly +
+   `egress-via-proxy` live proof)
 2. **P4c own build** — fetch/apply/build per `engine/README.md`, verify
    harness + claim suite on OUR binary, publish manifest
 3. **Claim coverage sweep** — WebRTC (P1), audio, fonts, WebGPU, battery,

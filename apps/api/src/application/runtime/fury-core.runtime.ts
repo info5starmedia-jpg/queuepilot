@@ -16,6 +16,7 @@ import type {
 } from "./browser-runtime.js";
 import { CdpTabController } from "./cdp/cdp-tab-controller.js";
 import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
+import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
 
 /**
  * Fury core engine adapter — Fury's BSD-3-Clause patched Chromium
@@ -66,18 +67,36 @@ export class FuryCoreRuntime implements BrowserRuntime {
     const configPath = path.join(request.profileDataDir, "fury-config.json");
     fs.writeFileSync(configPath, JSON.stringify(config));
 
+    // P0 (proxy leak): a configured proxy is NEVER silently dropped. The
+    // engine only understands --proxy-server without credentials, so an
+    // auth-injecting loopback relay fronts the real upstream. A proxy the
+    // relay cannot honor (socks5, unparseable) refuses the launch loudly —
+    // direct fallback would leak the operator's real IP, which is the one
+    // failure this product may never have.
+    let relay: ProxyRelay | null = null;
+    if (request.proxyUrl) {
+      relay = await startProxyRelay(request.proxyUrl);
+    }
+
     const engineArgs = [
       `--user-data-dir=${request.profileDataDir}`,
       `--remote-debugging-port=${debugPort}`,
       "--no-first-run",
       "--no-default-browser-check",
       `--window-size=${request.identity?.screenWidth ?? 1920},${request.identity?.screenHeight ?? 1080}`,
+      ...(relay ? [`--proxy-server=http://127.0.0.1:${relay.port}`] : []),
       "about:blank",
     ];
 
     const child = spawnFuryWithConfig(binary, configPath, engineArgs);
-    const enginePid = await readEnginePid(child);
-    return new FurySession(child, enginePid, debugPort);
+    let enginePid: number;
+    try {
+      enginePid = await readEnginePid(child);
+    } catch (err) {
+      if (relay) await relay.close().catch(() => {});
+      throw err;
+    }
+    return new FurySession(child, enginePid, debugPort, relay);
   }
 }
 
@@ -254,6 +273,8 @@ export class FurySession implements BrowserSession {
     /** The actual engine PID (child of the bootstrap). */
     readonly enginePid: number,
     readonly debugPort: number,
+    /** Auth-injecting relay for this run, when a proxy is configured. */
+    private readonly relay: ProxyRelay | null = null,
   ) {
     this.wsEndpoint = `ws://127.0.0.1:${debugPort}`;
     this.tabs = new CdpTabController(this.wsEndpoint, async () => {
@@ -267,6 +288,9 @@ export class FurySession implements BrowserSession {
     this.exited = new Promise((resolve) => {
       bootstrap.once("exit", (code, signal) => resolve({ code, signal }));
     });
+    // The relay lives exactly as long as the engine: a window-closed exit
+    // must not leave a listener holding proxy credentials behind.
+    this.exited.then(() => relay?.close().catch(() => {}));
   }
 
   /** BrowserSession.pid is the engine PID, not the bootstrap's. */
@@ -300,6 +324,8 @@ export class FurySession implements BrowserSession {
     } catch {
       await taskkill(this.enginePid, true);
       await this.exited;
+    } finally {
+      if (this.relay) await this.relay.close().catch(() => {});
     }
   }
 }
