@@ -43,10 +43,17 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   files, refresh upserts identically. ✅ v0.7.0
 - P1.5 COMPLETE. Next track: P2 web dashboard.
 
-## P2 — Web dashboard
+## P2 — Web dashboard (DONE v0.8.0)
 
-- React console served by the API itself: profiles grid, proxy manager,
-  live status over the existing SSE stream. No separate hosting.
+- Console served by the API itself at `/`: profiles grid (start/stop,
+  fingerprint regen, drift badge, tab counts), proxy manager with liveness
+  tests, live lifecycle feed over the existing SSE stream. No separate
+  hosting. ✅
+- Deliberate substitution: zero-build vanilla JS instead of React. QueuePilot
+  is local-first with no bundler; the dashboard ships as static assets in the
+  repo, works offline on loopback, and honors the API bearer token. If the
+  console outgrows it, a React app can replace `src/dashboard/` without
+  touching the API.
 
 ## P3 — Automation depth
 

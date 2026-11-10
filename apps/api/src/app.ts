@@ -18,6 +18,7 @@ import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerGoogleRoutes } from "./http/google.routes.js";
+import { registerDashboardRoutes } from "./http/dashboard.routes.js";
 import type { GoogleAuthService } from "./application/google/google-auth.service.js";
 
 export interface AppDeps {
@@ -62,6 +63,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
   registerGoogleRoutes(app, deps.google);
+  registerDashboardRoutes(app);
 
   return app;
 }

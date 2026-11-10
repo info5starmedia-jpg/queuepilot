@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QueuePilot</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>QueuePilot</h1>
+      <div class="chips">
+        <span id="engine" class="chip" title="engine health">engine…</span>
+        <span id="google" class="chip" title="google connection">google…</span>
+        <span id="sse" class="chip chip-off" title="live event stream"
+          >offline</span
+        >
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <div class="section-head">
+          <h2>Profiles</h2>
+          <form id="create-profile">
+            <input id="new-name" placeholder="name" required maxlength="120" />
+            <input
+              id="new-group"
+              placeholder="group (optional)"
+              maxlength="120"
+            />
+            <button type="submit">Create</button>
+          </form>
+        </div>
+        <div id="profiles" class="grid"></div>
+      </section>
+
+      <section>
+        <div class="section-head"><h2>Proxies</h2></div>
+        <table id="proxies">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>type</th>
+              <th>endpoint</th>
+              <th>timezone</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Events</h2>
+          <span class="hint">live via SSE</span>
+        </div>
+        <ul id="events" class="events"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/dashboard/app.js"></script>
+  </body>
+</html>

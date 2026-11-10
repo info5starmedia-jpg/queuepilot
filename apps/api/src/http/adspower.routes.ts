@@ -18,7 +18,7 @@ export function registerAdsPowerRoutes(
   profiles: ProfileService,
 ): void {
   app.get("/status", async () =>
-    adsOk({ service: "queuepilot", version: "0.7.0" }),
+    adsOk({ service: "queuepilot", version: "0.8.0" }),
   );
 
   app.post("/api/v1/browser/start", async (req, reply) => {

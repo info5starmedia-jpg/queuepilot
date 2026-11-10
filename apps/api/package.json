@@ -1,13 +1,13 @@
 {
   "name": "@queuepilot/api",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node --input-type=module -e \"import fs from 'node:fs'; fs.cpSync('src/dashboard', 'dist/dashboard', { recursive: true })\"",
     "test": "vitest run"
   },
   "dependencies": {

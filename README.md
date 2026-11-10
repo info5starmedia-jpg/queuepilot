@@ -16,10 +16,10 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.7.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+`v0.8.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
 providers (CSV _and_ Google Sheets) + temporary proxies + engine pre-flight +
-tab/partition model with engine-side routing. What works today, covered by
-103 tests:
+tab/partition model with engine-side routing + web dashboard. What works
+today, covered by 106 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -54,6 +54,10 @@ tab/partition model with engine-side routing. What works today, covered by
   crash detection, idempotent stop, boot-time recovery, lifecycle events (SSE).
 - AdsPower-compatible endpoints: `/status`, `/api/v1/browser/start|stop|active`,
   `/api/v1/profile/list|create`.
+- **Web dashboard** — zero-build console served by the API itself at `/`:
+  profiles grid (start/stop, fingerprint regen, drift badges, tab counts),
+  proxy manager with liveness tests, live lifecycle feed over SSE. No separate
+  hosting, no CDN, works offline on loopback.
 - Two engine runtimes: **fake** (deterministic, for tests/CI/demos) and
   **camoufox** (real fingerprint-patched Firefox; bring your own binary).
 - **Profile providers** — refreshable CSV imports following the familiar
@@ -79,7 +83,8 @@ npm run dev -w apps/api          # or: npm start
 ```
 
 The API listens on `http://127.0.0.1:50325` (the AdsPower convention, so existing
-scripts work unchanged).
+scripts work unchanged). Open `http://127.0.0.1:50325/` in a browser for the
+dashboard.
 
 ```bash
 # create a profile (gets a coherent fingerprint identity automatically)
