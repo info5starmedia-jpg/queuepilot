@@ -38,7 +38,9 @@ export interface TestContext {
   dataDir: string;
 }
 
-export function makeTestContext(): TestContext {
+export function makeTestContext(
+  runtime: FakeBrowserRuntime = new FakeBrowserRuntime(),
+): TestContext {
   const db = openTestDatabase();
   const profileRepo = new ProfileRepository(db);
   const identityRepo = new FingerprintIdentityRepository(db);
@@ -47,7 +49,6 @@ export function makeTestContext(): TestContext {
 
   const proxies = new ProxyService(proxyRepo);
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
-  const runtime = new FakeBrowserRuntime();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-test-"));
   const snapshots = new LaunchIdentityService(dataDir);
   const lifecycle = new BrowserLifecycleService(

@@ -3,6 +3,7 @@ import type {
   BrowserRuntime,
   BrowserSession,
   LaunchRequest,
+  OpenTabRequest,
 } from "./browser-runtime.js";
 
 /**
@@ -79,5 +80,28 @@ export class FakeSession extends EventEmitter implements BrowserSession {
       this.stopped = true;
       this.resolveExit({ code: null, signal });
     }
+  }
+
+  /**
+   * In-memory tab model: every open tab records the partition key it was
+   * routed to, so tests can assert partitioning without a browser.
+   */
+  readonly tabs = new Map<
+    string,
+    { url: string | null; partitionKey: string }
+  >();
+  private nextTab = 0;
+
+  async openTab(request: OpenTabRequest): Promise<{ engineTabId: string }> {
+    const engineTabId = `fake-tab-${this.pid}-${++this.nextTab}`;
+    this.tabs.set(engineTabId, {
+      url: request.url,
+      partitionKey: request.partitionKey,
+    });
+    return { engineTabId };
+  }
+
+  async closeTab(engineTabId: string): Promise<void> {
+    this.tabs.delete(engineTabId);
   }
 }

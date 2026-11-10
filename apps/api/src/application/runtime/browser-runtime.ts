@@ -23,6 +23,20 @@ export interface BrowserSession {
   /** Resolve once the browser process has exited for any reason. */
   readonly exited: Promise<{ code: number | null; signal: string | null }>;
   stop(): Promise<void>;
+  /**
+   * Optional tab management. Present = the runtime can open/close tabs and
+   * route each tab into a session partition by key (tabs sharing a key share
+   * an in-memory session). Absent = the runtime launches browsers only; the
+   * API answers TABS_UNSUPPORTED rather than pretending a tab exists.
+   */
+  openTab?(request: OpenTabRequest): Promise<{ engineTabId: string }>;
+  closeTab?(engineTabId: string): Promise<void>;
+}
+
+export interface OpenTabRequest {
+  url: string | null;
+  /** Session-partition routing key; equal keys = shared in-memory session. */
+  partitionKey: string;
 }
 
 export interface BrowserRuntime {

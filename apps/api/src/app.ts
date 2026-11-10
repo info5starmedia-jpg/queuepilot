@@ -16,6 +16,7 @@ import { registerAdsPowerRoutes } from "./http/adspower.routes.js";
 import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
+import { registerTabRoutes } from "./http/tabs.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -56,6 +57,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   registerEngineRoutes(app, deps.engineHealth);
+  registerTabRoutes(app, deps.lifecycle);
 
   return app;
 }

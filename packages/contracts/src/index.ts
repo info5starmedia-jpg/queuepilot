@@ -5,6 +5,7 @@ export * from "./launch-identity.js";
 export * from "./engine.js";
 export * from "./adspower.js";
 export * from "./providers.js";
+export * from "./tabs.js";
 
 /**
  * Domain error codes shared across the API, the UI and automation clients.
@@ -23,6 +24,8 @@ export const ErrorCodes = {
   ENGINE_DOWNLOAD_REQUIRES_CONSENT: "ENGINE_DOWNLOAD_REQUIRES_CONSENT",
   ENGINE_CHECKSUM_MISMATCH: "ENGINE_CHECKSUM_MISMATCH",
   ENGINE_MANIFEST_INVALID: "ENGINE_MANIFEST_INVALID",
+  TABS_UNSUPPORTED: "TABS_UNSUPPORTED",
+  TAB_NOT_FOUND: "TAB_NOT_FOUND",
   VALIDATION_FAILED: "VALIDATION_FAILED",
   CONFLICT: "CONFLICT",
 } as const;

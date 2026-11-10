@@ -16,9 +16,9 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.4.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
-providers + temporary proxies + engine pre-flight. What works today, covered by
-78 tests:
+`v0.5.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+providers + temporary proxies + engine pre-flight + tab/partition model. What
+works today, covered by 89 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -40,6 +40,11 @@ providers + temporary proxies + engine pre-flight. What works today, covered by
   whether the engine binary is actually on disk, and every verified install
   receipt; `POST /engine/self-test` launches and cleanly stops a throwaway
   browser to prove the full spawn path works.
+- **Tabs & session partitions** — open tabs inside a run
+  (`POST /profiles/:id/tabs`); every tab lives in an isolated in-memory
+  session partition, and tabs opened with `relatedTo` share the parent tab's
+  partition (the related-tabs model). Tab state is never written to disk and
+  dies with the run; `tab.opened`/`tab.closed` ride the SSE stream.
 - Proxies — full CRUD, TCP liveness test, credentials write-only over the API.
 - Browser lifecycle — start/stop/active/history, double-launch guard,
   crash detection, idempotent stop, boot-time recovery, lifecycle events (SSE).
@@ -57,7 +62,8 @@ providers + temporary proxies + engine pre-flight. What works today, covered by
   persist / start-over / random distribution via `POST /proxy-providers/:id/next`.
 
 Not yet: web dashboard, Google Sheets providers, resolver/parser registries,
-tab/partition model, plugin system, own Chromium engine build. See
+plugin system, engine-side tab routing for camoufox (tab model works on the
+fake runtime today), own Chromium engine build. See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
 
 ## Quickstart
@@ -111,6 +117,28 @@ curl -X POST http://127.0.0.1:50325/engine/self-test   # launch + stop a throwaw
 npm start -- engine install --manifest engines.json --yes
 # without --yes: prints the entry and refuses — no bytes move
 ```
+
+### Tabs and session partitions
+
+Tabs live inside a run. Every tab gets its own isolated in-memory session
+partition unless you open it as _related_ to another tab — related tabs share
+the parent's session (cookies/storage), everything else is isolated:
+
+```bash
+# isolated tab
+curl -X POST http://127.0.0.1:50325/profiles/<id>/tabs \
+  -H 'content-type: application/json' -d '{"url":"https://example.com"}'
+
+# related tab — shares the parent tab's session partition
+curl -X POST http://127.0.0.1:50325/profiles/<id>/tabs \
+  -H 'content-type: application/json' -d '{"url":"https://example.com/cart","relatedTo":"<tab-id>"}'
+
+curl http://127.0.0.1:50325/profiles/<id>/tabs                 # tabs + partitions
+curl -X POST http://127.0.0.1:50325/profiles/<id>/tabs/<tab-id>/close
+```
+
+Tab state is never written to disk and dies with the run. A runtime that
+cannot manage tabs answers `501 TABS_UNSUPPORTED` rather than pretending.
 
 ### Import a profile CSV
 

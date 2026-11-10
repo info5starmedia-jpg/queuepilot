@@ -6,7 +6,12 @@ import { z } from "zod";
  * the API dies mid-launch, recovery finds the row and reconciles it against
  * real OS processes on next boot.
  */
-export const BrowserRunStatusSchema = z.enum(["launching", "running", "stopped", "crashed"]);
+export const BrowserRunStatusSchema = z.enum([
+  "launching",
+  "running",
+  "stopped",
+  "crashed",
+]);
 export type BrowserRunStatus = z.infer<typeof BrowserRunStatusSchema>;
 
 export const BrowserRunSchema = z.object({
@@ -24,9 +29,18 @@ export type BrowserRun = z.infer<typeof BrowserRunSchema>;
 
 /** Lifecycle event published on the SSE stream. */
 export const LifecycleEventSchema = z.object({
-  type: z.enum(["run.started", "run.stopped", "run.crashed", "profile.updated"]),
+  type: z.enum([
+    "run.started",
+    "run.stopped",
+    "run.crashed",
+    "profile.updated",
+    "tab.opened",
+    "tab.closed",
+  ]),
   profileId: z.string().uuid(),
   runId: z.string().uuid().nullable(),
+  /** Set on tab.opened / tab.closed events. */
+  tabId: z.string().uuid().nullish(),
   at: z.string().datetime(),
   detail: z.string().max(500).default(""),
 });

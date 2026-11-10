@@ -6,9 +6,12 @@ import {
   ErrorCodes,
   TempProxyInputSchema,
   type BrowserRun,
+  type BrowserTab,
   type IdentityDrift,
   type LifecycleEvent,
+  type OpenTabInput,
   type Profile,
+  type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
 import { isProcessAlive } from "../../infrastructure/process-inventory.js";
@@ -25,6 +28,7 @@ import type {
   BrowserSession,
 } from "../runtime/browser-runtime.js";
 import type { LaunchIdentityService } from "./launch-identity.service.js";
+import { TabRegistry } from "../tabs/tab-registry.js";
 
 export interface StartOptions {
   /**
@@ -55,6 +59,7 @@ export class BrowserLifecycleService {
   private readonly sessions = new Map<string, BrowserSession>();
   readonly events = new EventEmitter();
   private readonly mutex = new ProfileOperationMutex();
+  private readonly tabRegistry = new TabRegistry();
 
   constructor(
     private readonly profiles: ProfileRepository,
@@ -194,6 +199,7 @@ export class BrowserLifecycleService {
       };
       this.runs.update(stopped);
       this.markProfile(profile, "idle");
+      this.tabRegistry.clearRun(run.id); // tabs die with the run
       try {
         await session?.stop();
       } catch {
@@ -216,6 +222,123 @@ export class BrowserLifecycleService {
 
   listRuns(profileId: string): BrowserRun[] {
     return this.runs.listForProfile(profileId);
+  }
+
+  /**
+   * Open a tab in the profile's active run. Without `relatedTo` the tab gets
+   * its own isolated session partition; with it, the tab shares the parent's
+   * partition (the Jancy "related tabs" model). Refuses honestly when there
+   * is no run, when the run was adopted after a restart (tab state unknown),
+   * or when the runtime cannot manage tabs at all.
+   */
+  async openTab(profileId: string, input: OpenTabInput): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const profile = this.requireProfile(profileId);
+      const run = this.runs.occupyingForProfile(profileId);
+      if (!run) {
+        throw new DomainError(
+          ErrorCodes.PROFILE_NOT_RUNNING,
+          `profile ${profileId} has no active browser run`,
+        );
+      }
+      const session = this.sessions.get(profileId);
+      if (!session) {
+        throw new DomainError(
+          ErrorCodes.TABS_UNSUPPORTED,
+          `run ${run.id} was adopted after an API restart — its tab state is unknown; stop and relaunch to manage tabs`,
+        );
+      }
+      if (!session.openTab) {
+        throw new DomainError(
+          ErrorCodes.TABS_UNSUPPORTED,
+          `runtime "${this.runtime.kind}" does not implement tab management`,
+        );
+      }
+
+      const { partition, relatedToTabId } = this.tabRegistry.resolvePartition(
+        run.id,
+        input.relatedTo ?? null,
+      );
+      let engineTabId: string | null = null;
+      try {
+        const opened = await session.openTab({
+          url: input.url ?? null,
+          partitionKey: partition.id,
+        });
+        engineTabId = opened.engineTabId;
+      } catch (err) {
+        // Engine refused — drop a partition we created for nothing.
+        this.tabRegistry.dropPartitionIfEmpty(partition.id);
+        throw err instanceof DomainError
+          ? err
+          : new DomainError(
+              ErrorCodes.ENGINE_LAUNCH_FAILED,
+              err instanceof Error ? err.message : String(err),
+            );
+      }
+
+      const tab = this.tabRegistry.recordTab({
+        runId: run.id,
+        profileId,
+        partitionId: partition.id,
+        engineTabId,
+        url: input.url ?? null,
+        relatedToTabId,
+      });
+      this.emit({
+        type: "tab.opened",
+        profileId,
+        runId: run.id,
+        tabId: tab.id,
+        at: now(),
+        detail: tab.url ?? "",
+      });
+      return tab;
+    });
+  }
+
+  /** Close a tab. Idempotent: closing an already-closed tab returns it. */
+  async closeTab(profileId: string, tabId: string): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      this.requireProfile(profileId);
+      const run = this.runs.occupyingForProfile(profileId);
+      if (!run) {
+        throw new DomainError(
+          ErrorCodes.PROFILE_NOT_RUNNING,
+          `profile ${profileId} has no active browser run`,
+        );
+      }
+      const tab = this.tabRegistry.getForRun(run.id, tabId);
+      if (tab.status === "closed") return tab; // idempotent close
+      const session = this.sessions.get(profileId);
+      if (session?.closeTab && tab.engineTabId) {
+        try {
+          await session.closeTab(tab.engineTabId);
+        } catch {
+          // Engine may already be gone; the registry is reconciled regardless.
+        }
+      }
+      const closed = this.tabRegistry.markClosed(tabId);
+      this.emit({
+        type: "tab.closed",
+        profileId,
+        runId: run.id,
+        tabId: tab.id,
+        at: now(),
+        detail: "",
+      });
+      return closed;
+    });
+  }
+
+  /** Tabs and partitions of the profile's active run; empty when not running. */
+  listTabs(profileId: string): {
+    tabs: BrowserTab[];
+    partitions: SessionPartition[];
+  } {
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) return { tabs: [], partitions: [] };
+    return this.tabRegistry.listForRun(run.id);
   }
 
   /**
@@ -282,6 +405,7 @@ export class BrowserLifecycleService {
     if (!run || (run.status !== "running" && run.status !== "launching"))
       return;
     this.sessions.delete(profileId);
+    this.tabRegistry.clearRun(runId); // tabs die with the engine
     const clean = code === 0;
     const final: BrowserRun = {
       ...run,

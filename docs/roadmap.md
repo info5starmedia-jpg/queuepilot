@@ -27,8 +27,15 @@
   `POST /profiles/:id/start` + `tempProxy`; never persisted, provenance
   recorded in the launch snapshot (`proxySource`), drift explains it while
   live, profile proxy applies again at next start. ✅ v0.4.0
-- Next in this track: tab/partition model (related tabs share an isolated
-  in-memory session); Google Sheets providers (OAuth).
+- Tab/partition model: tabs live inside a run; every tab sits in an isolated
+  in-memory session partition unless opened with `relatedTo` (shares the
+  parent's partition — the related-tabs session model). Cross-run relations
+  are refused, closes are idempotent, tab state dies with the run and is
+  never persisted, and runtimes without tab support answer `501
+TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
+- Next in this track: engine-side tab routing for camoufox (CDP/Juggler
+  target management behind the existing `openTab` capability); Google Sheets
+  providers (OAuth).
 
 ## P2 — Web dashboard
 
