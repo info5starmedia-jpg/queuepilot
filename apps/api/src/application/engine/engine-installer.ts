@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
   DomainError,
   ErrorCodes,
+  EngineManifestEntrySchema,
   InstalledEngineSchema,
-  type EngineManifestEntry,
+  type EngineManifestEntryInput,
   type InstalledEngine,
 } from "@queuepilot/contracts";
 
@@ -44,9 +46,12 @@ export class EngineInstaller {
   }
 
   async install(
-    entry: EngineManifestEntry,
+    rawEntry: EngineManifestEntryInput,
     opts: { consent: boolean },
   ): Promise<InstalledEngine> {
+    // Parse first: applies defaults (archive: "raw") and rejects malformed
+    // entries before any byte moves.
+    const entry = EngineManifestEntrySchema.parse(rawEntry);
     if (!opts.consent) {
       throw new DomainError(
         ErrorCodes.ENGINE_DOWNLOAD_REQUIRES_CONSENT,
@@ -74,7 +79,43 @@ export class EngineInstaller {
     const staging = `${dir}.staging-${process.pid}-${Date.now()}`;
     fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true });
-    fs.writeFileSync(path.join(staging, "payload.bin"), payload);
+    const payloadFile = path.join(staging, "payload.bin");
+    fs.writeFileSync(payloadFile, payload);
+
+    // Archives are extracted in staging after the checksum passed; the pinned
+    // hash covers the archive bytes, so whatever tar unpacks is the verified
+    // content. Extraction uses the OS tar (bsdtar on Windows/macOS, GNU tar on
+    // Linux — both handle xz). No tar = a loud, named failure.
+    const archive = entry.archive ?? "raw";
+    if (archive !== "raw") {
+      try {
+        // cwd + relative name: bsdtar (Windows/macOS) would otherwise parse
+        // the "C:" in an absolute path as a remote host.
+        execFileSync("tar", ["-xf", "payload.bin"], {
+          cwd: staging,
+          stdio: "pipe",
+        });
+      } catch (err) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        throw new DomainError(
+          ErrorCodes.ENGINE_MANIFEST_INVALID,
+          `engine ${entry.kind}@${entry.version}: archive extraction failed (tar -xf): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      fs.rmSync(payloadFile, { force: true });
+      if (
+        entry.binaryPath &&
+        !fs.existsSync(path.join(staging, entry.binaryPath))
+      ) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        throw new DomainError(
+          ErrorCodes.ENGINE_MANIFEST_INVALID,
+          `engine ${entry.kind}@${entry.version}: archive extracted but ${entry.binaryPath} is missing — manifest does not match the payload`,
+        );
+      }
+    }
 
     const receipt: InstalledEngine = InstalledEngineSchema.parse({
       kind: entry.kind,
@@ -84,6 +125,7 @@ export class EngineInstaller {
       url: entry.url,
       installedAt: new Date().toISOString(),
       dir,
+      ...(entry.binaryPath ? { binaryPath: entry.binaryPath } : {}),
     });
     fs.writeFileSync(path.join(staging, "install.json"), JSON.stringify(receipt, null, 2));
 
@@ -92,12 +134,13 @@ export class EngineInstaller {
     return receipt;
   }
 
-  isInstalled(entry: EngineManifestEntry): boolean {
+  isInstalled(rawEntry: EngineManifestEntryInput): boolean {
+    const entry = EngineManifestEntrySchema.parse(rawEntry);
     const receipt = this.readReceipt(path.join(this.engineDir(entry), "install.json"));
     return receipt !== null && receipt.sha256 === entry.sha256;
   }
 
-  private engineDir(entry: EngineManifestEntry): string {
+  private engineDir(entry: { kind: string; version: string; platform: string }): string {
     return path.join(this.enginesDir, entry.kind, entry.version, entry.platform);
   }
 

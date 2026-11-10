@@ -9,10 +9,7 @@ import type {
   OpenTabRequest,
 } from "./browser-runtime.js";
 import { CdpTabController } from "./cdp/cdp-tab-controller.js";
-import {
-  attestationUnsupported,
-  captureFingerprintViaCdp,
-} from "./cdp/cdp-attestation.js";
+import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
 
 /**
  * Camoufox engine adapter.
@@ -144,20 +141,11 @@ export class CamoufoxSession implements BrowserSession {
    * ATTESTATION_UNSUPPORTED, never a fabricated "match".
    */
   async captureFingerprint(): Promise<ObservedFingerprint> {
-    try {
-      const res = await fetch(
-        `http://127.0.0.1:${this.debugPort}/json/version`,
-      );
-      const info = res.ok
-        ? ((await res.json()) as { webSocketDebuggerUrl?: string })
-        : {};
-      return await captureFingerprintViaCdp(
-        info.webSocketDebuggerUrl ?? this.wsEndpoint,
-      );
-    } catch (err) {
-      if (err instanceof DomainError) throw err;
-      throw attestationUnsupported("camoufox", err);
-    }
+    return captureFingerprintViaDebugPort(
+      "camoufox",
+      this.debugPort,
+      this.wsEndpoint,
+    );
   }
 
   async stop(): Promise<void> {

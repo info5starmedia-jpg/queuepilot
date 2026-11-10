@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "engines": [
+    {
+      "kind": "fury-core",
+      "version": "0.5.1",
+      "platform": "windows-x64",
+      "url": "https://github.com/furyteamtop/fury-antidetect-browser/releases/download/v0.5.1/fury-core-0.5.1-windows-x64.tar.xz",
+      "sha256": "af9d5559ca1e147bad8123a5c41d68d3a12cc15357901ffdd8ddc46333f3cae4",
+      "sizeBytes": 150550308,
+      "archive": "tar.xz",
+      "binaryPath": "Fury/chrome.exe"
+    }
+  ]
+}

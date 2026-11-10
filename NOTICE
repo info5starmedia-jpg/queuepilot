@@ -1,0 +1,24 @@
+QueuePilot
+==========
+
+This product builds on openly licensed work from the following projects.
+Nothing here is a trademark claim; names belong to their owners.
+
+Fury (fury-antidetect-browser)
+  Copyright 2026 The Fury Authors.
+  - core/patches/ and the prebuilt fury-core browser binaries: BSD-3-Clause.
+    QueuePilot's optional `fury` engine runtime downloads Fury's prebuilt
+    Chromium core (checksum-pinned, consent-gated) and implements the persona
+    launch contract described by those patch sources.
+  - Fury's agent/server/desktop/build code is AGPL-3.0 and is NOT included
+    in or derived into QueuePilot.
+
+AliasMode
+  Copyright the AliasMode authors. Apache-2.0.
+  QueuePilot's fingerprint-attestation design (measured photograph vs
+  launch expectation, match/mismatch verdict) follows AliasMode's
+  attestation model; the implementation here is original.
+
+Jancy
+  Closed-source commercial product. No code used. Workflow concepts are
+  informed by Jancy's public documentation only.

@@ -81,3 +81,25 @@ export function attestationUnsupported(kind: string, cause: unknown): DomainErro
     }`,
   );
 }
+
+/**
+ * Attestation via the engine's HTTP debug port: discover the browser-level
+ * WebSocket endpoint from /json/version (it may carry a session path), then
+ * run the probe. Shared by every CDP-speaking runtime.
+ */
+export async function captureFingerprintViaDebugPort(
+  kind: string,
+  debugPort: number,
+  fallbackWs: string,
+): Promise<ObservedFingerprint> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${debugPort}/json/version`);
+    const info = res.ok
+      ? ((await res.json()) as { webSocketDebuggerUrl?: string })
+      : {};
+    return await captureFingerprintViaCdp(info.webSocketDebuggerUrl ?? fallbackWs);
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw attestationUnsupported(kind, err);
+  }
+}

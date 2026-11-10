@@ -15,7 +15,7 @@ const ConfigSchema = z.object({
   host: z.string().default("127.0.0.1"),
   dataDir: z.string().default(path.join(os.homedir(), ".queuepilot")),
   /** "fake" runs the deterministic in-memory engine (tests, CI, demos). */
-  runtime: z.enum(["camoufox", "fake"]).default("camoufox"),
+  runtime: z.enum(["camoufox", "fury", "fake"]).default("camoufox"),
   /** Optional bearer token. Unset = loopback-only trust (still binds 127.0.0.1). */
   apiToken: z.string().min(8).optional(),
   /** Google Cloud OAuth client (Sheets API) for Google Sheets providers. */

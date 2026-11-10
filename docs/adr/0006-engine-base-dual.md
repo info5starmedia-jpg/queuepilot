@@ -85,5 +85,25 @@ netinfo don't exist in Firefox the same way, which is itself a tell).
   probes, we keep camoufox and lose only the spike.
 - We inherit a rebase cadence decision later (track Fury releases vs build
   our own from patches) — deferred until the spike proves value.
-- Node's `child_process` on Windows can pass inheritable HANDLEs via
-  `stdio` — the one genuinely new systems code in the spike.
+- The spike found Node cannot mint an inheritable HANDLE with a known value,
+  so config transport runs through a small PowerShell bootstrap per launch
+  (inline `-EncodedCommand`, no files, ~0.5 s overhead). A native launcher
+  can replace it later without touching the contract.
+
+## Spike outcome (2026-11-10, v0.10.0)
+
+Validated live on Windows x64 against fury-core 0.5.1 (Chrome 157.0.8103.39):
+
+- Checksummed consent-gated install via `engine install` (archive extraction
+  added to EngineInstaller; SHA-256 matched the published digest). ✅
+- Persona delivered via inherited HANDLE (`--fury-fp-file-handle`): two
+  defects found and fixed en route — .NET file handles are not inheritable
+  by default (needs `SetHandleInformation`), and PowerShell 5.1's IntPtr
+  lacks `ToUInt32`. ✅
+- `GET /profiles/:id/attest` → **verdict "match"** with the identity's real
+  materialized values; UA is a clean stock Chrome string (no brand leak). ✅
+- Tab open/close in isolated browser contexts over native CDP ✅ (one fix:
+  `Target.createTarget` needs a window-retry when no window is open).
+- Graceful stop via WM_CLOSE (taskkill), force fallback after 10 s. ✅
+- PowerShell bootstrap is the v0.10.0 transport; a native launcher can
+  replace it later without touching the contract.

@@ -28,6 +28,10 @@ import {
   CamoufoxRuntime,
   defaultCamoufoxPath,
 } from "./application/runtime/camoufox.runtime.js";
+import {
+  FuryCoreRuntime,
+  resolveFuryBinary,
+} from "./application/runtime/fury-core.runtime.js";
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 
@@ -86,7 +90,9 @@ export async function main(): Promise<void> {
   const runtime: BrowserRuntime =
     config.runtime === "fake"
       ? new FakeBrowserRuntime()
-      : new CamoufoxRuntime(defaultCamoufoxPath(config.dataDir));
+      : config.runtime === "fury"
+        ? new FuryCoreRuntime(resolveFuryBinary(config.dataDir))
+        : new CamoufoxRuntime(defaultCamoufoxPath(config.dataDir));
 
   const engineHealth = new EngineHealthService(runtime, config.dataDir);
 

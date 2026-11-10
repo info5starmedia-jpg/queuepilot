@@ -75,11 +75,13 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 
 ## P4 — Own engine track
 
-- Evaluate a Chromium fork with a quilt patch series (navigator, canvas,
-  WebGL, WebRTC, fonts), each patch paired with a runtime verification
-  script in `core/verify/`, run in CI against public checkers
-  (CreepJS, sannysoft, pixelscan-class surfaces). Detection regression blocks
-  release, exactly like a failing test.
+- P4a spike (DONE v0.10.0): `fury` runtime launches Fury's prebuilt BSD
+  Chromium core (checksummed, consent-gated install; persona JSON delivered
+  via inherited HANDLE per the BSD patch contract). Validated live on
+  Windows: install → launch → attestation `match` → isolated tabs → clean
+  stop. Remaining P4: claim-based probe suite, detection CI (CreepJS/
+  sannysoft-class surfaces) on every engine bump, then the default-engine
+  decision.
 
 ## P5 — Team mode
 

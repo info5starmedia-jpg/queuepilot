@@ -128,6 +128,24 @@ npm start -- engine install --manifest engines.json --yes
 # without --yes: prints the entry and refuses — no bytes move
 ```
 
+### Engines: camoufox (default) and fury-core
+
+Two engine runtimes ship behind the same API:
+
+- `camoufox` — C++-patched Firefox (default; `SPECTRA_CAMOUFOX_PATH` or
+  `<dataDir>/engines/camoufox/`).
+- `fury` — Fury's BSD-3-Clause patched Chromium core (Chrome 157):
+  C++-level canvas/audio/WebGL/WebGPU/font/timezone spoofing. Install the
+  pinned, checksum-verified build and select it:
+
+```bash
+npm start -- engine install --manifest engines.manifest.json --yes
+SPECTRA_RUNTIME=fury npm start
+```
+
+Persona config is handed to the core as an inherited file handle (never in
+argv); `GET /profiles/:id/attest` verifies what actually materialized.
+
 ### Fingerprint attestation
 
 The launch snapshot records what we ASKED the engine for; attestation probes a

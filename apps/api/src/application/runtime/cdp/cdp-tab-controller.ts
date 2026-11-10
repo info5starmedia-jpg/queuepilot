@@ -40,12 +40,30 @@ export class CdpTabController {
   ): Promise<{ engineTabId: string }> {
     const conn = await this.ensureConnection();
     const browserContextId = await this.contextFor(conn, partitionKey);
-    const result = await conn.call<CreateTargetResult>("Target.createTarget", {
+    const target = {
       url: url ?? "about:blank",
       browserContextId,
-      newWindow: false,
-    });
-    return { engineTabId: result.targetId };
+    };
+    try {
+      const result = await conn.call<CreateTargetResult>("Target.createTarget", {
+        ...target,
+        newWindow: false,
+      });
+      return { engineTabId: result.targetId };
+    } catch (err) {
+      // Chromium answers "no browser is open" when asked for a tab while no
+      // window exists (e.g. engine launched straight to about:blank and the
+      // window was closed). Opening a window+tab is the same partition —
+      // retry honestly instead of failing the tab.
+      if (err instanceof Error && /no browser is open/i.test(err.message)) {
+        const result = await conn.call<CreateTargetResult>(
+          "Target.createTarget",
+          { ...target, newWindow: true },
+        );
+        return { engineTabId: result.targetId };
+      }
+      throw err;
+    }
   }
 
   async closeTab(engineTabId: string): Promise<void> {

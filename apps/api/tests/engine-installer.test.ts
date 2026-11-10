@@ -3,10 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { ErrorCodes, type EngineManifestEntry } from "@queuepilot/contracts";
+import { ErrorCodes, type EngineManifestEntryInput } from "@queuepilot/contracts";
 import { EngineInstaller } from "../src/application/engine/engine-installer.js";
 
-function makeEntry(payload: Uint8Array, overrides: Partial<EngineManifestEntry> = {}): EngineManifestEntry {
+function makeEntry(payload: Uint8Array, overrides: Partial<EngineManifestEntryInput> = {}): EngineManifestEntryInput {
   return {
     kind: "camoufox",
     version: "1.0.0",

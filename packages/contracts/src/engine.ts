@@ -19,8 +19,18 @@ export const EngineManifestEntrySchema = z.object({
   url: z.string().url(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   sizeBytes: z.number().int().positive().optional(),
+  /**
+   * Payload format. "raw" = the payload IS the binary; archive kinds are
+   * extracted (system tar) after the checksum passes — the pinned hash covers
+   * the archive bytes, so extraction of a verified archive is safe.
+   */
+  archive: z.enum(["raw", "tar.xz", "tar.gz"]).default("raw"),
+  /** Path of the executable inside the payload/archive, e.g. "Fury/chrome.exe". */
+  binaryPath: z.string().min(1).optional(),
 });
 export type EngineManifestEntry = z.infer<typeof EngineManifestEntrySchema>;
+/** Input shape — `archive` optional before parsing applies its "raw" default. */
+export type EngineManifestEntryInput = z.input<typeof EngineManifestEntrySchema>;
 
 export const EngineManifestSchema = z.object({
   schemaVersion: z.literal(1),
@@ -38,6 +48,8 @@ export const InstalledEngineSchema = z.object({
   installedAt: z.string().datetime(),
   /** Absolute path of the engine directory. */
   dir: z.string().min(1),
+  /** Executable path relative to dir, when the manifest declares one. */
+  binaryPath: z.string().min(1).optional(),
 });
 export type InstalledEngine = z.infer<typeof InstalledEngineSchema>;
 
