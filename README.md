@@ -14,6 +14,12 @@ around the two things that actually break multi-account tooling in production:
    AdsPower-compatible Local API on port 50325 (existing automation tooling works by
    pointing it at QueuePilot), plus a native REST API and an SSE event stream.
 
+**Reading order for anyone picking this up (human or LLM):**
+[docs/handoff.md](docs/handoff.md) (the contract — mission, invariants, verified
+facts, next tasks) → [docs/parity.md](docs/parity.md) (the completeness checklist
+vs Fury/AliasMode, with green gates) → [docs/roadmap.md](docs/roadmap.md) →
+[docs/adr/](docs/adr/). The engine patchset is owned in [engine/](engine/).
+
 ## Status
 
 `v0.11.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
@@ -149,6 +155,11 @@ SPECTRA_RUNTIME=fury npm start
 
 Persona config is handed to the core as an inherited file handle (never in
 argv); `GET /profiles/:id/attest` verifies what actually materialized.
+
+**The patchset is ours.** Fury's BSD-licensed patch series and build chain
+are vendored in [`engine/`](engine/) — we can rebase, extend and build our
+own Chromium (ritual in `engine/README.md`); the prebuilt upstream binary
+remains the default runtime until our own build passes the same gates.
 
 ### Detection claim verification
 

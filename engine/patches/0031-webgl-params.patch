@@ -1,0 +1,356 @@
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index b452298c24..f9bafb42bd 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -25,8 +25,17 @@
+ 
+ #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+ 
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "components/fury/fury_config.h"
++#include "third_party/blink/renderer/platform/graphics/fury_flat.h"
++#include "components/fury/fury_noise.h"
++
+ #include <inttypes.h>
+ 
++#include <algorithm>
++
+ #include <memory>
+ #include <utility>
+ 
+@@ -3888,6 +3897,29 @@ bool WebGLRenderingContextBase::TimerQueryExtensionsEnabled() {
+               .IsWorkaroundEnabled(gpu::ENABLE_WEBGL_TIMER_QUERY_EXTENSIONS));
+ }
+ 
++namespace {
++
++// The persona's extension list for this kind of context. A WebGL1 and a
++// WebGL2 context list different extensions on the same machine -- WebGL2 has
++// its own (EXT_color_buffer_float, OES_draw_buffers_indexed) and drops the
++// ones it made core -- so one list for both left a WebGL2 context with only
++// the names the two shared: 18 where Chrome on the same Windows machine lists
++// 32 (ctx-fury baseline). gpu.webglExtensions is what a persona without
++// per-context lists carries, and what an older agent sends.
++std::optional<std::vector<std::string>> FuryExtensionList(
++    const fury::FuryConfig& config,
++    bool webgl2) {
++  std::optional<std::vector<std::string>> list =
++      webgl2 ? config.GetStringList("gpu.webgl2Extensions")
++             : config.GetStringList("gpu.webgl1Extensions");
++  if (!list) {
++    list = config.GetStringList("gpu.webglExtensions");
++  }
++  return list;
++}
++
++}  // namespace
++
+ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
+                                                      const String& name) {
+   ExecutionContext* context = ExecutionContext::From(script_state);
+@@ -3896,6 +3928,24 @@ ScriptObject WebGLRenderingContextBase::getExtension(ScriptState* script_state,
+     UseCounter::Count(context, WebFeature::kWebGLDebugRendererInfo);
+   }
+ 
++  // Fury: an extension the persona does not list is not there, whatever the
++  // host's driver offers. Otherwise getSupportedExtensions() and
++  // getExtension() disagree, which no real browser does. Names compare
++  // without case, as getExtension() itself does.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<std::vector<std::string>> extensions =
++            FuryExtensionList(*config, IsWebGL2())) {
++      const std::string wanted = name.Utf8();
++      if (std::none_of(extensions->begin(), extensions->end(),
++                       [&](const std::string& listed) {
++                         return base::EqualsCaseInsensitiveASCII(listed,
++                                                                 wanted);
++                       })) {
++        return ScriptObject::CreateNull(script_state->GetIsolate());
++      }
++    }
++  }
++
+   WebGLExtension* extension = EnableExtensionIfSupported(name, context);
+   return ScriptObject(
+       script_state->GetIsolate(),
+@@ -4003,10 +4053,149 @@ void WebGLRenderingContextBase::RecordANGLEImplementation() {
+                             webgl_angle_implementation);
+ }
+ 
++namespace {
++
++// Maps the GLenum a page passes to getParameter() onto the name the config uses.
++//
++// Intercepting once at the top of getParameter() rather than case by case is
++// deliberate: the switch below has around eighty arms, and patching them
++// individually would guarantee some are missed at the next rebase — and a
++// single un-spoofed limit contradicts every spoofed one around it.
++//
++// Names match what tools/detect-suite/probe.js dumps, so a persona can be
++// filled straight from a capture of a real machine.
++struct FuryGlParamName {
++  GLenum pname;
++  const char* name;
++};
++
++constexpr FuryGlParamName kFuryGlIntParams[] = {
++    {GL_MAX_TEXTURE_SIZE, "MAX_TEXTURE_SIZE"},
++    {GL_MAX_RENDERBUFFER_SIZE, "MAX_RENDERBUFFER_SIZE"},
++    {GL_MAX_CUBE_MAP_TEXTURE_SIZE, "MAX_CUBE_MAP_TEXTURE_SIZE"},
++    {GL_MAX_TEXTURE_IMAGE_UNITS, "MAX_TEXTURE_IMAGE_UNITS"},
++    {GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, "MAX_VERTEX_TEXTURE_IMAGE_UNITS"},
++    {GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, "MAX_COMBINED_TEXTURE_IMAGE_UNITS"},
++    {GL_MAX_VERTEX_ATTRIBS, "MAX_VERTEX_ATTRIBS"},
++    {GL_MAX_VERTEX_UNIFORM_VECTORS, "MAX_VERTEX_UNIFORM_VECTORS"},
++    {GL_MAX_FRAGMENT_UNIFORM_VECTORS, "MAX_FRAGMENT_UNIFORM_VECTORS"},
++    {GL_MAX_VARYING_VECTORS, "MAX_VARYING_VECTORS"},
++    {GL_RED_BITS, "RED_BITS"},
++    {GL_GREEN_BITS, "GREEN_BITS"},
++    {GL_BLUE_BITS, "BLUE_BITS"},
++    {GL_DEPTH_BITS, "DEPTH_BITS"},
++    {GL_STENCIL_BITS, "STENCIL_BITS"},
++    {GL_SUBPIXEL_BITS, "SUBPIXEL_BITS"},
++    {GL_SAMPLE_BUFFERS, "SAMPLE_BUFFERS"},
++    {GL_SAMPLES, "SAMPLES"},
++};
++
++constexpr FuryGlParamName kFuryGlStringParams[] = {
++    {GL_VENDOR, "VENDOR"},
++    {GL_RENDERER, "RENDERER"},
++    {GL_VERSION, "VERSION"},
++    {GL_SHADING_LANGUAGE_VERSION, "SHADING_LANGUAGE_VERSION"},
++    {WebGLDebugRendererInfo::kUnmaskedVendorWebgl, "UNMASKED_VENDOR_WEBGL"},
++    {WebGLDebugRendererInfo::kUnmaskedRendererWebgl, "UNMASKED_RENDERER_WEBGL"},
++};
++
++// Reported as Float32Array, so the config stores them comma-separated.
++constexpr FuryGlParamName kFuryGlFloatArrayParams[] = {
++    {GL_ALIASED_LINE_WIDTH_RANGE, "ALIASED_LINE_WIDTH_RANGE"},
++    {GL_ALIASED_POINT_SIZE_RANGE, "ALIASED_POINT_SIZE_RANGE"},
++};
++
++// Reported as Int32Array — same storage, different JS type, and the type is
++// itself a fingerprint. MAX_VIEWPORT_DIMS answers an Int32Array on every real
++// WebGL implementation, so handing back a Float32Array names this build in one
++// line of script: a worse tell than the value it was hiding. It sat in the
++// float table above until the config-key audit went looking for exactly this.
++constexpr FuryGlParamName kFuryGlIntArrayParams[] = {
++    {GL_MAX_VIEWPORT_DIMS, "MAX_VIEWPORT_DIMS"},
++};
++
++const char* FuryFindName(base::span<const FuryGlParamName> table, GLenum pname) {
++  for (const auto& entry : table) {
++    if (entry.pname == pname) {
++      return entry.name;
++    }
++  }
++  return nullptr;
++}
++
++}  // namespace
++
+ ScriptValue WebGLRenderingContextBase::getParameter(ScriptState* script_state,
+                                                     GLenum pname) {
+   if (isContextLost())
+     return ScriptValue::CreateNull(script_state->GetIsolate());
++
++  // Fury: answer from the configured GPU before consulting the real driver.
++  // MAX_VIEWPORT_DIMS and friends are as much a part of the GPU's identity as
++  // the renderer string, and a persona that changes one without the others
++  // describes a card that has never existed.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    // UNMASKED_VENDOR_WEBGL and UNMASKED_RENDERER_WEBGL exist only once the
++    // page has enabled WEBGL_debug_renderer_info. Before that, real Chrome
++    // answers null and raises INVALID_ENUM, which is the upstream case below.
++    // Answering the configured string regardless meant two lines of JS told
++    // Fury from Chrome whatever the persona (#16, measured by yxtbikak on
++    // 0.2.16: 258 of 258 readings). So those two fall through until the
++    // extension is on; VENDOR and RENDERER are always readable and keep
++    // answering here.
++    const bool unmasked_without_extension =
++        (pname == WebGLDebugRendererInfo::kUnmaskedRendererWebgl ||
++         pname == WebGLDebugRendererInfo::kUnmaskedVendorWebgl) &&
++        !ExtensionEnabled(kWebGLDebugRendererInfoName);
++    if (const char* name = FuryFindName(kFuryGlStringParams, pname);
++        name && !unmasked_without_extension) {
++      if (std::optional<std::string> value = config->GetString(
++              std::string("gpu.webglParams.") + name)) {
++        return WebGLAny(script_state, String::FromUtf8(*value));
++      }
++    }
++    if (const char* name = FuryFindName(kFuryGlIntParams, pname)) {
++      if (std::optional<int> value = config->GetInt(
++              std::string("gpu.webglParams.") + name)) {
++        return WebGLAny(script_state, *value);
++      }
++    }
++    if (const char* name = FuryFindName(kFuryGlFloatArrayParams, pname)) {
++      if (std::optional<std::string> value = config->GetString(
++              std::string("gpu.webglParams.") + name)) {
++        // Parsed with std::string rather than WTF::String: the WTF numeric
++        // helpers move between releases (M150 has no String::ToFloat), and this
++        // input comes from our own config, not from the web.
++        Vector<float> values;
++        for (const auto& token : base::SplitStringPiece(
++                 *value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++          double parsed = 0;
++          if (base::StringToDouble(token, &parsed)) {
++            values.push_back(static_cast<float>(parsed));
++          }
++        }
++        if (!values.empty()) {
++          return WebGLAny(script_state, DOMFloat32Array::Create(values));
++        }
++      }
++    }
++    if (const char* name = FuryFindName(kFuryGlIntArrayParams, pname)) {
++      if (std::optional<std::string> value = config->GetString(
++              std::string("gpu.webglParams.") + name)) {
++        Vector<int32_t> values;
++        for (const auto& token : base::SplitStringPiece(
++                 *value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++          int parsed = 0;
++          if (base::StringToInt(token, &parsed)) {
++            values.push_back(parsed);
++          }
++        }
++        if (!values.empty()) {
++          return WebGLAny(script_state, DOMInt32Array::Create(values));
++        }
++      }
++    }
++  }
+   const int kIntZero = 0;
+   switch (pname) {
+     case GL_ACTIVE_TEXTURE:
+@@ -4526,6 +4715,55 @@ WebGLShaderPrecisionFormat* WebGLRenderingContextBase::getShaderPrecisionFormat(
+   GLint precision = 0;
+   ContextGL()->GetShaderPrecisionFormat(shader_type, precision_type, range,
+                                         &precision);
++
++  // Fury: a phone GPU answers here differently from a desktop one, and phone
++  // families from each other. Every desktop says 127,127,23 for all floats;
++  // a Mali-G76 says 15,15,10 for lowp and mediump, and an Adreno 722 says
++  // 127,127,23 for vertex lowp but 15,15,10 for fragment lowp. A phone persona
++  // answering with the host's was one call from being found out. Only what
++  // the persona states; the rest stays the host's.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    const char* shader =
++        shader_type == GL_VERTEX_SHADER ? "VERTEX_SHADER" : "FRAGMENT_SHADER";
++    const char* kind = nullptr;
++    switch (precision_type) {
++      case GL_LOW_FLOAT:
++        kind = "LOW_FLOAT";
++        break;
++      case GL_MEDIUM_FLOAT:
++        kind = "MEDIUM_FLOAT";
++        break;
++      case GL_HIGH_FLOAT:
++        kind = "HIGH_FLOAT";
++        break;
++      case GL_LOW_INT:
++        kind = "LOW_INT";
++        break;
++      case GL_MEDIUM_INT:
++        kind = "MEDIUM_INT";
++        break;
++      case GL_HIGH_INT:
++        kind = "HIGH_INT";
++        break;
++    }
++    if (std::optional<std::string> value =
++            config->GetString(std::string("gpu.shaderPrecision.") + shader +
++                              "." + kind)) {
++      std::vector<int> parts;
++      for (const auto& token : base::SplitStringPiece(
++               *value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++        int parsed = 0;
++        if (base::StringToInt(token, &parsed)) {
++          parts.push_back(parsed);
++        }
++      }
++      if (parts.size() == 3) {
++        range[0] = parts[0];
++        range[1] = parts[1];
++        precision = parts[2];
++      }
++    }
++  }
+   return MakeGarbageCollected<WebGLShaderPrecisionFormat>(range[0], range[1],
+                                                           precision);
+ }
+@@ -4549,6 +4787,29 @@ WebGLRenderingContextBase::getSupportedExtensions() {
+     }
+   }
+ 
++  // The extension list is driver- and GPU-specific, so it has to move with the
++  // rest of the persona. Replaced wholesale rather than filtered: a list that is
++  // a subset of the real driver's would still describe the real driver.
++  //
++  // In the order this context registers its extensions, which is the order
++  // every Chrome reports them in, not the persona's: personas are captured
++  // sorted, and a sorted list is no Chrome's (demo.fingerprint.com's
++  // tampering score fell from 0.49 to 0.28 on the order alone, 23.10.2026).
++  // A name this kind of context never registers is dropped with it --
++  // ANGLE_instanced_arrays is core in WebGL 2, and no WebGL 2 context lists it.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<std::vector<std::string>> extensions =
++            FuryExtensionList(*config, IsWebGL2())) {
++      result.clear();
++      for (ExtensionTracker* tracker : extensions_) {
++        if (std::find(extensions->begin(), extensions->end(),
++                      tracker->ExtensionName()) != extensions->end()) {
++          result.push_back(tracker->ExtensionName());
++        }
++      }
++    }
++  }
++
+   return result;
+ }
+ 
+@@ -5372,6 +5633,42 @@ void WebGLRenderingContextBase::ReadPixelsHelper(GLint x,
+     }
+     ContextGL()->ReadPixels(x, y, width, height, format, type, data);
+   }
++
++  // Perturb what comes back out, by the same rules as canvas: deterministic
++  // from absolute position, so two reads of the same framebuffer agree.
++  // Spoofing the renderer string while leaving the rendered pixels untouched
++  // would be pointless — the pixels are the more expensive fingerprint and the
++  // harder one to fake convincingly.
++  //
++  // Restricted to RGBA/UNSIGNED_BYTE, the format every fingerprinting script
++  // uses. Other formats have different byte layouts and are left alone rather
++  // than corrupted; a page that reads floats gets the truth, which is a gap
++  // worth recording instead of a crash worth debugging.
++  if (data && format == GL_RGBA && type == GL_UNSIGNED_BYTE && width > 0 &&
++      height > 0) {
++    uint64_t seed = 0;
++    if (fury::GetCanvasNoiseSeed(&seed)) {
++      const size_t row_bytes = static_cast<size_t>(width) * 4;
++      // SAFETY: the caller sized this buffer for width * height RGBA pixels,
++      // which ReadPixels has just filled.
++      base::span<uint8_t> read_back = UNSAFE_BUFFERS(base::span(
++          static_cast<uint8_t*>(data), row_bytes * static_cast<size_t>(height)));
++      // Only coverage at antialiased edges moves. A framebuffer cleared to one
++      // colour reads back as that colour on every GPU -- a solid 16x16 clear
++      // came back with 34 of its 256 pixels moved under the old noise -- and a
++      // smooth-shaded triangle is a ramp a page can check for smoothness:
++      // pixelscan said "Masking detected" with WebGL noise alone and nothing
++      // with 2D noise alone (Windows build box, 29.09.2026).
++      const std::vector<uint8_t> original(read_back.begin(), read_back.end());
++      // Coverage at antialiased edges only; flat areas and shaded interiors
++      // stay exact. See fury_flat.h. The region is its own world: neighbours
++      // outside what was read are not considered.
++      fury_flat::ApplyEdgeNoise(seed, base::span(original), read_back,
++                                row_bytes, x, y, width, height, x, y, width,
++                                height, x + width, y + height, /*bgra=*/false,
++                                /*opaque_blends=*/false);
++    }
++  }
+ }
+ 
+ void WebGLRenderingContextBase::RenderbufferStorageImpl(

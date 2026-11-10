@@ -92,6 +92,16 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   apps/api -- --engine fury`. Remaining P4: external checker pass (CreepJS/
   sannysoft-class surfaces, deliberately manual) on every engine bump, then
   the default-engine decision.
+- **P0 (found in P4 audit 2026-11-10): fury runtime silently drops
+  `proxyUrl`** — a profile with a proxy browses on the real IP. Fix =
+  auth-injecting loopback relay + refuse-loudly + `egress-via-proxy` claim.
+  See docs/parity.md §2. NEXT TASK.
+- P4c own build (OPEN, approved 2026-11-10): Fury's BSD patchset + build
+  chain vendored into `engine/` (provenance, license and the engine-bump
+  ritual in `engine/README.md`). First overnight build on the reference
+  machine, then Fury's per-patch verify harness + our claim suite on OUR
+  binary; only then publish our own tarball in the engine manifest.
+  Hardware pre-flight done: 207GB free NVMe, 32GB RAM, 6c/12t (est. 6–12h).
 
 ## P5 — Team mode
 

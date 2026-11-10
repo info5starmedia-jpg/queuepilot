@@ -1,0 +1,359 @@
+diff --git a/third_party/blink/renderer/core/css/media_values.cc b/third_party/blink/renderer/core/css/media_values.cc
+index 0d60244742..c7b239cac0 100644
+--- a/third_party/blink/renderer/core/css/media_values.cc
++++ b/third_party/blink/renderer/core/css/media_values.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/core/css/media_values.h"
+ 
++#include "components/fury/fury_config.h"
++
+ #include "third_party/blink/public/common/css/scripting.h"
+ #include "third_party/blink/renderer/core/css/css_resolution_units.h"
+ #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
+@@ -164,6 +166,18 @@ double MediaValues::CalculateDynamicViewportHeight(LocalFrame* frame) {
+ 
+ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
+   DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
++  // The CSS side of screen.width. Screen::GetRect() is patched, and these read
++  // ScreenInfo directly, so without this a page asking
++  // matchMedia('(device-width: 1920px)') was told the host's real screen while
++  // screen.width said the persona's. Measured on 0.2.2: JS 1920x1080 at 1x,
++  // CSS 1470 at 2dppx. Two answers to one question is the tell.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<int> width = config->GetInt("screen.width")) {
++      if (*width > 0) {
++        return *width;
++      }
++    }
++  }
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   int device_width = screen_info.rect.width();
+@@ -176,6 +190,13 @@ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
+ 
+ int MediaValues::CalculateDeviceHeight(LocalFrame* frame) {
+   DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<int> height = config->GetInt("screen.height")) {
++      if (*height > 0) {
++        return *height;
++      }
++    }
++  }
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   int device_height = screen_info.rect.height();
+@@ -193,6 +214,17 @@ bool MediaValues::CalculateStrictMode(LocalFrame* frame) {
+ }
+ 
+ float MediaValues::CalculateDevicePixelRatio(LocalFrame* frame) {
++  // `resolution` and `-webkit-device-pixel-ratio` — and srcset/image-set pick
++  // their candidate from this too, which is what a page on a screen of that
++  // density would load. Same value window.devicePixelRatio reports.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<double> dpr =
++            config->GetDouble("screen.devicePixelRatio")) {
++      if (*dpr > 0) {
++        return static_cast<float>(*dpr);
++      }
++    }
++  }
+   return frame->DevicePixelRatio();
+ }
+ 
+@@ -208,6 +240,16 @@ bool MediaValues::CalculateDeviceSupportsHDR(LocalFrame* frame) {
+ int MediaValues::CalculateColorBitsPerComponent(LocalFrame* frame) {
+   DCHECK(frame);
+   DCHECK(frame->GetPage());
++  // `(color: N)` is bits per component, screen.colorDepth is bits per pixel
++  // over three components: 24 -> 8, 30 -> 10. A Mac host reports 10 here, and
++  // a Windows persona claiming colorDepth 24 beside it contradicts itself.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<int> depth = config->GetInt("screen.colorDepth")) {
++      if (*depth > 0) {
++        return *depth / 3;
++      }
++    }
++  }
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   if (screen_info.is_monochrome) {
+diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
+index 0269587971..faf300e09b 100644
+--- a/third_party/blink/renderer/core/frame/local_dom_window.cc
++++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
+@@ -26,6 +26,8 @@
+ 
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ 
++#include "components/fury/fury_config.h"
++
+ #include <memory>
+ #include <optional>
+ #include <utility>
+@@ -1686,6 +1688,16 @@ int LocalDOMWindow::outerHeight() const {
+   }
+ 
+   ChromeClient& chrome_client = page->GetChromeClient();
++
++  // Patch 0020: outerHeight - innerHeight is the height of the browser chrome,
++  // and it differs between Windows and macOS (phase 0 measured 143 px on our
++  // clean build against 87 px on real Chrome), so it has to match the claimed
++  // OS. innerHeight stays the real viewport, which layout depends on, and only
++  // the chrome is described: the browser tells every frame of the page a
++  // window that is the page's viewport plus the persona's chrome
++  // (RenderWidgetHostImpl::FuryWindowScreenRect), and RootWindowRect below is
++  // that window.
++
+   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
+     return static_cast<int>(
+         lroundf(chrome_client.RootWindowRect(*frame).height() *
+@@ -1718,6 +1730,8 @@ int LocalDOMWindow::outerWidth() const {
+   }
+ 
+   ChromeClient& chrome_client = page->GetChromeClient();
++
++  // Patch 0020: the chrome is the browser's to describe, as in outerHeight.
+   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
+     return static_cast<int>(
+         lroundf(chrome_client.RootWindowRect(*frame).width() *
+@@ -1939,6 +1953,15 @@ double LocalDOMWindow::devicePixelRatio() const {
+     return 0.0;
+   }
+ 
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<double> dpr =
++            config->GetDouble("screen.devicePixelRatio")) {
++      if (*dpr > 0) {
++        return *dpr;
++      }
++    }
++  }
++
+   return GetFrame()->DevicePixelRatio();
+ }
+ 
+diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
+index ed5028943e..b439c025e8 100644
+--- a/third_party/blink/renderer/core/frame/screen.cc
++++ b/third_party/blink/renderer/core/frame/screen.cc
+@@ -28,6 +28,8 @@
+ 
+ #include "third_party/blink/renderer/core/frame/screen.h"
+ 
++#include "components/fury/fury_config.h"
++
+ #include "base/numerics/safe_conversions.h"
+ #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
+ #include "third_party/blink/renderer/core/dom/document.h"
+@@ -106,6 +108,16 @@ unsigned Screen::colorDepth() const {
+   // https://drafts.csswg.org/cssom-view/#dom-screen-colordepth
+   unsigned unknown_color_depth = 24u;
+ 
++  // pixelDepth() forwards to this, so both follow one value — no real browser
++  // reports the two differently.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<int> depth = config->GetInt("screen.colorDepth")) {
++      if (*depth > 0) {
++        return static_cast<unsigned>(*depth);
++      }
++    }
++  }
++
+   if (!DomWindow()) {
+     return unknown_color_depth;
+   }
+@@ -175,6 +187,39 @@ gfx::Rect Screen::GetRect(bool available) const {
+   LocalFrame* frame = DomWindow()->GetFrame();
+   const display::ScreenInfo& screen_info = GetScreenInfo();
+   gfx::Rect rect = available ? screen_info.available_rect : screen_info.rect;
++
++  // screen.width, height, availWidth, availHeight, availLeft and availTop all
++  // read through here, so one override keeps all six mutually consistent.
++  // Overriding them getter by getter would make it possible to ship an
++  // availWidth larger than width — a contradiction no real display produces.
++  //
++  // Fields are applied independently: pinning the resolution while leaving the
++  // available area to the real machine is a legitimate combination.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    const std::optional<int> width = config->GetInt(
++        available ? "screen.availWidth" : "screen.width");
++    const std::optional<int> height = config->GetInt(
++        available ? "screen.availHeight" : "screen.height");
++    if (width && *width > 0) {
++      rect.set_width(*width);
++    }
++    if (height && *height > 0) {
++      rect.set_height(*height);
++    }
++    if (available) {
++      if (std::optional<int> left = config->GetInt("screen.availLeft")) {
++        rect.set_x(*left);
++      }
++      if (std::optional<int> top = config->GetInt("screen.availTop")) {
++        rect.set_y(*top);
++      }
++    } else {
++      // The screen rect is always at the origin; only the available rect is
++      // inset. A stale offset here would contradict the reported size.
++      rect.set_origin(gfx::Point());
++    }
++    return rect;
++  }
+   if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk())
+     return gfx::ScaleToRoundedRect(rect, screen_info.device_scale_factor);
+   if (frame->GetDocument() && frame->GetDocument()->TextScaleMetaTagPresent()) {
+diff --git a/third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.cc b/third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.cc
+index c885f53917..41872d60fd 100644
+--- a/third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.cc
++++ b/third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope.h"
+ 
++#include "components/fury/fury_config.h"
++
+ #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+ #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+ #include "third_party/blink/renderer/bindings/core/v8/v8_no_argument_constructor.h"
+@@ -245,6 +247,18 @@ CSSPaintDefinition* PaintWorkletGlobalScope::FindDefinition(
+ }
+ 
+ double PaintWorkletGlobalScope::devicePixelRatio() const {
++  // Fury patch 0020: the persona's ratio, as window.devicePixelRatio says.
++  // Off the main thread this was the element's effective zoom, which carries
++  // the host screen's scale: a 2.8125 phone persona on a 2x Mac painted with
++  // devicePixelRatio 2 (measured 10.10.2026, by the width a paint() drew),
++  // and so would any persona whose ratio differs from the host's.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get()) {
++    if (std::optional<double> ratio =
++            config->GetDouble("screen.devicePixelRatio");
++        ratio && *ratio > 0) {
++      return *ratio;
++    }
++  }
+   return IsMainThread()
+              ? GetFrame()->DevicePixelRatio()
+              : PaintWorkletProxyClient::From(Clients())->DevicePixelRatio();
+diff --git a/content/browser/renderer_host/render_widget_host_impl.h b/content/browser/renderer_host/render_widget_host_impl.h
+index f6d6eb3d1a..1723de4a41 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.h
++++ b/content/browser/renderer_host/render_widget_host_impl.h
+@@ -739,6 +739,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
+   // Update the renderer's cache of the screen rect of the view and window.
+   void SendScreenRects();
+ 
++  // Fury patch 0020: the window rect a page is told, which is the top-level
++  // page's viewport plus the persona's chrome (see the definition).
++  gfx::Rect FuryWindowScreenRect();
++
+   // Indicates whether the renderer drives the RenderWidgetHosts's size or the
+   // other way around.
+   bool auto_resize_enabled() { return auto_resize_enabled_; }
+diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
+index 043cc52282..aac5e3a799 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.cc
++++ b/content/browser/renderer_host/render_widget_host_impl.cc
+@@ -45,6 +45,7 @@
+ #include "cc/input/browser_controls_offset_tag_modifications.h"
+ #include "cc/trees/browser_controls_params.h"
+ #include "cc/trees/render_frame_metadata.h"
++#include "components/fury/fury_config.h"
+ #include "components/input/dispatch_to_renderer_callback.h"
+ #include "components/input/features.h"
+ #include "components/input/input_constants.h"
+@@ -692,12 +693,12 @@ void RenderWidgetHostImpl::SendScreenRects() {
+   }
+ 
+   if (last_view_screen_rect_ == view_->GetViewBoundsWithoutTransform() &&
+-      last_window_screen_rect_ == view_->GetBoundsInScreenWithoutTransform()) {
++      last_window_screen_rect_ == FuryWindowScreenRect()) {
+     return;
+   }
+ 
+   last_view_screen_rect_ = view_->GetViewBoundsWithoutTransform();
+-  last_window_screen_rect_ = view_->GetBoundsInScreenWithoutTransform();
++  last_window_screen_rect_ = FuryWindowScreenRect();
+   blink_widget_->UpdateScreenRects(
+       last_view_screen_rect_, last_window_screen_rect_,
+       base::BindOnce(&RenderWidgetHostImpl::OnUpdateScreenRectsAck,
+@@ -705,6 +706,52 @@ void RenderWidgetHostImpl::SendScreenRects() {
+   waiting_for_screen_rects_ack_ = true;
+ }
+ 
++// Fury patch 0020: outerWidth and outerHeight are the window's size, and a
++// persona's window has the chrome of the persona's OS around it, not the
++// host's. So the rect every frame of a page is told is the top-level page's
++// viewport plus the persona's chrome (screen.chromeWidthDelta and
++// chromeHeightDelta), at the window's real position.
++//
++// It used to be the renderer adding the chrome to the frame's own innerWidth.
++// That holds in the page and nowhere else: an iframe got its own box plus the
++// chrome, 300x289 for a default 300x150 iframe beside 1004x748 in the page,
++// measured on the Windows build box on 24.10.2026, where real Chrome gives the
++// page's pair in every frame. Taking the page's viewport from the top-level
++// view here gives a cross-site iframe in another process the same pair, and
++// from its first script: the renderer's own copy of the page's viewport
++// reaches such a frame only after it has started running (measured 0x0 at
++// load). It also leaves outerWidth alone when the page is zoomed, as a real
++// window does, where innerWidth + chrome shrank with the zoom.
++//
++// A phone persona's window is its screen, which the renderer answers for
++// (patch 0131), and a widget that is not a frame (a <select> popup) keeps its
++// real rect.
++gfx::Rect RenderWidgetHostImpl::FuryWindowScreenRect() {
++  gfx::Rect window = view_->GetBoundsInScreenWithoutTransform();
++  const fury::FuryConfig* config = fury::FuryConfig::Get();
++  if (!config || config->GetBool("mobile.enabled").value_or(false) ||
++      (!owner_delegate_ && !view_->IsRenderWidgetHostViewChildFrame())) {
++    return window;
++  }
++  RenderWidgetHostViewBase* root = view_->GetRootView();
++  if (!root) {
++    return window;
++  }
++  gfx::Size viewport = root->GetViewBoundsWithoutTransform().size();
++  if (viewport.IsEmpty()) {
++    return window;
++  }
++  if (std::optional<int> delta = config->GetInt("screen.chromeWidthDelta");
++      delta && *delta >= 0) {
++    window.set_width(viewport.width() + *delta);
++  }
++  if (std::optional<int> delta = config->GetInt("screen.chromeHeightDelta");
++      delta && *delta >= 0) {
++    window.set_height(viewport.height() + *delta);
++  }
++  return window;
++}
++
+ void RenderWidgetHostImpl::SetFrameDepth(unsigned int depth) {
+   if (frame_depth_ == depth) {
+     return;
+@@ -3011,7 +3058,7 @@ void RenderWidgetHostImpl::OnUpdateScreenRectsAck() {
+   view_->SendInitialPropertiesIfNeeded();
+ 
+   if (view_->GetViewBoundsWithoutTransform() == last_view_screen_rect_ &&
+-      view_->GetBoundsInScreenWithoutTransform() == last_window_screen_rect_) {
++      FuryWindowScreenRect() == last_window_screen_rect_) {
+     return;
+   }
+ 
+diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
+index 2a4625eebc..4d2d44eba4 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.cc
++++ b/content/browser/renderer_host/render_frame_host_impl.cc
+@@ -10826,9 +10826,10 @@ void RenderFrameHostImpl::CreateNewWindow(
+                                 ->GetLocalRenderWidgetHost()) {
+         if (auto* shown_rwhv = shown_rwh->GetView()) {
+           reply->widget_screen_rect.emplace(shown_rwhv->GetViewBounds());
++          // Fury patch 0020: the window rect the opened page is told.
+           reply->window_screen_rect.emplace(
+-              static_cast<RenderWidgetHostViewBase*>(shown_rwhv)
+-                  ->GetBoundsInScreenWithoutTransform());
++              static_cast<RenderWidgetHostImpl*>(shown_rwh)
++                  ->FuryWindowScreenRect());
+           reply->visual_properties =
+               static_cast<RenderWidgetHostImpl*>(shown_rwh)
+                   ->GetVisualProperties();
