@@ -52,4 +52,14 @@ export function registerRunRoutes(
     const { id } = req.params as { id: string };
     return { drift: lifecycle.identityDrift(id) };
   });
+
+  /**
+   * Attestation: what the live engine ACTUALLY materialized vs the launch
+   * snapshot. verdict "match" | "mismatch" | "unattested" (no identity of
+   * record); 501 ATTESTATION_UNSUPPORTED when the runtime can't probe.
+   */
+  app.get("/profiles/:id/attest", async (req) => {
+    const { id } = req.params as { id: string };
+    return lifecycle.attest(id);
+  });
 }

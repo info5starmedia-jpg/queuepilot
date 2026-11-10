@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { FingerprintIdentity, ObservedFingerprint } from "@queuepilot/contracts";
 import type {
   BrowserRuntime,
   BrowserSession,
@@ -35,6 +36,7 @@ export class FakeBrowserRuntime implements BrowserRuntime {
       ++this.nextPid,
       ++this.nextPort,
       request.profile.id,
+      request.identity,
     );
     this.sessions.push(session);
     return session;
@@ -59,12 +61,39 @@ export class FakeSession extends EventEmitter implements BrowserSession {
     readonly pid: number,
     readonly debugPort: number,
     readonly profileId: string,
+    private readonly identity: FingerprintIdentity | null = null,
   ) {
     super();
     this.wsEndpoint = `ws://127.0.0.1:${debugPort}/devtools/browser/fake-${pid}`;
     this.exited = new Promise((resolve) => {
       this.resolveExit = resolve;
     });
+  }
+
+  /**
+   * Test hook: what the next attestation probe "observes". Defaults to the
+   * launch identity materialized faithfully (verdict: match); tests set this
+   * to force mismatch, or null to simulate an engine without probe support.
+   */
+  observedFingerprint: ObservedFingerprint | null = null;
+
+  async captureFingerprint(): Promise<ObservedFingerprint> {
+    if (this.observedFingerprint) return this.observedFingerprint;
+    const id = this.identity;
+    return {
+      userAgent: `FakeEngine/1.0 (${id?.platform ?? "linux"})`,
+      platform: id?.platform ?? "linux",
+      languages: [id?.locale ?? "en-US"],
+      hardwareConcurrency: id?.hardwareConcurrency ?? 8,
+      deviceMemory: id?.deviceMemoryGb ?? 8,
+      screenWidth: id?.screenWidth ?? 1920,
+      screenHeight: id?.screenHeight ?? 1080,
+      colorDepth: 24,
+      timezone: id?.timezone ?? "UTC",
+      locale: id?.locale ?? "en-US",
+      webglVendor: "FakeVendor",
+      webglRenderer: "FakeRenderer",
+    };
   }
 
   async stop(): Promise<void> {

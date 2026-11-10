@@ -12,6 +12,7 @@ import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecyc
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
 import { EngineHealthService } from "./application/engine/engine-health.service.js";
 import { runEngineInstall } from "./cli/engine-install.js";
+import { runScript } from "./cli/script-runner.js";
 import { GoogleAuthService } from "./application/google/google-auth.service.js";
 import { SheetsClient } from "./application/google/sheets-client.js";
 import {
@@ -40,6 +41,9 @@ async function dispatchCli(argv: string[]): Promise<number | null> {
     return runEngineInstall(argv.slice(2), {
       enginesDir: `${config.dataDir}/engines`,
     });
+  }
+  if (argv[0] === "script") {
+    return runScript(argv.slice(1));
   }
   return null;
 }

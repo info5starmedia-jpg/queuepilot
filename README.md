@@ -128,6 +128,39 @@ npm start -- engine install --manifest engines.json --yes
 # without --yes: prints the entry and refuses — no bytes move
 ```
 
+### Fingerprint attestation
+
+The launch snapshot records what we ASKED the engine for; attestation probes a
+live page over CDP and reports what the engine ACTUALLY materialized:
+
+```bash
+curl http://127.0.0.1:50325/profiles/<id>/attest
+# -> {"verdict":"match","observed":{...},"differences":[],...}
+# verdict: "match" | "mismatch" (per-field differences listed)
+#        | "unattested" (run has no identity of record)
+```
+
+### Run a script against a profile
+
+User automation as a JS module — the runner borrows the live session (starts
+the browser if needed, never stops it):
+
+```js
+// my-script.mjs
+export default async ({ api, wsEndpoint }) => {
+  // puppeteer.connect({ browserWSEndpoint: wsEndpoint })
+  // playwright: chromium.connectOverCDP(wsEndpoint)
+  return { title: "done" }; // printed to stdout
+};
+```
+
+```bash
+npm start -- script my-script.mjs --profile <id>
+```
+
+The typed SDK (`@queuepilot/client`, a zero-dependency fetch wrapper over the
+whole API) is what `ctx.api` hands to scripts — same types as the contracts.
+
 ### Tabs and session partitions
 
 Tabs live inside a run. Every tab gets its own isolated in-memory session

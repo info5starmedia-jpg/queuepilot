@@ -1,5 +1,9 @@
 import { proxyUrl } from "@queuepilot/contracts";
-import type { FingerprintIdentity, Profile } from "@queuepilot/contracts";
+import type {
+  FingerprintIdentity,
+  ObservedFingerprint,
+  Profile,
+} from "@queuepilot/contracts";
 
 /**
  * The engine port. The API never talks to a browser engine directly — only
@@ -31,6 +35,13 @@ export interface BrowserSession {
    */
   openTab?(request: OpenTabRequest): Promise<{ engineTabId: string }>;
   closeTab?(engineTabId: string): Promise<void>;
+  /**
+   * Optional fingerprint attestation. Present = the runtime can probe a live
+   * page (over CDP or equivalent) and report what the engine ACTUALLY
+   * materialized. Absent = the API answers ATTESTATION_UNSUPPORTED rather
+   * than returning an unverified "match".
+   */
+  captureFingerprint?(): Promise<ObservedFingerprint>;
 }
 
 export interface OpenTabRequest {

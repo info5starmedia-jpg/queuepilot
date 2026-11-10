@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { DomainError, ErrorCodes } from "@queuepilot/contracts";
+import { DomainError, ErrorCodes, type ObservedFingerprint } from "@queuepilot/contracts";
 import type {
   BrowserRuntime,
   BrowserSession,
@@ -9,6 +9,10 @@ import type {
   OpenTabRequest,
 } from "./browser-runtime.js";
 import { CdpTabController } from "./cdp/cdp-tab-controller.js";
+import {
+  attestationUnsupported,
+  captureFingerprintViaCdp,
+} from "./cdp/cdp-attestation.js";
 
 /**
  * Camoufox engine adapter.
@@ -131,6 +135,29 @@ export class CamoufoxSession implements BrowserSession {
 
   async closeTab(engineTabId: string): Promise<void> {
     return this.tabs.closeTab(engineTabId);
+  }
+
+  /**
+   * Attestation: probe a fresh about:blank target over CDP and report what
+   * the engine actually materialized. Uses the discovered browser-level
+   * endpoint (same resolver as tab routing); failures become
+   * ATTESTATION_UNSUPPORTED, never a fabricated "match".
+   */
+  async captureFingerprint(): Promise<ObservedFingerprint> {
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${this.debugPort}/json/version`,
+      );
+      const info = res.ok
+        ? ((await res.json()) as { webSocketDebuggerUrl?: string })
+        : {};
+      return await captureFingerprintViaCdp(
+        info.webSocketDebuggerUrl ?? this.wsEndpoint,
+      );
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      throw attestationUnsupported("camoufox", err);
+    }
   }
 
   async stop(): Promise<void> {

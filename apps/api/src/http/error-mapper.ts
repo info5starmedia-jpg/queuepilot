@@ -33,7 +33,8 @@ export function toHttpError(err: unknown): {
           ? 409
           : err.code === ErrorCodes.ENGINE_UNAVAILABLE
             ? 503
-            : err.code === ErrorCodes.TABS_UNSUPPORTED
+            : err.code === ErrorCodes.TABS_UNSUPPORTED ||
+                err.code === ErrorCodes.ATTESTATION_UNSUPPORTED
               ? 501
               : err.code === ErrorCodes.GOOGLE_NOT_CONFIGURED ||
                   err.code === ErrorCodes.GOOGLE_NOT_CONNECTED

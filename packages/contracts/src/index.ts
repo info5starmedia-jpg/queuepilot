@@ -6,6 +6,7 @@ export * from "./engine.js";
 export * from "./adspower.js";
 export * from "./providers.js";
 export * from "./tabs.js";
+export * from "./attestation.js";
 
 /**
  * Domain error codes shared across the API, the UI and automation clients.
@@ -25,6 +26,7 @@ export const ErrorCodes = {
   ENGINE_CHECKSUM_MISMATCH: "ENGINE_CHECKSUM_MISMATCH",
   ENGINE_MANIFEST_INVALID: "ENGINE_MANIFEST_INVALID",
   TABS_UNSUPPORTED: "TABS_UNSUPPORTED",
+  ATTESTATION_UNSUPPORTED: "ATTESTATION_UNSUPPORTED",
   TAB_NOT_FOUND: "TAB_NOT_FOUND",
   GOOGLE_NOT_CONFIGURED: "GOOGLE_NOT_CONFIGURED",
   GOOGLE_NOT_CONNECTED: "GOOGLE_NOT_CONNECTED",

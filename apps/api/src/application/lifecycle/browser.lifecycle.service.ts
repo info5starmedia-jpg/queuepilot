@@ -5,6 +5,7 @@ import {
   DomainError,
   ErrorCodes,
   TempProxyInputSchema,
+  type AttestationResult,
   type BrowserRun,
   type BrowserTab,
   type IdentityDrift,
@@ -15,6 +16,7 @@ import {
   type TempProxyInput,
 } from "@queuepilot/contracts";
 import { isProcessAlive } from "../../infrastructure/process-inventory.js";
+import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import type {
   ProfileRepository,
   FingerprintIdentityRepository,
@@ -356,6 +358,43 @@ export class BrowserLifecycleService {
       identityId: profile.identityId,
       proxyId: profile.proxyId,
     });
+  }
+
+  /**
+   * Fingerprint attestation: probe the live engine for what it ACTUALLY
+   * materialized and compare against the run's launch-snapshot identity.
+   * Verdict "match" is only ever returned when observed values agree —
+   * a runtime without probe support answers ATTESTATION_UNSUPPORTED instead.
+   */
+  async attest(profileId: string): Promise<AttestationResult> {
+    const profile = this.requireProfile(profileId);
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) {
+      throw new DomainError(
+        ErrorCodes.PROFILE_NOT_RUNNING,
+        `profile ${profileId} has no active browser run`,
+      );
+    }
+    const session = this.sessions.get(profileId);
+    if (!session?.captureFingerprint) {
+      throw new DomainError(
+        ErrorCodes.ATTESTATION_UNSUPPORTED,
+        session
+          ? `runtime "${this.runtime.kind}" does not implement fingerprint capture`
+          : `run ${run.id} was adopted after an API restart — its engine session is not attached; stop and relaunch to attest`,
+      );
+    }
+    const observed = await session.captureFingerprint();
+    const identity = this.snapshots?.forRun(run.id)?.identity ?? null;
+    const { verdict, differences } = compareFingerprint(identity, observed);
+    return {
+      profileId: profile.id,
+      runId: run.id,
+      verdict,
+      observed,
+      differences,
+      capturedAt: now(),
+    };
   }
 
   /**

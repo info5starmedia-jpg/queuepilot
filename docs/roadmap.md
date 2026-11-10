@@ -12,6 +12,10 @@
   launch + clean stop). ✅ v0.4.0
 - CLI `queuepilot engine install --manifest <file> --yes` wrapping the
   installer; without `--yes` it prints the entry and refuses. ✅ v0.4.0
+- Fingerprint attestation: `GET /profiles/:id/attest` probes a live page over
+  CDP (throwaway about:blank target, flatten-attach, Runtime.evaluate) and
+  compares what the engine ACTUALLY materialized against the launch snapshot —
+  verdict match/mismatch/unattested, never a fabricated match. ✅ v0.9.0
 
 ## P1.5 — Jancy-parity core (DONE — providers v0.3.0, temp proxies v0.4.0, tabs v0.5.0/v0.6.0, sheets v0.7.0)
 
@@ -59,8 +63,15 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 
 ## P3 — Automation depth
 
-- Playwright/Puppeteer connection helpers returned by start (library mode).
-- Script runner (user JS/Python against a profile), warmup recorder.
+- Playwright/Puppeteer connection helpers: `@queuepilot/client` typed
+  zero-dependency SDK; `connect()` starts a profile and returns
+  `{ wsEndpoint, debugPort }` ready for `puppeteer.connect` /
+  `chromium.connectOverCDP`; start also returns the endpoint for library
+  mode. ✅ v0.9.0
+- Script runner: `queuepilot script <file.mjs> --profile <id>` runs a user
+  module against a profile — borrows the live session (starts if needed,
+  never stops), typed client + CDP endpoint handed to the script. ✅ v0.9.0
+- Warmup recorder. (open)
 
 ## P4 — Own engine track
 

@@ -70,6 +70,7 @@ export class CdpConnection {
     method: string,
     params: Record<string, unknown> = {},
     timeoutMs = 15_000,
+    sessionId?: string,
   ): Promise<T> {
     if (this.closed)
       return Promise.reject(new Error("CDP connection is closed"));
@@ -84,7 +85,11 @@ export class CdpConnection {
         reject,
         timer,
       });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      this.ws.send(
+        JSON.stringify(
+          sessionId ? { id, method, params, sessionId } : { id, method, params },
+        ),
+      );
     });
   }
 
