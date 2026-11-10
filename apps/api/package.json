@@ -1,6 +1,6 @@
 {
   "name": "@queuepilot/api",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@queuepilot/contracts": "*",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },

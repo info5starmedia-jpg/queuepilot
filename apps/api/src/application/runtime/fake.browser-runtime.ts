@@ -1,5 +1,9 @@
 import { EventEmitter } from "node:events";
-import type { BrowserRuntime, BrowserSession, LaunchRequest } from "./browser-runtime.js";
+import type {
+  BrowserRuntime,
+  BrowserSession,
+  LaunchRequest,
+} from "./browser-runtime.js";
 
 /**
  * Deterministic in-memory engine for tests, CI and demos. It models the
@@ -26,16 +30,28 @@ export class FakeBrowserRuntime implements BrowserRuntime {
       this.failNextLaunch = null;
       throw new Error(message);
     }
-    const session = new FakeSession(++this.nextPid, ++this.nextPort, request.profile.id);
+    const session = new FakeSession(
+      ++this.nextPid,
+      ++this.nextPort,
+      request.profile.id,
+    );
     this.sessions.push(session);
     return session;
+  }
+
+  /** The fake runtime ships no binary — nothing to probe. */
+  engineBinaryPath(): string | null {
+    return null;
   }
 }
 
 export class FakeSession extends EventEmitter implements BrowserSession {
   readonly wsEndpoint: string;
   readonly exited: Promise<{ code: number | null; signal: string | null }>;
-  private resolveExit!: (v: { code: number | null; signal: string | null }) => void;
+  private resolveExit!: (v: {
+    code: number | null;
+    signal: string | null;
+  }) => void;
   stopped = false;
 
   constructor(

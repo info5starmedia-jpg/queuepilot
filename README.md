@@ -7,7 +7,7 @@ cookie jar — and launches real fingerprint-resistant browsers for them. It is 
 around the two things that actually break multi-account tooling in production:
 
 1. **Deterministic lifecycle.** A profile can never launch twice (guarded in-process
-   *and* by a unique constraint in SQLite), a crash never corrupts profile state, and
+   _and_ by a unique constraint in SQLite), a crash never corrupts profile state, and
    an API restart reconciles the database against real OS processes before serving
    traffic.
 2. **A typed, documented API.** Zod contracts shared between server and clients, an
@@ -16,8 +16,9 @@ around the two things that actually break multi-account tooling in production:
 
 ## Status
 
-`v0.3.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
-providers. What works today, covered by 61 tests:
+`v0.4.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
+providers + temporary proxies + engine pre-flight. What works today, covered by
+78 tests:
 
 - Profiles, groups, tags, notes — full CRUD, fingerprint identities (immutable,
   seed-deterministic, hardware-coherent) generated at creation and regenerable.
@@ -26,10 +27,19 @@ providers. What works today, covered by 61 tests:
   with, and `GET /profiles/:id/drift` reports exactly what "applies at next
   start". The identity of record is the launch snapshot, not the profile row.
 - **Launch-identity snapshots** — every run durably records the exact
-  identity + proxy + engine it launched with (atomic JSON write per run).
+  identity + proxy + engine it launched with (atomic JSON write per run),
+  including proxy provenance (`profile` / `temporary` / `none`).
+- **Temporary proxies** — pass a one-shot proxy at launch
+  (`POST /profiles/:id/start` with a `tempProxy` body). It applies to that run
+  only, is never persisted, and the profile's own proxy applies again at the
+  next start; drift tells you while it's live.
 - **Engine installer** — consent-gated (no consent, no download), SHA-256
   pinned, atomic install, idempotent; a checksum mismatch is a hard refusal,
-  never a warning.
+  never a warning. CLI: `npm start -- engine install --manifest m.json --yes`.
+- **Engine pre-flight** — `GET /engine/health` reports the active runtime,
+  whether the engine binary is actually on disk, and every verified install
+  receipt; `POST /engine/self-test` launches and cleanly stops a throwaway
+  browser to prove the full spawn path works.
 - Proxies — full CRUD, TCP liveness test, credentials write-only over the API.
 - Browser lifecycle — start/stop/active/history, double-launch guard,
   crash detection, idempotent stop, boot-time recovery, lifecycle events (SSE).
@@ -76,6 +86,32 @@ curl -X POST http://127.0.0.1:50325/api/v1/browser/stop \
   -H 'content-type: application/json' -d '{"profile_id":"<id>"}'
 ```
 
+### Launch with a temporary proxy
+
+A one-shot proxy for a single run — never persisted, dies with the run:
+
+```bash
+curl -X POST http://127.0.0.1:50325/profiles/<id>/start \
+  -H 'content-type: application/json' \
+  -d '{"tempProxy":{"type":"socks5","host":"10.0.0.9","port":1080,"username":"u","password":"p"}}'
+# GET /profiles/<id>/drift will say: running on a temporary proxy —
+# the profile's proxy applies at next start
+```
+
+### Engine pre-flight
+
+```bash
+curl http://127.0.0.1:50325/engine/health        # runtime, binary presence, install receipts
+curl -X POST http://127.0.0.1:50325/engine/self-test   # launch + stop a throwaway browser
+```
+
+### Install an engine from a manifest
+
+```bash
+npm start -- engine install --manifest engines.json --yes
+# without --yes: prints the entry and refuses — no bytes move
+```
+
 ### Import a profile CSV
 
 ```bash
@@ -105,13 +141,13 @@ QueuePilot never downloads code silently: install Camoufox yourself and either s
 
 All config is environment variables:
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `SPECTRA_PORT` | `50325` | API port |
-| `SPECTRA_HOST` | `127.0.0.1` | Bind address (loopback by default, on purpose) |
-| `SPECTRA_DATA_DIR` | `~/.queuepilot` | SQLite + profile data |
-| `SPECTRA_RUNTIME` | `camoufox` | `camoufox` or `fake` |
-| `SPECTRA_API_TOKEN` | unset | If set, every route except `/health` needs `Authorization: Bearer <token>` |
+| Variable            | Default         | Purpose                                                                    |
+| ------------------- | --------------- | -------------------------------------------------------------------------- |
+| `SPECTRA_PORT`      | `50325`         | API port                                                                   |
+| `SPECTRA_HOST`      | `127.0.0.1`     | Bind address (loopback by default, on purpose)                             |
+| `SPECTRA_DATA_DIR`  | `~/.queuepilot` | SQLite + profile data                                                      |
+| `SPECTRA_RUNTIME`   | `camoufox`      | `camoufox` or `fake`                                                       |
+| `SPECTRA_API_TOKEN` | unset           | If set, every route except `/health` needs `Authorization: Bearer <token>` |
 
 ## Development
 
@@ -121,7 +157,7 @@ npm run typecheck # strict TS everywhere
 ```
 
 Design documents: [docs/architecture.md](docs/architecture.md) and
-[docs/adr/](docs/adr/) record the decisions and *why* they were made.
+[docs/adr/](docs/adr/) record the decisions and _why_ they were made.
 
 ## License and attribution
 

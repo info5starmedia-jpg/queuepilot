@@ -31,7 +31,11 @@ export class LaunchIdentityService {
     runId: string;
     profile: Profile;
     identity: FingerprintIdentity | null;
+    /** Stored proxy used for the launch, or null when none / a temp proxy. */
+    proxyId: string | null;
     proxyUrl: string | null;
+    /** Where the launched proxy came from; "temporary" dies with the run. */
+    proxySource: "profile" | "temporary" | "none";
     engineKind: string;
   }): LaunchIdentitySnapshot {
     const snapshot: LaunchIdentitySnapshot = {
@@ -41,8 +45,9 @@ export class LaunchIdentityService {
       engineKind: args.engineKind,
       identityId: args.identity?.id ?? null,
       identity: args.identity,
-      proxyId: args.profile.proxyId ?? null,
+      proxyId: args.proxyId,
       proxyUrl: args.proxyUrl,
+      proxySource: args.proxySource,
       capturedAt: new Date().toISOString(),
     };
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);
@@ -56,14 +61,19 @@ export class LaunchIdentityService {
   forRun(runId: string): LaunchIdentitySnapshot | null {
     const file = this.fileFor(runId);
     if (!fs.existsSync(file)) return null;
-    return LaunchIdentitySnapshotSchema.parse(JSON.parse(fs.readFileSync(file, "utf8")));
+    return LaunchIdentitySnapshotSchema.parse(
+      JSON.parse(fs.readFileSync(file, "utf8")),
+    );
   }
 
   /**
    * Drift of a run's snapshot against the profile's current pointers. Null
    * when the run has no snapshot (e.g. pre-snapshot history rows).
    */
-  drift(runId: string, current: { identityId: string | null; proxyId: string | null }): IdentityDrift | null {
+  drift(
+    runId: string,
+    current: { identityId: string | null; proxyId: string | null },
+  ): IdentityDrift | null {
     const snapshot = this.forRun(runId);
     if (!snapshot) return null;
     return computeIdentityDrift(snapshot, current);

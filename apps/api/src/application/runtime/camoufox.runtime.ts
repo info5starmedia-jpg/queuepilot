@@ -2,7 +2,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
-import type { BrowserRuntime, BrowserSession, LaunchRequest } from "./browser-runtime.js";
+import type {
+  BrowserRuntime,
+  BrowserSession,
+  LaunchRequest,
+} from "./browser-runtime.js";
 
 /**
  * Camoufox engine adapter.
@@ -23,10 +27,19 @@ import type { BrowserRuntime, BrowserSession, LaunchRequest } from "./browser-ru
 export class CamoufoxRuntime implements BrowserRuntime {
   readonly kind = "camoufox";
 
-  constructor(private readonly enginePathResolver: (dataDir: string) => string) {}
+  /**
+   * The binary path is resolved ONCE at construction (env override or
+   * <dataDir>/engines/camoufox/) — it must not depend on the per-launch
+   * request, because profileDataDir is per-profile and the engine is shared.
+   */
+  constructor(private readonly binaryPath: string) {}
+
+  engineBinaryPath(): string {
+    return this.binaryPath;
+  }
 
   async launch(request: LaunchRequest): Promise<BrowserSession> {
-    const binary = this.enginePathResolver(request.profileDataDir);
+    const binary = this.binaryPath;
     if (!fs.existsSync(binary)) {
       throw new DomainError(
         ErrorCodes.ENGINE_UNAVAILABLE,
@@ -131,7 +144,8 @@ async function findFreePort(): Promise<number> {
 
 /** Default binary lookup: env override, then <dataDir>/engines/camoufox/. */
 export function defaultCamoufoxPath(dataDir: string): string {
-  if (process.env.SPECTRA_CAMOUFOX_PATH) return process.env.SPECTRA_CAMOUFOX_PATH;
+  if (process.env.SPECTRA_CAMOUFOX_PATH)
+    return process.env.SPECTRA_CAMOUFOX_PATH;
   const name = process.platform === "win32" ? "camoufox.exe" : "camoufox";
   return path.join(dataDir, "engines", "camoufox", name);
 }

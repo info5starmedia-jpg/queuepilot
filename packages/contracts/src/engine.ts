@@ -40,3 +40,35 @@ export const InstalledEngineSchema = z.object({
   dir: z.string().min(1),
 });
 export type InstalledEngine = z.infer<typeof InstalledEngineSchema>;
+
+/**
+ * Engine health report (GET /engine/health). Answers the two questions an
+ * operator asks before burning accounts: which runtime is serving launches,
+ * and is the real engine binary actually where the config says it is.
+ */
+export const EngineHealthSchema = z.object({
+  /** Active runtime kind: "camoufox", "fake", ... */
+  runtime: z.string().min(1),
+  /** Path the runtime will try to execute, or null when the runtime needs no binary (fake). */
+  binaryPath: z.string().nullable(),
+  /** True when no binary is required, or the required binary exists on disk. */
+  binaryPresent: z.boolean(),
+  /** Verified install receipts found under <dataDir>/engines/. */
+  installs: z.array(InstalledEngineSchema),
+});
+export type EngineHealth = z.infer<typeof EngineHealthSchema>;
+
+/**
+ * Launch self-test result (POST /engine/self-test): the runtime launches a
+ * throwaway browser with a synthetic profile and immediately stops it. Proves
+ * the full spawn path (binary, ports, process reaping) works, end to end.
+ */
+export const EngineSelfTestResultSchema = z.object({
+  ok: z.boolean(),
+  runtime: z.string().min(1),
+  /** Wall-clock time for launch + clean stop. */
+  latencyMs: z.number().int().nonnegative().nullable(),
+  /** Named failure when ok=false (e.g. ENGINE_UNAVAILABLE message). */
+  error: z.string().nullable(),
+});
+export type EngineSelfTestResult = z.infer<typeof EngineSelfTestResultSchema>;

@@ -50,8 +50,26 @@ export const UpdateProxyInputSchema = z
     username: z.string().max(200).nullable().optional(),
     password: z.string().max(200).nullable().optional(),
   })
-  .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" });
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "at least one field is required",
+  });
 export type UpdateProxyInput = z.input<typeof UpdateProxyInputSchema>;
+
+/**
+ * Temporary proxy: a one-shot proxy passed at launch time that applies to a
+ * single browser run and dies with it. It is never written to the proxies
+ * table and never mutates the profile's attached proxy — the profile's own
+ * proxy applies again at the next start. Credentials stay in-process and in
+ * the launch snapshot (the run's identity of record), nowhere else.
+ */
+export const TempProxyInputSchema = z.object({
+  type: ProxyTypeSchema,
+  host: HostSchema,
+  port: z.number().int().min(1).max(65535),
+  username: z.string().max(200).nullable().optional(),
+  password: z.string().max(200).nullable().optional(),
+});
+export type TempProxyInput = z.input<typeof TempProxyInputSchema>;
 
 /** Build the URL an engine's --proxy-server flag expects. Never logged. */
 export function proxyUrl(p: {

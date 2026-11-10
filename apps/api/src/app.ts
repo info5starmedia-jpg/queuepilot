@@ -3,6 +3,7 @@ import type { AppConfig } from "./config/config.js";
 import type { ProfileService } from "./application/profiles/profile.service.js";
 import type { ProxyService } from "./application/proxies/proxy.service.js";
 import type { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
+import type { EngineHealthService } from "./application/engine/engine-health.service.js";
 import type {
   ProfileProviderService,
   ProxyProviderService,
@@ -14,6 +15,7 @@ import { registerRunRoutes } from "./http/runs.routes.js";
 import { registerAdsPowerRoutes } from "./http/adspower.routes.js";
 import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
+import { registerEngineRoutes } from "./http/engine.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -22,6 +24,7 @@ export interface AppDeps {
   lifecycle: BrowserLifecycleService;
   profileProviders: ProfileProviderService;
   proxyProviders: ProxyProviderService;
+  engineHealth: EngineHealthService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -32,7 +35,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     app.addHook("onRequest", async (req, reply) => {
       if (req.url === "/health") return;
       if (req.headers.authorization !== `Bearer ${token}`) {
-        return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "invalid token" } });
+        return reply
+          .code(401)
+          .send({ error: { code: "UNAUTHORIZED", message: "invalid token" } });
       }
     });
   }
@@ -50,6 +55,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
+  registerEngineRoutes(app, deps.engineHealth);
 
   return app;
 }

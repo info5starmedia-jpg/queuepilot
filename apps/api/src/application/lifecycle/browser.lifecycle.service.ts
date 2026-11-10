@@ -4,19 +4,37 @@ import path from "node:path";
 import {
   DomainError,
   ErrorCodes,
+  TempProxyInputSchema,
   type BrowserRun,
   type IdentityDrift,
   type LifecycleEvent,
   type Profile,
+  type TempProxyInput,
 } from "@queuepilot/contracts";
 import { isProcessAlive } from "../../infrastructure/process-inventory.js";
-import type { ProfileRepository, FingerprintIdentityRepository } from "../profiles/profile.repository.js";
+import type {
+  ProfileRepository,
+  FingerprintIdentityRepository,
+} from "../profiles/profile.repository.js";
 import type { ProxyService } from "../proxies/proxy.service.js";
 import type { BrowserRunRepository } from "./browser-run.repository.js";
 import { ProfileOperationMutex } from "./profile-operation.mutex.js";
 import { proxyUrl } from "@queuepilot/contracts";
-import type { BrowserRuntime, BrowserSession } from "../runtime/browser-runtime.js";
+import type {
+  BrowserRuntime,
+  BrowserSession,
+} from "../runtime/browser-runtime.js";
 import type { LaunchIdentityService } from "./launch-identity.service.js";
+
+export interface StartOptions {
+  /**
+   * One-shot proxy for this run only. Overrides the profile's attached proxy
+   * for the launch; never persisted — the profile row is untouched and its own
+   * proxy applies again at the next start. Validated against
+   * TempProxyInputSchema before anything is written.
+   */
+  tempProxy?: TempProxyInput | null;
+}
 
 /**
  * BrowserLifecycleService — the deterministic core of QueuePilot.
@@ -50,7 +68,7 @@ export class BrowserLifecycleService {
     this.events.setMaxListeners(0);
   }
 
-  async start(profileId: string): Promise<BrowserRun> {
+  async start(profileId: string, opts: StartOptions = {}): Promise<BrowserRun> {
     return this.mutex.runExclusive(profileId, async () => {
       const profile = this.requireProfile(profileId);
       if (this.runs.occupyingForProfile(profileId)) {
@@ -60,8 +78,36 @@ export class BrowserLifecycleService {
         );
       }
 
-      const identity = profile.identityId ? this.identities.get(profile.identityId) : null;
-      const proxy = profile.proxyId ? this.proxyService.getStored(profile.proxyId) : null;
+      const identity = profile.identityId
+        ? this.identities.get(profile.identityId)
+        : null;
+      // A temp proxy wins over the profile's attached proxy for THIS launch
+      // only. Nothing is persisted: the profile row keeps its proxyId, and the
+      // launch snapshot records proxySource so drift can explain itself.
+      const tempProxy = opts.tempProxy
+        ? TempProxyInputSchema.parse(opts.tempProxy)
+        : null;
+      const attached = tempProxy
+        ? null
+        : profile.proxyId
+          ? this.proxyService.getStored(profile.proxyId)
+          : null;
+      const launchProxyUrl = tempProxy
+        ? proxyUrl({
+            type: tempProxy.type,
+            host: tempProxy.host,
+            port: tempProxy.port,
+            username: tempProxy.username ?? null,
+            password: tempProxy.password ?? null,
+          })
+        : attached
+          ? proxyUrl(attached)
+          : null;
+      const proxySource = tempProxy
+        ? ("temporary" as const)
+        : attached
+          ? ("profile" as const)
+          : ("none" as const);
 
       const run: BrowserRun = {
         id: randomUUID(),
@@ -83,7 +129,7 @@ export class BrowserLifecycleService {
         session = await this.runtime.launch({
           profile,
           identity,
-          proxyUrl: proxy ? proxyUrl(proxy) : null,
+          proxyUrl: launchProxyUrl,
           profileDataDir: path.join(this.dataDir, "profiles", profile.id),
         });
       } catch (err) {
@@ -111,13 +157,21 @@ export class BrowserLifecycleService {
         runId: live.id,
         profile,
         identity,
-        proxyUrl: proxy ? proxyUrl(proxy) : null,
+        proxyId: tempProxy ? null : (profile.proxyId ?? null),
+        proxyUrl: launchProxyUrl,
+        proxySource,
         engineKind: this.runtime.kind,
       });
       void session.exited.then(({ code, signal }) =>
         this.onEngineExit(profileId, live.id, code, signal),
       );
-      this.emit({ type: "run.started", profileId, runId: live.id, at: now(), detail: this.runtime.kind });
+      this.emit({
+        type: "run.started",
+        profileId,
+        runId: live.id,
+        at: now(),
+        detail: this.runtime.kind,
+      });
       return live;
     });
   }
@@ -145,7 +199,13 @@ export class BrowserLifecycleService {
       } catch {
         // Engine may already be gone; the row is already reconciled above.
       }
-      this.emit({ type: "run.stopped", profileId, runId: run.id, at: now(), detail: "" });
+      this.emit({
+        type: "run.stopped",
+        profileId,
+        runId: run.id,
+        at: now(),
+        detail: "",
+      });
       return stopped;
     });
   }
@@ -199,23 +259,37 @@ export class BrowserLifecycleService {
         });
         const profile = this.profiles.get(run.profileId);
         if (profile) this.markProfile(profile, "idle");
-        this.emit({ type: "run.crashed", profileId: run.profileId, runId: run.id, at: now(), detail: "reconciled at boot" });
+        this.emit({
+          type: "run.crashed",
+          profileId: run.profileId,
+          runId: run.id,
+          at: now(),
+          detail: "reconciled at boot",
+        });
         crashed++;
       }
     }
     return { adopted, crashed };
   }
 
-  private onEngineExit(profileId: string, runId: string, code: number | null, signal: string | null): void {
+  private onEngineExit(
+    profileId: string,
+    runId: string,
+    code: number | null,
+    signal: string | null,
+  ): void {
     const run = this.runs.get(runId);
-    if (!run || (run.status !== "running" && run.status !== "launching")) return;
+    if (!run || (run.status !== "running" && run.status !== "launching"))
+      return;
     this.sessions.delete(profileId);
     const clean = code === 0;
     const final: BrowserRun = {
       ...run,
       status: clean ? "stopped" : "crashed",
       stoppedAt: now(),
-      lastError: clean ? null : `engine exited (code=${code}, signal=${signal})`,
+      lastError: clean
+        ? null
+        : `engine exited (code=${code}, signal=${signal})`,
     };
     this.runs.update(final);
     const profile = this.profiles.get(profileId);
@@ -234,10 +308,17 @@ export class BrowserLifecycleService {
       ...run,
       status: "crashed",
       stoppedAt: now(),
-      lastError: err instanceof Error ? err.message.slice(0, 2000) : String(err),
+      lastError:
+        err instanceof Error ? err.message.slice(0, 2000) : String(err),
     });
     this.markProfile(profile, "error");
-    this.emit({ type: "run.crashed", profileId: profile.id, runId: run.id, at: now(), detail: "launch failed" });
+    this.emit({
+      type: "run.crashed",
+      profileId: profile.id,
+      runId: run.id,
+      at: now(),
+      detail: "launch failed",
+    });
   }
 
   private markProfile(profile: Profile, status: Profile["status"]): void {
@@ -246,7 +327,11 @@ export class BrowserLifecycleService {
 
   private requireProfile(id: string): Profile {
     const p = this.profiles.get(id);
-    if (!p) throw new DomainError(ErrorCodes.PROFILE_NOT_FOUND, `profile ${id} not found`);
+    if (!p)
+      throw new DomainError(
+        ErrorCodes.PROFILE_NOT_FOUND,
+        `profile ${id} not found`,
+      );
     return p;
   }
 

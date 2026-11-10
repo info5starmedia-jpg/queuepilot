@@ -27,6 +27,12 @@ export interface BrowserSession {
 
 export interface BrowserRuntime {
   readonly kind: string;
+  /**
+   * Absolute path of the engine binary this runtime will execute, or null
+   * when the runtime needs no binary (the fake runtime). Used by the engine
+   * health probe; the path is reported, never modified.
+   */
+  engineBinaryPath?(): string | null;
   launch(request: LaunchRequest): Promise<BrowserSession>;
 }
 

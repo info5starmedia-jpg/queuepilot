@@ -17,7 +17,9 @@ export function registerAdsPowerRoutes(
   lifecycle: BrowserLifecycleService,
   profiles: ProfileService,
 ): void {
-  app.get("/status", async () => adsOk({ service: "queuepilot", version: "0.3.0" }));
+  app.get("/status", async () =>
+    adsOk({ service: "queuepilot", version: "0.4.0" }),
+  );
 
   app.post("/api/v1/browser/start", async (req, reply) => {
     const { profile_id } = (req.body ?? req.query) as { profile_id?: string };
@@ -33,7 +35,9 @@ export function registerAdsPowerRoutes(
       };
       return reply.send(adsOk(data));
     } catch (err) {
-      return reply.send(adsErr(err instanceof Error ? err.message : String(err)));
+      return reply.send(
+        adsErr(err instanceof Error ? err.message : String(err)),
+      );
     }
   });
 
@@ -45,17 +49,25 @@ export function registerAdsPowerRoutes(
       const run = await lifecycle.start(profile_id);
       return reply.send(
         adsOk({
-          ws: { puppeteer: run.wsEndpoint ?? "", selenium: run.wsEndpoint ?? "" },
+          ws: {
+            puppeteer: run.wsEndpoint ?? "",
+            selenium: run.wsEndpoint ?? "",
+          },
           debug_port: String(run.debugPort ?? ""),
         }),
       );
     } catch (err) {
-      return reply.send(adsErr(err instanceof Error ? err.message : String(err)));
+      return reply.send(
+        adsErr(err instanceof Error ? err.message : String(err)),
+      );
     }
   });
 
   app.all("/api/v1/browser/stop", async (req, reply) => {
-    const src = { ...(req.query as object), ...((req.body ?? {}) as object) } as {
+    const src = {
+      ...(req.query as object),
+      ...((req.body ?? {}) as object),
+    } as {
       profile_id?: string;
     };
     if (!src.profile_id) return reply.send(adsErr("profile_id is required"));
@@ -63,7 +75,9 @@ export function registerAdsPowerRoutes(
       const run = await lifecycle.stop(src.profile_id);
       return reply.send(adsOk({ stopped: run !== null }));
     } catch (err) {
-      return reply.send(adsErr(err instanceof Error ? err.message : String(err)));
+      return reply.send(
+        adsErr(err instanceof Error ? err.message : String(err)),
+      );
     }
   });
 
@@ -83,10 +97,17 @@ export function registerAdsPowerRoutes(
   });
 
   app.get("/api/v1/profile/list", async (req, reply) => {
-    const q = req.query as { group_id?: string; page?: string; page_size?: string };
+    const q = req.query as {
+      group_id?: string;
+      page?: string;
+      page_size?: string;
+    };
     const all = profiles.list(q.group_id ? { group: q.group_id } : {});
     const page = Math.max(1, Number(q.page ?? 1) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(q.page_size ?? 50) || 50));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Number(q.page_size ?? 50) || 50),
+    );
     const slice = all.slice((page - 1) * pageSize, page * pageSize);
     return reply.send(
       adsOk({
@@ -105,10 +126,16 @@ export function registerAdsPowerRoutes(
     const body = (req.body ?? {}) as { name?: string; group_id?: string };
     if (!body.name) return reply.send(adsErr("name is required"));
     try {
-      const p = profiles.create({ name: body.name, group: body.group_id, generateFingerprint: true });
+      const p = profiles.create({
+        name: body.name,
+        group: body.group_id,
+        generateFingerprint: true,
+      });
       return reply.send(adsOk({ profile_id: p.id, user_id: p.id }));
     } catch (err) {
-      return reply.send(adsErr(err instanceof Error ? err.message : String(err)));
+      return reply.send(
+        adsErr(err instanceof Error ? err.message : String(err)),
+      );
     }
   });
 }
