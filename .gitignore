@@ -5,3 +5,9 @@ data/
 .DS_Store
 coverage/
 .env
+# P4c: a Chromium source tree / build output must NEVER live in the repo
+# (and especially not in this OneDrive-synced folder). Builds happen in
+# C:\queuepilot-engine — see engine/README.md.
+engine/src/
+engine/depot_tools/
+engine/out/
