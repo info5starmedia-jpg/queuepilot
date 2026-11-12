@@ -230,6 +230,209 @@ export const CLAIMS: Claim[] = [
       );
     },
   },
+  {
+    id: "webrtc-no-host-candidates",
+    title: "WebRTC SDP contains no host/srflx (local network) candidates",
+    async check(page) {
+      // Fury patch 0070 (WebRTC IP policy). Control measured on stock Chrome:
+      // with no proxy policy, createOffer gathers typ host AND typ srflx
+      // candidates from every local interface — that leak is exactly what the
+      // patch kills. A proxied/patched engine yields relay-only or none.
+      const v = (await page.evaluate(`(async () => {
+        const pc = new RTCPeerConnection();
+        try {
+          pc.createDataChannel('q');
+          await pc.setLocalDescription(await pc.createOffer());
+          await new Promise(res => {
+            if (pc.iceGatheringState === 'complete') return res();
+            pc.addEventListener('icegatheringstatechange', () => {
+              if (pc.iceGatheringState === 'complete') res();
+            });
+            setTimeout(res, 8000);
+          });
+          const m = pc.localDescription ? pc.localDescription.sdp.match(/typ \\w+/g) : null;
+          return { types: m ? [...new Set(m)] : [] };
+        } finally {
+          try { pc.close(); } catch {}
+        }
+      })()`)) as { types: string[] };
+      const bad = v.types.filter((t) => /host|srflx/.test(t));
+      return result(
+        "webrtc-no-host-candidates",
+        bad.length === 0,
+        bad.length ? `leaks: ${v.types.join(" ")}` : `clean (${v.types.join(" ") || "no candidates"})`,
+      );
+    },
+  },
+  {
+    id: "audio-deterministic",
+    title: "OfflineAudioContext readback is identical across two fresh contexts",
+    async check(page) {
+      // Fury patch 0040 (audio noise). Fury's noise is a pure function of the
+      // per-profile seed, so two INDEPENDENT OfflineAudioContext runs on the
+      // same page must produce byte-identical buffers. Stock Chrome (no noise)
+      // is trivially deterministic too — this claim verifies determinism, not
+      // noise-ness; noise calibration lives in the engine-side tests.
+      const v = (await page.evaluate(`(async () => {
+        const run = async () => {
+          const ctx = new OfflineAudioContext(1, 4410, 44100);
+          const osc = ctx.createOscillator();
+          const comp = ctx.createDynamicsCompressor();
+          osc.type = 'triangle'; osc.frequency.value = 1000;
+          osc.connect(comp); comp.connect(ctx.destination);
+          osc.start(0);
+          const buf = await ctx.startRendering();
+          const d = buf.getChannelData(0);
+          let h = 0;
+          for (let i = 0; i < d.length; i++) h = Math.imul(31, h) + (d[i] * 1e6 | 0) | 0;
+          return h;
+        };
+        const a = await run();
+        const b = await run();
+        return { a, b, same: a === b };
+      })()`)) as { a: number; b: number; same: boolean };
+      return result(
+        "audio-deterministic",
+        v.same,
+        v.same ? "two contexts identical" : `hashes ${v.a} vs ${v.b} differ`,
+      );
+    },
+  },
+  {
+    id: "fonts-standard-families",
+    title: "core web font families resolve (Arial/monospace/Times)",
+    async check(page) {
+      // Fury patches 0050/0051 (font metrics & family surface). A Windows
+      // persona must at minimum resolve the standard families document.fonts
+      // knows on real desktop Chrome — absence means the font table was
+      // stripped past stock shape.
+      const v = (await page.evaluate(`(() => {
+        const probe = ['12px Arial', '16px monospace', '14px "Times New Roman"'];
+        return probe.map(f => ({ f, ok: document.fonts.check(f) }));
+      })()`)) as { f: string; ok: boolean }[];
+      const missing = v.filter((x) => !x.ok).map((x) => x.f);
+      return result(
+        "fonts-standard-families",
+        missing.length === 0,
+        missing.length ? `unresolved: ${missing.join(", ")}` : "3/3 standard families resolve",
+      );
+    },
+  },
+  {
+    id: "webgpu-present-or-null",
+    title: "WebGPU API present and requestAdapter resolves (null OK without GPU)",
+    async check(page) {
+      // Fury patch 0032 (WebGPU surface). Stock Chrome on a GPU-less VM
+      // resolves requestAdapter() to null — that is a PASS. A fail is a
+      // missing navigator.gpu or a REJECTED adapter request (hook half-done).
+      const v = (await page.evaluate(`(async () => {
+        if (!('gpu' in navigator)) return { api: false, rejected: false, adapter: false };
+        try {
+          const a = await navigator.gpu.requestAdapter();
+          return { api: true, rejected: false, adapter: a !== null };
+        } catch {
+          return { api: true, rejected: true, adapter: false };
+        }
+      })()`)) as { api: boolean; rejected: boolean; adapter: boolean };
+      const ok = v.api && !v.rejected;
+      return result(
+        "webgpu-present-or-null",
+        ok,
+        !v.api ? "navigator.gpu missing" : v.rejected ? "requestAdapter rejected" : `adapter=${v.adapter ? "present" : "null (no GPU, OK)"}`,
+      );
+    },
+  },
+  {
+    id: "battery-desktop-mains",
+    title: "Battery API reports desktop-on-mains tuple (charging, level 1)",
+    async check(page) {
+      // Fury patch 0121 (battery spoof). The persona is a desktop on mains:
+      // {charging: true, level: 1.0, dischargingTime: Infinity}. A laptop host
+      // leaks its real battery (charging: false, level ~0.6) through an
+      // unpatched engine. getBattery needs a secure context — if absent we
+      // skip rather than fake.
+      const v = (await page.evaluate(`(async () => {
+        if (!('getBattery' in navigator)) return { api: null };
+        const b = await navigator.getBattery();
+        return { api: true, charging: b.charging, level: b.level, dt: b.dischargingTime };
+      })()`)) as { api: boolean | null; charging?: boolean; level?: number; dt?: number };
+      if (v.api === null) {
+        return { id: "battery-desktop-mains", pass: false, skipped: true, detail: "getBattery unavailable (non-secure context)" };
+      }
+      const ok = v.charging === true && v.level === 1;
+      return result(
+        "battery-desktop-mains",
+        ok,
+        `charging=${v.charging} level=${v.level} dt=${String(v.dt)}`,
+      );
+    },
+  },
+  {
+    id: "media-devices-sane",
+    title: "enumerateDevices resolves with at least one audio output",
+    async check(page) {
+      // Fury patch 0060 (media device surface). Claim is coherence, not a
+      // fabricated list: the API must resolve and report the sink the page
+      // actually has. Stock Chrome always yields >= 1 audiooutput.
+      const v = (await page.evaluate(`(async () => {
+        const ds = await navigator.mediaDevices.enumerateDevices();
+        return {
+          kinds: ds.map(d => d.kind),
+          out: ds.filter(d => d.kind === 'audiooutput').length,
+        };
+      })()`)) as { kinds: string[]; out: number };
+      return result(
+        "media-devices-sane",
+        v.out >= 1,
+        v.out >= 1 ? `${v.kinds.length} devices, ${v.out} audioout` : `no audiooutput (${v.kinds.join(",") || "empty"})`,
+      );
+    },
+  },
+  {
+    id: "client-rects-deterministic",
+    title: "getBoundingClientRect/getClientRects are stable across repeated reads",
+    async check(page) {
+      // Fury patch 0033 (rect noise). If a noise seed is applied per read
+      // instead of per profile, two immediate reads of the same static box
+      // disagree. Deterministic engine: identical every time.
+      const v = (await page.evaluate(`(() => {
+        const el = document.createElement('div');
+        el.style.cssText = 'position:absolute;left:37.5px;top:11.25px;width:200.5px;height:80.75px;';
+        document.body.appendChild(el);
+        const r1 = JSON.stringify(el.getBoundingClientRect());
+        const r2 = JSON.stringify(el.getBoundingClientRect());
+        const c1 = JSON.stringify(el.getClientRects());
+        const c2 = JSON.stringify(el.getClientRects());
+        el.remove();
+        return { rectSame: r1 === r2, clientSame: c1 === c2 };
+      })()`)) as { rectSame: boolean; clientSame: boolean };
+      const ok = v.rectSame && v.clientSame;
+      return result(
+        "client-rects-deterministic",
+        ok,
+        ok ? "rect+clientRects stable" : `rectSame=${v.rectSame} clientSame=${v.clientSame}`,
+      );
+    },
+  },
+  {
+    id: "performance-memory-present",
+    title: "performance.memory exposes a heap limit (Chrome-only surface)",
+    async check(page) {
+      // Fury patch 0120 (memory surface). performance.memory exists only in
+      // Chromium; a fork that accidentally runs a non-Chrome-shaped page
+      // (or strips the object) loses this API and stands out. jsHeapSizeLimit
+      // is the most stable field across versions.
+      const v = (await page.evaluate(`(() => {
+        const m = performance.memory;
+        return m ? { limit: m.jsHeapSizeLimit } : null;
+      })()`)) as { limit: number } | null;
+      return result(
+        "performance-memory-present",
+        v !== null && v.limit > 0,
+        v === null ? "performance.memory missing" : `jsHeapSizeLimit=${v.limit}`,
+      );
+    },
+  },
 ];
 
 /**

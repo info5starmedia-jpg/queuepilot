@@ -93,4 +93,97 @@ describe("detection claims", () => {
     const platformClaim = claims.find((c) => c.id === "persona-platform")!;
     expect((await platformClaim.check(bad)).pass).toBe(false);
   });
+
+  it("webrtc-no-host-candidates passes relay-only, fails host/srflx leaks", async () => {
+    const c = claim("webrtc-no-host-candidates");
+    const clean: PageProbe = { evaluate: async () => ({ types: ["typ relay"] }) };
+    const empty: PageProbe = { evaluate: async () => ({ types: [] }) };
+    const host: PageProbe = { evaluate: async () => ({ types: ["typ host", "typ srflx"] }) };
+    expect((await c.check(clean)).pass).toBe(true);
+    expect((await c.check(empty)).pass).toBe(true);
+    expect((await c.check(host)).pass).toBe(false);
+  });
+
+  it("audio-deterministic requires two context hashes to match", async () => {
+    const c = claim("audio-deterministic");
+    const passPage: PageProbe = { evaluate: async () => ({ a: 42, b: 42, same: true }) };
+    const failPage: PageProbe = { evaluate: async () => ({ a: 42, b: 43, same: false }) };
+    expect((await c.check(passPage)).pass).toBe(true);
+    expect((await c.check(failPage)).pass).toBe(false);
+  });
+
+  it("fonts-standard-families fails when any standard family is unresolved", async () => {
+    const c = claim("fonts-standard-families");
+    const passPage: PageProbe = {
+      evaluate: async () => [
+        { f: "12px Arial", ok: true },
+        { f: "16px monospace", ok: true },
+        { f: "14px \"Times New Roman\"", ok: true },
+      ],
+    };
+    const failPage: PageProbe = {
+      evaluate: async () => [
+        { f: "12px Arial", ok: true },
+        { f: "16px monospace", ok: false },
+        { f: "14px \"Times New Roman\"", ok: true },
+      ],
+    };
+    expect((await c.check(passPage)).pass).toBe(true);
+    expect((await c.check(failPage)).pass).toBe(false);
+  });
+
+  it("webgpu-present-or-null accepts resolving-null, rejects missing api or rejection", async () => {
+    const c = claim("webgpu-present-or-null");
+    const noGpu: PageProbe = { evaluate: async () => ({ api: true, rejected: false, adapter: false }) };
+    const withGpu: PageProbe = { evaluate: async () => ({ api: true, rejected: false, adapter: true }) };
+    const missing: PageProbe = { evaluate: async () => ({ api: false, rejected: false, adapter: false }) };
+    const rejected: PageProbe = { evaluate: async () => ({ api: true, rejected: true, adapter: false }) };
+    expect((await c.check(noGpu)).pass).toBe(true);
+    expect((await c.check(withGpu)).pass).toBe(true);
+    expect((await c.check(missing)).pass).toBe(false);
+    expect((await c.check(rejected)).pass).toBe(false);
+  });
+
+  it("battery-desktop-mains skips without getBattery, requires charging+level 1", async () => {
+    const c = claim("battery-desktop-mains");
+    const noApi: PageProbe = { evaluate: async () => ({ api: null }) };
+    const desktop: PageProbe = {
+      evaluate: async () => ({ api: true, charging: true, level: 1, dt: Infinity }),
+    };
+    const laptopLeak: PageProbe = {
+      evaluate: async () => ({ api: true, charging: false, level: 0.62, dt: 7200 }),
+    };
+    const noApiResult = await c.check(noApi);
+    expect(noApiResult.skipped).toBe(true);
+    expect((await c.check(desktop)).pass).toBe(true);
+    expect((await c.check(laptopLeak)).pass).toBe(false);
+  });
+
+  it("media-devices-sane requires at least one audio output", async () => {
+    const c = claim("media-devices-sane");
+    const sane: PageProbe = {
+      evaluate: async () => ({ kinds: ["audiooutput", "audioinput"], out: 1 }),
+    };
+    const empty: PageProbe = { evaluate: async () => ({ kinds: [], out: 0 }) };
+    expect((await c.check(sane)).pass).toBe(true);
+    expect((await c.check(empty)).pass).toBe(false);
+  });
+
+  it("client-rects-deterministic fails when either rect read is unstable", async () => {
+    const c = claim("client-rects-deterministic");
+    const stable: PageProbe = { evaluate: async () => ({ rectSame: true, clientSame: true }) };
+    const noisy: PageProbe = { evaluate: async () => ({ rectSame: true, clientSame: false }) };
+    expect((await c.check(stable)).pass).toBe(true);
+    expect((await c.check(noisy)).pass).toBe(false);
+  });
+
+  it("performance-memory-present requires a positive heap limit", async () => {
+    const c = claim("performance-memory-present");
+    const chromePage: PageProbe = { evaluate: async () => ({ limit: 2_170_000_000 }) };
+    const stripped: PageProbe = { evaluate: async () => null };
+    const zeroPage: PageProbe = { evaluate: async () => ({ limit: 0 }) };
+    expect((await c.check(chromePage)).pass).toBe(true);
+    expect((await c.check(stripped)).pass).toBe(false);
+    expect((await c.check(zeroPage)).pass).toBe(false);
+  });
 });

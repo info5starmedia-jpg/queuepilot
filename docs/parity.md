@@ -47,19 +47,19 @@ trust in the binary — acceptable short-term, tracked below to close.
 | 0021 | scrollbar width (3 themes) | 🟡 Windows side uncompiled upstream | none | ❌ claim owed |
 | 0030 | canvas noise at readback | ✅ | `canvas-deterministic` | ✅ |
 | 0031 | WebGL params + readPixels noise | ✅ | `webgl-coherent` | ✅ |
-| 0032 | WebGPU adapter narrowing | ✅ | none | ❌ claim owed |
-| 0033 | client rects noise | ✅ | none | ❌ claim owed |
-| 0040 | audio noise | ✅ | none | ❌ claim owed |
+| 0032 | WebGPU adapter narrowing | ✅ | `webgpu-present-or-null` | ✅ |
+| 0033 | client rects noise | ✅ | `client-rects-deterministic` | ✅ |
+| 0040 | audio noise | ✅ | `audio-deterministic` (determinism only; noise calibration is engine-side) | ✅ |
 | 0041/0042 | speech voices (+ Google network voices) | ✅ | none | ❌ claim owed |
-| 0050/0051 | font fallback/platform filters | ✅ | none | ❌ claim owed |
-| 0060 | media device narrowing | ✅ | none | ❌ claim owed |
-| 0070 | WebRTC IP policy (the worst leak class) | ✅ | none | ❌ **claim owed — P1** |
+| 0050/0051 | font fallback/platform filters | ✅ | `fonts-standard-families` | ✅ |
+| 0060 | media device narrowing | ✅ | `media-devices-sane` | ✅ |
+| 0070 | WebRTC IP policy (the worst leak class) | ✅ | `webrtc-no-host-candidates` | ✅ |
 | 0080/0081 | timezone / Intl locale everywhere | ✅ | `persona-timezone`, `persona-locale` | ✅ |
 | 0082 | geolocation provider seam | ✅ | none | ❌ claim owed (needs persona geolocation field first) |
 | 0090 | permissions consistency | ✅ | `permissions-consistent` | ✅ |
 | 0110 | per-profile os-crypt key | ✅ in binary | not wired — our runtime doesn't pass the oscrypt handle | ❌ P2 (needed for portable profiles) |
-| 0120 | performance.memory | ✅ | none | ❌ claim owed |
-| 0121 | battery (desktop-mains tuple) | ✅ | none | ❌ claim owed |
+| 0120 | performance.memory | ✅ | `performance-memory-present` | ✅ |
+| 0121 | battery (desktop-mains tuple) | ✅ | `battery-desktop-mains` (skips on non-secure context) | ✅ |
 | 0122 | network information | ⬜ upstream retired: Chrome's own designed noise; pinning would be a NEW tell | — | ⬜ |
 | 0130–0136 | mobile persona suite | ✅ in binary | our identity model is desktop-only | ❌ P3 |
 | 0300 | cdc_/automation var removal | ✅ | `no-automation-traces`, `webdriver-hidden` | ✅ |
