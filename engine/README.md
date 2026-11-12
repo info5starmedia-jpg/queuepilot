@@ -34,16 +34,42 @@ Upstream-to-date check is part of the engine-bump ritual (below).
 
 ## Status
 
-**Patchset vendored (v0.11.x); first own build NOT yet run.** The shipping
-runtime still uses upstream's prebuilt fury-core 0.5.1 (checksum-pinned,
-consent-gated installer). The own-build milestone is tracked in
-`docs/roadmap.md` (P4c) and its green gate is defined in `docs/parity.md`.
+**P4c in progress (2026-11-11).** The shipping runtime still uses upstream's
+prebuilt fury-core 0.5.1. First own build underway:
+
+- Build root is `C:\queuepilot-engine` (NOT `engine/src/` — the repo lives
+  in a OneDrive-synced folder; a 100GB source tree there would be a
+  disaster). `engine/` here is the patchset's source of truth; it is copied
+  to the build root, builds happen there.
+- Toolchain present: VS Build Tools 2026 (MSVC 14.51), Windows 11 SDK
+  10.0.26100, depot_tools at `C:\queuepilot-engine\depot_tools` (bootstrap
+  done). ATL/MFC NOT installed — first build will tell us if recent
+  Chromium needs it.
+- **Headless-launch traps, all measured on this machine (do not
+  re-derive):**
+  1. GCM hangs forever headless → always `GIT_TERMINAL_PROMPT=0
+     GCM_INTERACTIVE=never` (googlesource is public, anonymous is fine).
+  2. PowerShell `Start-Process bash -ArgumentList '-c', '<inline script>'`
+     garbles inline commands → pass ONE script-file argument instead
+     (`/c/queuepilot-engine/sync-run.sh`).
+  3. This agent session's environment is STRIPPED of Windows vars
+     (PROCESSOR_ARCHITECTURE, ProgramFiles...) → `platform.machine()` is
+     `''` → gclient sets `host_cpu=''` → DEPS conditions crash with a
+     cryptic `ast.parse: SyntaxError` at "line 0". `sync-run.sh` restores
+     the essentials before invoking gclient. A desktop shell never sees
+     this.
+  4. depot_tools only bootstraps through its NATIVE Windows entry
+     (`gclient.bat`); the POSIX path silently no-ops.
+  5. gclient_eval.py / gclient.py in the build root carry temporary
+     QP-DEBUG instrumentation; `git -C depot_tools checkout .` cleans it.
 
 ## The engine-bump ritual (when updating Chromium)
 
 1. Edit `CHROMIUM_VERSION` to the new tag.
-2. `engine/build/fetch.sh <tag>` — sync the source tree (~100GB, internal
-   NVMe only; the machine needs ≥150GB free).
+2. Run the fetch from the build root: `bash /c/queuepilot-engine/build/fetch.sh <tag>`
+   (~100GB, internal NVMe only; the machine needs ≥150GB free). For the
+   gclient sync step use `sync-run.sh` (env restoration) rather than raw
+   gclient.
 3. `engine/build/rebase.sh` — port the series; every conflict is localisable
    to one named vector (that is what the one-patch-per-vector rule buys).
 4. `engine/build/build.sh windows-x64` — 6–12h on the reference machine
