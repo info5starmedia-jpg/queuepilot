@@ -78,6 +78,40 @@ export class BrowserRunRepository {
     ).map(toRun);
   }
 
+  countOccupying(): number {
+    const r = this.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM browser_runs WHERE status IN ('launching','running')",
+      )
+      .get() as { n: number };
+    return r.n;
+  }
+
+  /**
+   * Host-wide admission slot (AliasMode lifecycle parity): count and insert
+   * atomically under BEGIN IMMEDIATE, so two API processes sharing one DB
+   * cannot both pass the cap — the check-then-insert race is closed at the
+   * storage layer, the same place the per-profile guard lives. maxConcurrent
+   * <= 0 means unlimited (previous behavior, and the default).
+   *
+   * The caller must still hold the per-profile mutex: the partial unique
+   * index is what makes the same-profile double-launch throw.
+   */
+  admit(
+    run: BrowserRun,
+    maxConcurrent: number,
+  ): { admitted: boolean; occupying: number } {
+    let occupying = 0;
+    const tx = this.db.transaction(() => {
+      occupying = this.countOccupying();
+      if (maxConcurrent > 0 && occupying >= maxConcurrent) return false;
+      this.create(run);
+      return true;
+    });
+    const admitted = tx.immediate();
+    return { admitted, occupying };
+  }
+
   listForProfile(profileId: string, limit = 20): BrowserRun[] {
     return (
       this.db

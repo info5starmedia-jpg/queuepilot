@@ -41,7 +41,9 @@ export function toHttpError(err: unknown): {
                 ? 400
                 : err.code === ErrorCodes.PROVIDER_SOURCE_UNREADABLE
                   ? 422
-                  : 500;
+                  : err.code === ErrorCodes.HOST_AT_CAPACITY
+                    ? 429
+                    : 500;
     return {
       status,
       body: { error: { code: err.code, message: err.message } },

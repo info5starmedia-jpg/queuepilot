@@ -106,6 +106,60 @@ describe("BrowserLifecycleService", () => {
   });
 });
 
+describe("host-wide admission slots (AliasMode lifecycle parity)", () => {
+  const ENV = "QUEUEPILOT_MAX_CONCURRENT_PROFILES";
+
+  it("refuses launches past the cap and frees a slot on stop", async () => {
+    process.env[ENV] = "2";
+    try {
+      const { lifecycle, profiles } = makeTestContext();
+      const a = profiles.create({ name: "slot-a", generateFingerprint: true });
+      const b = profiles.create({ name: "slot-b", generateFingerprint: true });
+      const c = profiles.create({ name: "slot-c", generateFingerprint: true });
+      await lifecycle.start(a.id);
+      await lifecycle.start(b.id);
+      await expect(lifecycle.start(c.id)).rejects.toMatchObject({
+        code: ErrorCodes.HOST_AT_CAPACITY,
+      });
+      // Stopping one profile frees its slot for the queue.
+      await lifecycle.stop(a.id);
+      const run = await lifecycle.start(c.id);
+      expect(run.status).toBe("running");
+    } finally {
+      delete process.env[ENV];
+    }
+  });
+
+  it("a parallel burst over the cap admits exactly the cap, all refused with HOST_AT_CAPACITY", async () => {
+    process.env[ENV] = "2";
+    try {
+      const { lifecycle, profiles } = makeTestContext();
+      const ids = Array.from({ length: 4 }, (_, i) =>
+        profiles.create({ name: `burst-${i}`, generateFingerprint: true }).id,
+      );
+      const results = await Promise.allSettled(ids.map((id) => lifecycle.start(id)));
+      const ok = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+      expect(ok).toHaveLength(2);
+      expect(rejected).toHaveLength(2);
+      for (const r of rejected) {
+        expect(r.reason.code).toBe(ErrorCodes.HOST_AT_CAPACITY);
+      }
+    } finally {
+      delete process.env[ENV];
+    }
+  });
+
+  it("cap 0 (default) stays unlimited", async () => {
+    const { lifecycle, profiles } = makeTestContext();
+    const ids = Array.from({ length: 4 }, (_, i) =>
+      profiles.create({ name: `free-${i}`, generateFingerprint: true }).id,
+    );
+    const runs = await Promise.all(ids.map((id) => lifecycle.start(id)));
+    expect(runs.every((r) => r.status === "running")).toBe(true);
+  });
+});
+
 describe("lifecycle events", () => {
   it("publishes run.started and run.stopped on the event bus", async () => {
     const { lifecycle, profiles } = makeTestContext();

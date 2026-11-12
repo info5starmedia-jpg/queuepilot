@@ -62,6 +62,16 @@ export class BrowserLifecycleService {
   readonly events = new EventEmitter();
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
+  /**
+   * Host-wide concurrent-profile cap (AliasMode's lifecycle admission slots).
+   * 0 = unlimited (default; this machine is the operator's own). Set
+   * QUEUEPILOT_MAX_CONCURRENT_PROFILES to bound RAM/CPU: each engine is a full
+   * Chromium, and a queue of launches is cheaper than a swap storm.
+   */
+  private readonly maxConcurrent: number = (() => {
+    const n = Number(process.env.QUEUEPILOT_MAX_CONCURRENT_PROFILES ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  })();
 
   constructor(
     private readonly profiles: ProfileRepository,
@@ -127,8 +137,20 @@ export class BrowserLifecycleService {
         stoppedAt: null,
         lastError: null,
       };
-      // Written before spawn — see invariant 2.
-      this.runs.create(run);
+      // Written before spawn — see invariant 2. The admission slot is the
+      // host-wide guard: count+insert atomically, so a second launch over
+      // the cap is refused BEFORE any engine spawns, not after.
+      if (this.maxConcurrent > 0) {
+        const { admitted, occupying } = this.runs.admit(run, this.maxConcurrent);
+        if (!admitted) {
+          throw new DomainError(
+            ErrorCodes.HOST_AT_CAPACITY,
+            `host at capacity: ${occupying}/${this.maxConcurrent} profiles running; stop one and retry`,
+          );
+        }
+      } else {
+        this.runs.create(run);
+      }
       this.markProfile(profile, "running");
 
       let session: BrowserSession;
