@@ -135,3 +135,27 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   camoufox stays default until attestation + detection probes say otherwise.
   Spike plan in ADR-0006 (P4a). Claim-based detection suite done (P4b,
   v0.11.0); external checker pass (CreepJS/sannysoft) still owed, manual.
+
+## P7 — Post-engine batch (queued 2026-11-12, starts after the parity audit passes)
+
+Ordered by dependency, not size. Every item ships with its claim/verify proof
+— no green checkbox without a live check, same rule as everything above.
+
+1. **os-crypt wiring (parity 0110)** — cookies move off engine-side plaintext
+   onto the SecretStore port (DPAPI first). Acceptance: `verify-0110` green on
+   our own binary, parity row flips to done.
+2. **socks5 in proxy-relay** — currently refuses loudly (PROXY_UNSUPPORTED);
+   implement the upstream-chain path so the refusal never fires. Acceptance:
+   `egress-via-proxy` claim passes with a socks5 upstream.
+3. **Egress diagnostics API** — surface the proxy chain, DNS and WebRTC leak
+   state per running profile in the console. Acceptance: diagnostics endpoint
+   + claim proving the values match an external probe.
+4. **External checker pass (D-004 remainder)** — CreepJS / sannysoft against
+   our own binary, results recorded in docs/parity.md. Manual, one sitting.
+5. **Extensions registry** — per-profile extension install/list/remove.
+6. **TOTP field for personas** — completes the speech-persona gap too.
+7. **Team server (P5 remainder)** — self-hosted sync, roles, multi-user
+   leases, on top of the v0.12.6 encrypted bundle format.
+8. **D-002 / D-003** — PID-reuse hardening (start tokens), proxy rotation
+   links design.
+9. **React console (ADR-0005)** — optional; vanilla console is shippable.
