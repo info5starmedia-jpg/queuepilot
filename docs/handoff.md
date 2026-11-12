@@ -90,6 +90,18 @@ npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <dir>  #
    `Windows Kits\10\Debuggers\x64` (UAC), QueuePilot icon generated at
    `C:\queuepilot-engine\assets\icon.png` (Fury's branding is NOT ours to
    ship), layout fix in our copy of `build/link-icons-windows.ps1`.
+   **Windows MAX_PATH fix (2026-11-12, three failed runs diagnosed):** grit's
+   flattenhtml opens resources as `..\..\out\<outdir>\gen\...` relative to
+   ninja's CWD; the deep root (`C:\queuepilot-engine\src\out\windows-x64-first-
+   16gb.noindex` = 60 chars) pushed the longest resource open to 262 > 260 →
+   deterministic ENOENT on files that exist (`components_resources_grit`).
+   NOT antivirus, NOT stale locks, NOT a Fury patch (proven by isolated
+   reproduction: `os.path.exists` true, `open()` ENOENT). Fix: `subst Q:
+   C:\queuepilot-engine` + ninja runs through `Q:` (CWD 39 chars, worst open
+   251). `build/build.sh` sets `NINJA_SRC=/q/src` on Windows (gn gen keeps the
+   real path so no object rebuilds); `build-run.sh` re-creates the subst every
+   launch (subst dies on reboot). Compiler-opened files were never at risk
+   (max combined 250 via real path, 228 via Q:).
    Log: `C:\queuepilot-engine\build.log`. When `build-wrapper exit: 0`:
    run the verify gate below against the fresh binary, then report; the
    overnight monitor task posts progress into the workspace every 2 h.
@@ -103,6 +115,5 @@ npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <dir>  #
    voices field; scrollbar claim awaits upstream Windows compile; os-crypt
    wiring (0110, P2); egress diagnostics API (P2); extensions registry,
    TOTP, socks5 (P2); team server/roles (P5 remainder).
-5. **Unpushed local commits await operator approval** (v0.12.4–v0.12.6 +
-   docs); v0.12.1–v0.12.3 ARE on GitHub. Push with the credential fallback
-   after the operator says so.
+5. All commits through v0.12.6 are pushed. Push gate for new work: operator
+   approval, credential fallback script if plain push hangs.
