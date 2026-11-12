@@ -433,6 +433,60 @@ export const CLAIMS: Claim[] = [
       );
     },
   },
+  {
+    id: "speech-voices-sane",
+    title: "speechSynthesis voices resolve, are non-empty, stable, well-formed",
+    async check(page) {
+      // Fury patches 0041/0042 (speech voice surface + Google network voices).
+      // Persona-narrowed voice lists (e.g. a de-DE desktop exposing only German
+      // local voices) belong to expectationClaims once the persona grows a
+      // voices field; this claim covers the stock-shape invariants every real
+      // desktop Chrome satisfies on Windows:
+      //  - getVoices() may be [] on first call; real Chrome populates
+      //    asynchronously via voiceschanged. Wait for it (3s cap).
+      //  - a real desktop has >= 1 voice (Windows SAPI always provides some)
+      //  - two reads after population are identical (no per-call noise)
+      //  - each voice has a non-empty name and a BCP-47-shaped lang
+      const v = (await page.evaluate(`(async () => {
+        if (!('speechSynthesis' in window)) return { api: false, voices: null };
+        const read = () => speechSynthesis.getVoices().map(x => ({
+          name: x.name, lang: x.lang, local: x.localService,
+        }));
+        let voices = read();
+        if (voices.length === 0) {
+          voices = await new Promise(res => {
+            const to = setTimeout(() => res(read()), 3000);
+            speechSynthesis.onvoiceschanged = () => {
+              const r = read();
+              if (r.length > 0) { clearTimeout(to); res(r); }
+            };
+            speechSynthesis.getVoices();
+          });
+        }
+        const again = read();
+        const bad = voices.filter(x => !x.name || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(x.lang));
+        return {
+          api: true,
+          count: voices.length,
+          stable: JSON.stringify(voices) === JSON.stringify(again),
+          malformed: bad.length,
+        };
+      })()`)) as {
+        api: boolean;
+        count?: number;
+        stable?: boolean;
+        malformed?: number;
+      };
+      if (!v.api) return result("speech-voices-sane", false, "speechSynthesis missing");
+      const ok =
+        (v.count ?? 0) >= 1 && v.stable === true && (v.malformed ?? 1) === 0;
+      return result(
+        "speech-voices-sane",
+        ok,
+        `voices=${v.count} stable=${v.stable} malformed=${v.malformed}`,
+      );
+    },
+  },
 ];
 
 /**

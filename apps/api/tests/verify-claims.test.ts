@@ -169,6 +169,28 @@ describe("detection claims", () => {
     expect((await c.check(empty)).pass).toBe(false);
   });
 
+  it("speech-voices-sane requires populated, stable, well-formed voices", async () => {
+    const c = claim("speech-voices-sane");
+    const good: PageProbe = {
+      evaluate: async () => ({ api: true, count: 4, stable: true, malformed: 0 }),
+    };
+    const empty: PageProbe = {
+      evaluate: async () => ({ api: true, count: 0, stable: true, malformed: 0 }),
+    };
+    const noisy: PageProbe = {
+      evaluate: async () => ({ api: true, count: 4, stable: false, malformed: 0 }),
+    };
+    const malformed: PageProbe = {
+      evaluate: async () => ({ api: true, count: 4, stable: true, malformed: 1 }),
+    };
+    const noApi: PageProbe = { evaluate: async () => ({ api: false, voices: null }) };
+    expect((await c.check(good)).pass).toBe(true);
+    expect((await c.check(empty)).pass).toBe(false);
+    expect((await c.check(noisy)).pass).toBe(false);
+    expect((await c.check(malformed)).pass).toBe(false);
+    expect((await c.check(noApi)).pass).toBe(false);
+  });
+
   it("client-rects-deterministic fails when either rect read is unstable", async () => {
     const c = claim("client-rects-deterministic");
     const stable: PageProbe = { evaluate: async () => ({ rectSame: true, clientSame: true }) };

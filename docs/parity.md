@@ -50,7 +50,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | 0032 | WebGPU adapter narrowing | ✅ | `webgpu-present-or-null` | ✅ |
 | 0033 | client rects noise | ✅ | `client-rects-deterministic` | ✅ |
 | 0040 | audio noise | ✅ | `audio-deterministic` (determinism only; noise calibration is engine-side) | ✅ |
-| 0041/0042 | speech voices (+ Google network voices) | ✅ | none | ❌ claim owed |
+| 0041/0042 | speech voices (+ Google network voices) | ✅ | `speech-voices-sane` (stock-shape invariants; persona-narrowed lists await a persona voices field) | ✅ |
 | 0050/0051 | font fallback/platform filters | ✅ | `fonts-standard-families` | ✅ |
 | 0060 | media device narrowing | ✅ | `media-devices-sane` | ✅ |
 | 0070 | WebRTC IP policy (the worst leak class) | ✅ | `webrtc-no-host-candidates` | ✅ |
