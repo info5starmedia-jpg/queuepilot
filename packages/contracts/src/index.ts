@@ -33,6 +33,7 @@ export const ErrorCodes = {
   GOOGLE_NOT_CONFIGURED: "GOOGLE_NOT_CONFIGURED",
   GOOGLE_NOT_CONNECTED: "GOOGLE_NOT_CONNECTED",
   VALIDATION_FAILED: "VALIDATION_FAILED",
+  BUNDLE_INVALID: "BUNDLE_INVALID",
   CONFLICT: "CONFLICT",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

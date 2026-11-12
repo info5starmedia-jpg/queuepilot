@@ -8,6 +8,11 @@ import { ProfileService } from "./application/profiles/profile.service.js";
 import { ProxyRepository } from "./application/proxies/proxy.repository.js";
 import { ProxyService } from "./application/proxies/proxy.service.js";
 import { createSecretStore } from "./application/secrets/secret-store.js";
+import { BundleService } from "./application/bundles/bundle.service.js";
+import {
+  exportCookiesViaCdp,
+  importCookiesViaCdp,
+} from "./application/bundles/cdp-cookies.js";
 import { BrowserRunRepository } from "./application/lifecycle/browser-run.repository.js";
 import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
@@ -118,6 +123,11 @@ export async function main(): Promise<void> {
     );
   }
 
+  const bundles = new BundleService(profiles, lifecycle, {
+    export: exportCookiesViaCdp,
+    import: importCookiesViaCdp,
+  });
+
   const app = buildApp({
     config,
     profiles,
@@ -127,6 +137,7 @@ export async function main(): Promise<void> {
     proxyProviders,
     engineHealth,
     google,
+    bundles,
   });
   await app.listen({ port: config.port, host: config.host });
   console.log(

@@ -43,7 +43,9 @@ export function toHttpError(err: unknown): {
                   ? 422
                   : err.code === ErrorCodes.HOST_AT_CAPACITY
                     ? 429
-                    : 500;
+                    : err.code === ErrorCodes.BUNDLE_INVALID
+                      ? 422
+                      : 500;
     return {
       status,
       body: { error: { code: err.code, message: err.message } },

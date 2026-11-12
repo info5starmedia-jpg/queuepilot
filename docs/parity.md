@@ -100,7 +100,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | **Proxy actually applied on EVERY engine** | ✅ auth-injecting local relay | ✅ camoufox native; fury via auth-injecting loopback relay | ✅ v0.12.0 |
 | Host-wide lifecycle admission slots (concurrency guard) | ✅ | ✅ `QUEUEPILOT_MAX_CONCURRENT_PROFILES`, atomic count+insert (BEGIN IMMEDIATE) at the storage layer; per-profile guard unchanged | ✅ v0.12.4 |
 | Window fit (window ≤ claimed screen) | ✅ `window-fit.ts` | ✅ ported (Apache-2.0 attribution) + CDP watcher + fitted launch size; pre-maximize restore is P2 polish | ✅ v0.12.3 |
-| Session bundle export/import (cookies via CDP, roaming) | ✅ | ❌ | ❌ P1 |
+| Session bundle export/import (cookies via CDP, roaming) | ✅ | ✅ encrypted `.qpbundle` (PBKDF2 + AES-256-GCM, passphrase), CDP Network.getAllCookies/setCookies against the live engine; local-first — operator-carried, no server | ✅ v0.12.6 |
 | Egress diagnostics (per-profile exit IP/geo proof) | ✅ | 🟡 harness-level `egress-via-proxy` claim; no per-profile API yet | ❌ P2 |
 | Per-profile extensions registry | ✅ | ❌ | ❌ P2 |
 | TOTP 2FA per profile | ✅ | ❌ | ❌ P2 |

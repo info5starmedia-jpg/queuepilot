@@ -108,6 +108,11 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 
 - Optional self-hosted sync server: encrypted profile bundles, profile
   locking, role-based access. Local-first remains the default forever.
+- Foundation 🟡 v0.12.6: the bundle format the sync server will move between
+  machines exists and is encrypted (`bundles/session-bundle.ts`); profile
+  locking across processes already lives at the storage layer (admission
+  slots + the per-profile partial unique index). Still open: the server
+  itself, roles, multi-user leases.
 
 ## P6 — Secrets hardening
 

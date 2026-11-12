@@ -244,6 +244,21 @@ export class BrowserLifecycleService {
     return this.runs.occupyingForProfile(profileId);
   }
 
+  /**
+   * The live engine session for a profile with an occupying run, or null.
+   * Session-level features (bundle export/import) use this; null can mean
+   * "not running" or "adopted after an API restart" — callers that care
+   * distinguish via activeRun().
+   */
+  sessionFor(profileId: string): BrowserSession | null {
+    return this.sessions.get(profileId) ?? null;
+  }
+
+  /** The runtime kind behind every session (manifest metadata for bundles). */
+  engineKind(): string {
+    return this.runtime.kind;
+  }
+
   listRuns(profileId: string): BrowserRun[] {
     return this.runs.listForProfile(profileId);
   }
