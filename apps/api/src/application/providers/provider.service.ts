@@ -216,6 +216,8 @@ export class ProxyProviderService {
     private readonly providers: ProxyProviderRepository,
     private readonly proxies: ProxyRepository,
     private readonly sheets?: SheetReader,
+    /** P6: when present, imported passwords go to the SecretStore, never the row. */
+    private readonly secrets?: import("../secrets/secret-store.js").SecretStore,
   ) {}
 
   async create(
@@ -277,21 +279,34 @@ export class ProxyProviderService {
     }
 
     const now = new Date().toISOString();
+    // P6: purge the outgoing rows' secrets with the rows themselves, so a
+    // refresh never leaves orphaned password blobs behind.
+    if (this.secrets) {
+      for (const proxy of existing) {
+        this.secrets.delete(`proxy:${proxy.id}:password`);
+      }
+    }
     this.proxies.deleteByProvider(provider.id);
     for (const row of imported) {
+      const id = randomUUID();
       const stored: StoredProxy = {
-        id: randomUUID(),
+        id,
         name: row.name,
         type: "http",
         host: row.host,
         port: row.port,
         username: row.username,
-        password: row.password,
+        password: null,
         timezone: row.timezone,
         providerId: provider.id,
         createdAt: now,
         updatedAt: now,
       };
+      if (row.password && this.secrets) {
+        this.secrets.set(`proxy:${id}:password`, row.password);
+      } else {
+        stored.password = row.password;
+      }
       this.proxies.create(stored);
     }
 

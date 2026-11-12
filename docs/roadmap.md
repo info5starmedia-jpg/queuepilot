@@ -112,7 +112,12 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 ## P6 — Secrets hardening
 
 - Proxy passwords and cookies move from SQLite to the OS keychain
-  (DPAPI / Keychain / libsecret) behind a `SecretStore` port.
+  (DPAPI / Keychain / libsecret) behind a `SecretStore` port. ✅ v0.12.5 —
+  `secrets/secret-store.ts`: DPAPI (CurrentUser) on Windows via ProtectedData,
+  plaintext dev fallback only behind explicit QUEUEPILOT_SECRET_STORE=plaintext.
+  ProxyService + ProxyProviderService route passwords through the port;
+  pre-v0.12.5 rows migrate lazily on first read (plaintext dies without
+  operator action). Cookies remain engine-side (os-crypt, parity 0110).
 
 ## Open decision items
 

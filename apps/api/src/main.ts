@@ -7,6 +7,7 @@ import {
 import { ProfileService } from "./application/profiles/profile.service.js";
 import { ProxyRepository } from "./application/proxies/proxy.repository.js";
 import { ProxyService } from "./application/proxies/proxy.service.js";
+import { createSecretStore } from "./application/secrets/secret-store.js";
 import { BrowserRunRepository } from "./application/lifecycle/browser-run.repository.js";
 import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
@@ -64,7 +65,8 @@ export async function main(): Promise<void> {
   const proxyRepo = new ProxyRepository(db);
   const runRepo = new BrowserRunRepository(db);
 
-  const proxies = new ProxyService(proxyRepo);
+  const secretStore = createSecretStore();
+  const proxies = new ProxyService(proxyRepo, secretStore);
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
 
   const google = new GoogleAuthService({
@@ -85,6 +87,7 @@ export async function main(): Promise<void> {
     new ProxyProviderRepository(db),
     proxyRepo,
     sheets,
+    secretStore,
   );
 
   const runtime: BrowserRuntime =
