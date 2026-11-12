@@ -66,6 +66,26 @@ npm run verify --workspace apps/api -- --engine fury --data-dir <dir>   # all PA
 npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <dir>  # + egress proof
 ```
 
+## Final gate: parity audit before pushing the own-engine manifest bump
+
+Runs after `spike/publish-engine.mjs` lands (official build verified green),
+BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
+
+1. Claim suite against OUR OWN binary, not the downloaded one:
+   `SPECTRA_FURY_PATH=C:\queuepilot-engine\src\out\windows-x64.noindex\chrome.exe
+   npm run verify --workspace apps/api -- --engine fury --data-dir <dir>`
+   (path per publish output; repeat with `--proxy`).
+2. Fury verify harness on the official-build binary:
+   `python /c/queuepilot-engine/verify/run-all.py` — all per-patch checks green.
+3. Walk `docs/parity.md` §1/§2: every row already claimed "done" still holds
+   on our binary (spot-check window-fit, admission slots, DPAPI SecretStore,
+   session bundles live, not just by suite name).
+4. Confirm the tarball: extracts to `Fury/chrome.exe`, no Widevine payload,
+   sha256 + sizeBytes in the manifest match the file on disk.
+5. Diff `engines.manifest.json` — only version/url/sha256/sizeBytes changed.
+6. Then commit + push. If any step is red: the build does not ship. No
+   exceptions (same rule as the engine-bump ritual in engine/README.md).
+
 ## Repo map
 
 - `apps/api/src/` — API, runtimes (`application/runtime/`, incl.
