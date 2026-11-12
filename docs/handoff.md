@@ -39,6 +39,7 @@ source — never copy code that doesn't exist to copy).
 
 ## Verified facts (measured on this repo, don't re-derive)
 
+- v0.12.6, 188 tests green (25 files), typecheck clean.
 - v0.11.0, 138 tests green, typecheck clean, 16/16 claims PASS live on
   fury-core 0.5.1 (Chrome 157.0.8103.39), Windows 11, loopback probe page.
 - Fury persona delivery: JSON `schema_version: 1` via inherited HANDLE,
@@ -79,8 +80,29 @@ npm run verify --workspace apps/api -- --engine fury --proxy --data-dir <dir>  #
 
 ## Next tasks, in order (detail in docs/parity.md §4)
 
-1. **P4c: first own build** — `engine/README.md` ritual, overnight build,
-   verify harness + claims on our binary
-2. Claim coverage sweep (WebRTC first, then audio/fonts/WebGPU/battery/…)
-3. Lifecycle P1s (admission slots, window-fit, session bundles)
-4. React console when workflow depth demands it
+1. **P4c: first own build — RUNNING overnight 2026-11-12.** Build root
+   `C:\queuepilot-engine` (outside the repo, deliberate). Sync done (exit 0),
+   41/41 patches applied, compile config `windows-x64-first-16gb` (first-build
+   isolation + `concurrent_links = 1` for the 16 GB machine). Machine fixes
+   already applied (don't redo): `DEPOT_TOOLS_WIN_TOOLCHAIN=0`,
+   `vs2022_install` → VS **18** BuildTools,
+   `WINDOWSSDKDIR` → Windows Kits\10, `dbghelp.dll` staged into
+   `Windows Kits\10\Debuggers\x64` (UAC), QueuePilot icon generated at
+   `C:\queuepilot-engine\assets\icon.png` (Fury's branding is NOT ours to
+   ship), layout fix in our copy of `build/link-icons-windows.ps1`.
+   Log: `C:\queuepilot-engine\build.log`. When `build-wrapper exit: 0`:
+   run the verify gate below against the fresh binary, then report; the
+   overnight monitor task posts progress into the workspace every 2 h.
+2. When the binary verifies: switch compile config to `windows-x64.gn`
+   (official build, LTO+PGO) for the shippable core, and only then publish
+   our own tarball in the engine manifest.
+3. Claim sweep ✅ done (v0.12.1 + v0.12.2 — 10 new claims, 157+ tests).
+   Lifecycle P1s ✅ done: window-fit v0.12.3, admission slots v0.12.4,
+   session bundles v0.12.6. P6 secrets ✅ done (v0.12.5, DPAPI).
+4. Remaining known gaps (parity.md §1/§2): speech personas await a persona
+   voices field; scrollbar claim awaits upstream Windows compile; os-crypt
+   wiring (0110, P2); egress diagnostics API (P2); extensions registry,
+   TOTP, socks5 (P2); team server/roles (P5 remainder).
+5. **Unpushed local commits await operator approval** (v0.12.4–v0.12.6 +
+   docs); v0.12.1–v0.12.3 ARE on GitHub. Push with the credential fallback
+   after the operator says so.
