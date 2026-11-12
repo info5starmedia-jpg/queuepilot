@@ -15,8 +15,16 @@ import type {
   OpenTabRequest,
 } from "./browser-runtime.js";
 import { CdpTabController } from "./cdp/cdp-tab-controller.js";
+import { CdpConnection } from "./cdp/cdp-connection.js";
 import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
 import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
+import {
+  claimedScreenArea,
+  cdpWindowDriver,
+  initialWindowSize,
+  WindowFitWatcher,
+  type ScreenArea,
+} from "./window-fit.js";
 
 /**
  * Fury core engine adapter — Fury's BSD-3-Clause patched Chromium
@@ -78,12 +86,14 @@ export class FuryCoreRuntime implements BrowserRuntime {
       relay = await startProxyRelay(request.proxyUrl);
     }
 
+    const fitArea = claimedScreenArea(request.identity);
+    const initialSize = initialWindowSize(request.identity);
     const engineArgs = [
       `--user-data-dir=${request.profileDataDir}`,
       `--remote-debugging-port=${debugPort}`,
       "--no-first-run",
       "--no-default-browser-check",
-      `--window-size=${request.identity?.screenWidth ?? 1920},${request.identity?.screenHeight ?? 1080}`,
+      `--window-size=${initialSize.width},${initialSize.height}`,
       ...(relay ? [`--proxy-server=http://127.0.0.1:${relay.port}`] : []),
       "about:blank",
     ];
@@ -96,7 +106,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
       if (relay) await relay.close().catch(() => {});
       throw err;
     }
-    return new FurySession(child, enginePid, debugPort, relay);
+    return new FurySession(child, enginePid, debugPort, relay, fitArea);
   }
 }
 
@@ -275,6 +285,8 @@ export class FurySession implements BrowserSession {
     readonly debugPort: number,
     /** Auth-injecting relay for this run, when a proxy is configured. */
     private readonly relay: ProxyRelay | null = null,
+    /** Claimed screen area the window-fit watcher enforces; null disables it. */
+    fitArea: ScreenArea | null = null,
   ) {
     this.wsEndpoint = `ws://127.0.0.1:${debugPort}`;
     this.tabs = new CdpTabController(this.wsEndpoint, async () => {
@@ -291,6 +303,33 @@ export class FurySession implements BrowserSession {
     // The relay lives exactly as long as the engine: a window-closed exit
     // must not leave a listener holding proxy credentials behind.
     this.exited.then(() => relay?.close().catch(() => {}));
+    // Window fit (AliasMode discipline): a window may never exceed the
+    // claimed screen, or a page finds innerHeight > screen.height in one
+    // comparison. The watcher is best-effort at launch — a failure here
+    // degrades stealth, never launch, and is logged.
+    if (fitArea) {
+      this.windowFit = { area: fitArea, watcher: null };
+      void this.startWindowFit();
+    }
+  }
+
+  private windowFit: { area: ScreenArea; watcher: WindowFitWatcher | null } | null =
+    null;
+
+  private async startWindowFit(): Promise<void> {
+    const fit = this.windowFit;
+    if (!fit || fit.watcher) return;
+    try {
+      const conn = await CdpConnection.connect(this.wsEndpoint, 10_000);
+      this.exited.then(() => conn.close());
+      const watcher = new WindowFitWatcher(cdpWindowDriver(conn), fit.area, {
+        log: (msg) => console.warn(`[fury] ${msg}`),
+      });
+      fit.watcher = watcher;
+      watcher.start();
+    } catch (err) {
+      console.warn(`[fury] window-fit watcher unavailable: ${String(err)}`);
+    }
   }
 
   /** BrowserSession.pid is the engine PID, not the bootstrap's. */
@@ -312,6 +351,7 @@ export class FurySession implements BrowserSession {
 
   async stop(): Promise<void> {
     if (this.bootstrap.exitCode !== null || this.bootstrap.killed) return;
+    this.windowFit?.watcher?.stop();
     await this.tabs.dispose();
     // Graceful first: taskkill without /F posts WM_CLOSE, which Chromium
     // handles as a clean shutdown (session store written, code 0).
