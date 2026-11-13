@@ -127,6 +127,14 @@ BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
    were never at risk (max 250 even before). The previously failing target
    `//content/browser/resources/traces_internals:build_ts` rebuilt clean in
    18 s as proof.
+   **RAM cap (2026-11-13):** at ~86% (47.7k/55.1k) run #5 lost 11
+   `code_cache_generator` ACTION steps + 1 grit at once, with NO error text,
+   plus cygwin `fork: retry: Resource temporarily unavailable` — classic
+   memory exhaustion at `-j12` on 16 GB (each code_cache_generator holds
+   ~1-2 GB; `concurrent_links = 1` only protects links). Proven by rebuilding
+   the failed targets with `-j1` (clean). Both wrappers now export `J=4`;
+   do not raise it on this machine. OOM signature for future runs: many
+   ACTION steps failing simultaneously with empty stderr.
    Log: `C:\queuepilot-engine\build.log`. When `build-wrapper exit: 0`:
    run the verify gate below against the fresh binary, then report; the
    overnight monitor task posts progress into the workspace every 2 h.
