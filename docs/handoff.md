@@ -110,18 +110,23 @@ BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
    `Windows Kits\10\Debuggers\x64` (UAC), QueuePilot icon generated at
    `C:\queuepilot-engine\assets\icon.png` (Fury's branding is NOT ours to
    ship), layout fix in our copy of `build/link-icons-windows.ps1`.
-   **Windows MAX_PATH fix (2026-11-12, three failed runs diagnosed):** grit's
+   **Windows MAX_PATH fix (2026-11-12, four failed runs diagnosed):** grit's
    flattenhtml opens resources as `..\..\out\<outdir>\gen\...` relative to
    ninja's CWD; the deep root (`C:\queuepilot-engine\src\out\windows-x64-first-
    16gb.noindex` = 60 chars) pushed the longest resource open to 262 > 260 →
    deterministic ENOENT on files that exist (`components_resources_grit`).
    NOT antivirus, NOT stale locks, NOT a Fury patch (proven by isolated
-   reproduction: `os.path.exists` true, `open()` ENOENT). Fix: `subst Q:
-   C:\queuepilot-engine` + ninja runs through `Q:` (CWD 39 chars, worst open
-   251). `build/build.sh` sets `NINJA_SRC=/q/src` on Windows (gn gen keeps the
-   real path so no object rebuilds); `build-run.sh` re-creates the subst every
-   launch (subst dies on reboot). Compiler-opened files were never at risk
-   (max combined 250 via real path, 228 via Q:).
+   reproduction: `os.path.exists` true, `open()` ENOENT).
+   **A subst drive is NOT the fix**: python tools mix `os.getcwd()` (keeps
+   the subst letter) with `os.path.realpath()` (resolves to the target drive)
+   → `ValueError: path is on mount 'C:', start on mount 'Q:'` in
+   `validate_tsconfig.py`. **The working fix: the build root itself lives at
+   the short real path `C:\qe`** (instant same-volume rename; ninja files are
+   fully root-relative, zero rebuilds), with junction `C:\queuepilot-engine`
+   → `C:\qe` so every existing script/reference keeps working. Compiler opens
+   were never at risk (max 250 even before). The previously failing target
+   `//content/browser/resources/traces_internals:build_ts` rebuilt clean in
+   18 s as proof.
    Log: `C:\queuepilot-engine\build.log`. When `build-wrapper exit: 0`:
    run the verify gate below against the fresh binary, then report; the
    overnight monitor task posts progress into the workspace every 2 h.
