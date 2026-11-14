@@ -143,9 +143,9 @@ Fix shape (AliasMode's proven pattern, re-implemented):
 | Tab ops (open/close/related) | ✅ |
 | Scripting against live profiles | ✅ `queuepilot script` |
 | Playwright/Puppeteer attach helpers | ✅ |
-| Resolver registry (captcha etc.) | ❌ the moat gap |
-| Parser registry (per-site extractors) | ❌ the moat gap |
-| Plugin system | ❌ |
+| Resolver registry (2FA/captcha etc.) | 🟡 | static/env/webhook/imap/gmail + plugin-registered; captcha-provider APIs = plugin content |
+| Parser registry (per-site extractors) | ✅ | `ParserRegistry` user `.mjs`; `/parsers/:name/run` |
+| Plugin system | ✅ | `.mjs` plugins, namespaced resolvers, enable/disable, logs |
 | Warmup recorder | ❌ |
 | Console UX depth (bulk ops, search, health badges) | 🟡 vanilla dashboard now; React migration per ADR-0005 |
 

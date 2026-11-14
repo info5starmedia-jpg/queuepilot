@@ -54,6 +54,79 @@ export const ProfileSchema = z.object({
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 
+/**
+ * Typed 2FA/persona fields — the Jancy panel's address/DOB/phone/SMS/passcode
+ * columns, living in `profile.extra` under these exact keys (the same shape
+ * provider import already writes). This schema is the read/validate contract:
+ * the extra bag may carry anything, but these keys, when present, must parse.
+ */
+export const PersonaAddressSchema = z.object({
+  line1: z.string().nullable().default(null),
+  line2: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
+  state: z.string().nullable().default(null),
+  zip: z.string().nullable().default(null),
+});
+export type PersonaAddress = z.infer<typeof PersonaAddressSchema>;
+
+/**
+ * One SMS number. Jancy's column syntax allows a country-code suffix on the
+ * column name (`SMS Number 3:44` = +44); import normalizes that into
+ * `countryCode`, display labels ride in `label`.
+ */
+export const PersonaSmsNumberSchema = z.object({
+  label: z.string().max(60).default(""),
+  number: z.string().min(1).max(40),
+  countryCode: z.string().max(6).nullable().default(null),
+});
+export type PersonaSmsNumber = z.infer<typeof PersonaSmsNumberSchema>;
+
+export const PersonaFieldsSchema = z.object({
+  address: PersonaAddressSchema.nullable().default(null),
+  dob: z.string().max(40).nullable().default(null),
+  phone: z.string().max(40).nullable().default(null),
+  smsNumbers: z.array(PersonaSmsNumberSchema).max(50).default([]),
+  passcodes: z.array(z.string().max(200)).max(50).default([]),
+  /** Jancy "Free 1 … Free 10" arbitrary columns. */
+  free: z.record(z.string(), z.string().max(4000)).default({}),
+});
+export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
+
+/** Partial update — only the keys present are merged. */
+export const UpdatePersonaInputSchema = z
+  .object({
+    address: PersonaAddressSchema.nullable().optional(),
+    dob: z.string().max(40).nullable().optional(),
+    phone: z.string().max(40).nullable().optional(),
+    smsNumbers: z.array(PersonaSmsNumberSchema).max(50).optional(),
+    passcodes: z.array(z.string().max(200)).max(50).optional(),
+    free: z.record(z.string(), z.string().max(4000)).optional(),
+    /**
+     * Well-known 2FA fields (see PERSONA_WELL_KNOWN_FIELDS), stored in
+     * `extra.fields`. Values may be literals OR resolver specs (`webhook:…`,
+     * `@alias`, …) — resolved on demand by the resolve endpoint. Max 50 keys.
+     */
+    fields: z.record(z.string(), z.string().max(2000)).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" })
+  .refine((v) => !v.fields || Object.keys(v.fields).length <= 50, {
+    message: "at most 50 well-known fields",
+  });
+export type UpdatePersonaInput = z.input<typeof UpdatePersonaInputSchema>;
+
+/**
+ * Well-known 2FA field names (Jancy's `password=` / `smscode=` / `emailcode=`
+ * / `othercode=` columns). Values live in `extra.fields` and may be literals
+ * OR resolver specs (`webhook:…`, `@alias`, …) — resolved on demand.
+ */
+export const PERSONA_WELL_KNOWN_FIELDS = [
+  "password",
+  "smscode",
+  "emailcode",
+  "othercode",
+] as const;
+export type PersonaWellKnownField = (typeof PERSONA_WELL_KNOWN_FIELDS)[number];
+
 export const CreateProfileInputSchema = z.object({
   name: z.string().min(1).max(120),
   group: z.string().max(120).optional(),

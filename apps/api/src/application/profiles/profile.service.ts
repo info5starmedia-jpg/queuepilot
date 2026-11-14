@@ -10,6 +10,13 @@ import {
 import type { ProfileRepository, FingerprintIdentityRepository } from "./profile.repository.js";
 import { generateIdentity } from "./fingerprint-generator.js";
 import { hostPrimaryDisplay } from "./host-display.js";
+import {
+  currentSms,
+  mergePersonaFields,
+  nextSmsIndex,
+  personaFieldsOf,
+} from "./persona-fields.js";
+import type { UpdatePersonaInput } from "@queuepilot/contracts";
 import type { ProxyRepository } from "../proxies/proxy.repository.js";
 
 export class ProfileService {
@@ -114,5 +121,49 @@ export class ProfileService {
       throw new DomainError(ErrorCodes.CONFLICT, "stop the browser before deleting the profile");
     }
     this.profiles.delete(id);
+  }
+
+  /**
+   * Typed merge of the Jancy 2FA/persona columns (address/DOB/phone/SMS/
+   * passcodes/Free). Only the keys present in `input` change; the rest of the
+   * extra bag rides through untouched.
+   */
+  updatePersona(id: string, input: unknown): Profile {
+    const p = this.get(id);
+    const extra = mergePersonaFields(p.extra, input as UpdatePersonaInput);
+    const next: Profile = { ...p, extra, updatedAt: new Date().toISOString() };
+    this.profiles.update(next);
+    return next;
+  }
+
+  /**
+   * Jancy SMS cycling: advance `extra.smsIndex` by one (wrapping is handled
+   * at read time) and return the newly current number. Refuses loudly when
+   * the profile has no SMS numbers — cycling nothing is a caller bug, not a
+   * silent no-op.
+   */
+  rotateSms(id: string): { index: number; total: number; number: string; label: string; countryCode: string | null } {
+    const p = this.get(id);
+    const fields = personaFieldsOf(p.extra);
+    const current = currentSms(fields, nextSmsIndex(p.extra));
+    if (!current) {
+      throw new DomainError(
+        ErrorCodes.CONFLICT,
+        "profile has no SMS numbers to cycle",
+      );
+    }
+    const next: Profile = {
+      ...p,
+      extra: { ...(p.extra ?? {}), smsIndex: nextSmsIndex(p.extra) },
+      updatedAt: new Date().toISOString(),
+    };
+    this.profiles.update(next);
+    return {
+      index: current.index,
+      total: current.total,
+      number: current.number.number,
+      label: current.number.label,
+      countryCode: current.number.countryCode,
+    };
   }
 }

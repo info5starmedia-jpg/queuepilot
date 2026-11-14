@@ -60,6 +60,20 @@ export function registerProfileRoutes(
     return service.regenerateFingerprint(id, body.platform);
   });
 
+  // Jancy 2FA/persona columns — typed merge over profile.extra.
+  app.patch("/profiles/:id/persona", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.updatePersona(id, req.body);
+  });
+
+  // SMS cycling (Jancy's rotate command): advances the persisted index and
+  // returns the newly current number. 409 CONFLICT when there is nothing to
+  // cycle — never a silent no-op.
+  app.post("/profiles/:id/sms/rotate", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.rotateSms(id);
+  });
+
   app.delete("/profiles/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     // Wait out any in-flight start/stop before the row goes (EBUSY guard).

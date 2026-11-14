@@ -398,9 +398,29 @@ its sub-steps and goal in one place.
    imap resolver covers the app-password path (f890417). sms-gateway
    variants ride the generic webhook; textchest-style providers = plugin
    content.
-4. 🟡 **JYL capability adoption** (2026-11-14, 74d46e6) — user commands +
+4. ✅ **JYL capability adoption** (2026-11-14, 74d46e6 + 8444c07) — user commands +
    macros as `.mjs` modules with ctx {args, profileId, log, store, fetch};
-   `/jyl/run` API. Remaining: JYL web endpoints + settings bundles.
+   `/jyl/run` API; JYL web endpoints + settings bundles in P7.10.
+5. ✅ **Persona fields — the Jancy 2FA layer** (2026-11-14, v0.14) — typed
+   read/validate layer over the provider-imported persona columns:
+   - Contracts: `PersonaFieldsSchema` / `PersonaAddressSchema` /
+     `PersonaSmsNumberSchema` / `UpdatePersonaInputSchema` (incl. well-known
+     `fields`) + `PERSONA_WELL_KNOWN_FIELDS` in `@queuepilot/contracts`.
+   - `PATCH /profiles/:id/persona` — validated partial merge into
+     `profile.extra`; unknown bag keys ride through untouched.
+   - `POST /profiles/:id/sms/rotate` — Jancy SMS cycling; persists
+     `extra.smsIndex`, wraps modulo; 409 when no numbers (never a silent no-op).
+   - `POST /profiles/:id/resolve` — `site` now optional; falls through Site
+     columns to well-known fields (`extra.fields`): literals pass through
+     (`pass:word` stays literal — only REGISTERED resolver prefixes resolve),
+     specs resolve with profile email/site/field context.
+   - 322/322 tests green; parity-jancy §1/§2 and parity.md §3 updated.
+
+## v0.14 — Persona fields / 2FA layer (first item)
+
+See P7 Jancy-gap item 5 above for sub-steps and goal. Remaining v0.14 items:
+credit-card typed layer + autofill wiring; per-profile proxy-list cycling;
+profile panel UX (React console per ADR-0005).
 
 ## P5.6 — Perf & startup
 

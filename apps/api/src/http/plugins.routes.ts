@@ -1,11 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
 import type { PluginRegistry } from "../application/plugins/plugin-registry.js";
 import type { ResolverRegistry, ResolverContext } from "../application/resolvers/resolver-registry.js";
 import { resolveSiteField } from "../application/resolvers/resolver-registry.js";
 import type { ParserRegistry } from "../application/parsers/parser-registry.js";
 import type { AliasStore } from "../application/resolvers/token-aliases.js";
 import type { ProfileService } from "../application/profiles/profile.service.js";
+import {
+  looksLikeSpec,
+  personaFieldValue,
+} from "../application/profiles/persona-fields.js";
 
 export interface PluginDeps {
   plugins: PluginRegistry;
@@ -21,7 +26,8 @@ const RunResolverSchema = z.object({
 });
 
 const ResolveFieldSchema = z.object({
-  site: z.string().min(1).max(200),
+  /** Site column selector. Omit to resolve a well-known persona field. */
+  site: z.string().min(1).max(200).optional(),
   field: z.string().min(1).max(60),
 });
 
@@ -76,23 +82,44 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
   });
 
   // Jancy's Site: columns — stored per profile in extra.sites, resolved here.
+  // Without a site, a well-known persona field (password/smscode/emailcode/
+  // othercode from extra.fields) resolves instead: a literal passes through,
+  // a `name:args` value whose name is a REGISTERED resolver gets resolved.
   app.post("/profiles/:id/resolve", async (req) => {
     const { id } = req.params as { id: string };
     const body = ResolveFieldSchema.parse(req.body);
     const profile = profiles.get(id);
-    const sites = (profile.extra?.sites ?? undefined) as
-      | Record<string, string>
-      | undefined;
     const ctx = resolverContext(id, profiles);
-    const out = await resolveSiteField(
-      sites,
-      body.site,
-      body.field,
-      ctx,
-      resolvers,
-      aliases,
-    );
-    return { ...out, profileId: id };
+
+    if (body.site) {
+      const sites = (profile.extra?.sites ?? undefined) as
+        | Record<string, string>
+        | undefined;
+      const out = await resolveSiteField(
+        sites,
+        body.site,
+        body.field,
+        ctx,
+        resolvers,
+        aliases,
+      );
+      if (out.found) return { ...out, profileId: id };
+      // Fall through to the well-known field — a Site column that doesn't
+      // name the field may still want the profile's global smscode, etc.
+    }
+
+    const wellKnown = PERSONA_WELL_KNOWN_FIELDS.find((f) => f === body.field);
+    if (wellKnown) {
+      const raw = personaFieldValue(profile.extra, wellKnown);
+      if (raw !== null) {
+        const registered = new Set(resolvers.list().map((r) => r.name));
+        const value = looksLikeSpec(raw, registered)
+          ? await resolvers.resolve(raw, { ...ctx, site: body.site, field: wellKnown }, aliases)
+          : raw;
+        return { found: true, field: wellKnown, value, spec: looksLikeSpec(raw, registered) ? raw : undefined, profileId: id };
+      }
+    }
+    return { found: false, profileId: id };
   });
 }
 

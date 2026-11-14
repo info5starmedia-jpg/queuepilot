@@ -30,7 +30,7 @@ import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/config.js";
 import { PluginRegistry } from "../src/application/plugins/plugin-registry.js";
-import { ResolverRegistry } from "../src/application/resolvers/resolver-registry.js";
+import { ResolverRegistry, registerBuiltinResolvers } from "../src/application/resolvers/resolver-registry.js";
 import { ParserRegistry } from "../src/application/parsers/parser-registry.js";
 import { secretAliasStore } from "../src/application/resolvers/token-aliases.js";
 import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
@@ -65,6 +65,7 @@ export interface TestContext {
   secrets: MapSecretStore;
   aliases: ReturnType<typeof secretAliasStore>;
   plugins: PluginRegistry;
+  resolvers: ResolverRegistry;
   jyl: JylRegistry;
   dataDir: string;
 }
@@ -114,6 +115,7 @@ export function makeTestContext(
   );
   const aliases = secretAliasStore(secrets);
   const resolvers = new ResolverRegistry();
+  registerBuiltinResolvers(resolvers); // same set main.ts wires in production
   const parsers = new ParserRegistry(path.join(dataDir, "parsers"));
   const plugins = new PluginRegistry(path.join(dataDir, "plugins"), resolvers, parsers);
   const jyl = new JylRegistry(path.join(dataDir, "jyl"));
@@ -153,6 +155,7 @@ export function makeTestContext(
     secrets,
     aliases,
     plugins,
+    resolvers,
     jyl,
     dataDir,
   };

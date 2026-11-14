@@ -17,8 +17,8 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Profile providers (CSV + Google Sheets, refreshable, many) | 🟡 | Sheets provider ✅ (P1.5). CSV import ✅ but see columns below |
 | Required columns `Profile/Name/Email` | ❌ | Import supports `name` only; no email column |
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ❌ |
-| Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ❌ | Not in profile model |
-| Optional: credit-card sets | ❌ | Not in profile model |
+| Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
+| Optional: credit-card sets | ❌ | Import stores them in the bag; no typed layer or autofill wiring yet |
 | Per-profile proxy list + "system connection" magic value | 🟡 | One proxyId per profile; multi-proxy cycling ❌ |
 | Tab color per profile | ❌ | |
 | Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | ❌ | Console is grid + actions only |
@@ -33,8 +33,11 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Token aliases (@alias → real key in settings) | ✅ | `@name` → SecretStore (DPAPI), `PUT/DELETE /aliases/:alias` |
 | User-defined parsers without a release (JYL) | ✅ | `.mjs` parser modules; commands/macros/web-endpoints all in `<dataDir>/jyl` |
 
-**This is the largest single gap.** Jancy's killer feature; QueuePilot has no
-2FA/code layer at all. Plugin-shaped by design (see §6).
+**Was the largest single gap.** v0.14 closed the core: resolver registry ✅,
+Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
+✅, parsers + aliases + JYL ✅. What remains is plugin/provider content
+(specific 2FA APIs) and panel UX (React-deferred). Plugin-shaped by design (see
+§6).
 
 ## 3. Proxies
 
