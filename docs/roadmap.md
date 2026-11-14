@@ -228,12 +228,14 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
    verbatim args), Site-column specs in `profile.extra.sites` (wildcard +
    most-specific), `@alias` tokens via DPAPI SecretStore, user `.mjs` parser
    modules from `<dataDir>/parsers`. 224/224 tests green.
-3. 🟡 **Provider resolvers as plugins** — imap resolver ✅ (2026-11-14,
-   f890417, gmail app-password path, `@alias` credentials, scripted-server
-   tests). Remaining: sms-gateway variants beyond the generic webhook,
-   oauth-based gmail (needs the Google OAuth flow).
-4. ⬜ **JYL capability adoption** — macros, commands, web endpoints as
-   JS/TS modules (parsers half-adopted already).
+3. ✅ **Provider resolvers** (2026-11-14, b9ee820) — gmail resolver on
+   multi-account PKCE OAuth (per-account DPAPI tokens, auto-refresh);
+   imap resolver covers the app-password path (f890417). sms-gateway
+   variants ride the generic webhook; textchest-style providers = plugin
+   content.
+4. 🟡 **JYL capability adoption** (2026-11-14, 74d46e6) — user commands +
+   macros as `.mjs` modules with ctx {args, profileId, log, store, fetch};
+   `/jyl/run` API. Remaining: JYL web endpoints + settings bundles.
 
 ## P5.6 — Perf & startup (open)
 
