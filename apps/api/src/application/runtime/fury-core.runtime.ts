@@ -22,6 +22,7 @@ import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
 import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
 import { egressIpViaRelay } from "./egress-check.js";
 import { getOrCreateOscryptKey } from "./oscrypt-key.js";
+import { applyBookmarkSets, normalizeBookmarkSets } from "./bookmark-sets.js";
 import {
   claimedScreenArea,
   cdpWindowDriver,
@@ -76,6 +77,17 @@ export class FuryCoreRuntime implements BrowserRuntime {
       );
     }
     fs.mkdirSync(request.profileDataDir, { recursive: true });
+
+    // Start pages on EVERY launch (Fury 0.5.2 parity): the engine opens the
+    // profile's start URLs each start, not just the first. extra.url is the
+    // Jancy URL column (single); extra.startUrls is the array form.
+    const startUrls = startUrlsOf(request.profile);
+    // Bookmark sets (Fury 0.5.3 parity), runtime-side: merged into Chromium's
+    // own Bookmarks file before launch; browser-made bookmarks untouched.
+    const bookmarkSets = normalizeBookmarkSets(request.profile.extra?.bookmarkSets);
+    if (bookmarkSets.length > 0) {
+      applyBookmarkSets(request.profileDataDir, bookmarkSets);
+    }
 
     const debugPort = await findFreePort();
     const config = personaConfig(request.identity);
@@ -137,7 +149,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
       "--no-default-browser-check",
       `--window-size=${initialSize.width},${initialSize.height}`,
       ...(relay ? [`--proxy-server=http://127.0.0.1:${relay.port}`] : []),
-      "about:blank",
+      ...startUrls,
     ];
 
     // Named launch refusals (AliasMode discipline): every failure says WHICH
@@ -167,6 +179,35 @@ export class FuryCoreRuntime implements BrowserRuntime {
     }
     return new FurySession(child, enginePid, debugPort, relay, fitArea, egress);
   }
+}
+
+/**
+ * Start URLs for a launch, from the profile's extra bag: `startUrls` (array)
+ * wins; Jancy's single `url` column is the fallback. Only http/https pass;
+ * anything else is dropped (a bad URL must never become a launch arg), and
+ * an empty result means the engine opens its default about:blank.
+ */
+export function startUrlsOf(profile: {
+  extra: Record<string, unknown> | null;
+}): string[] {
+  const extra = profile.extra ?? {};
+  const raw =
+    Array.isArray(extra.startUrls) && extra.startUrls.length > 0
+      ? extra.startUrls
+      : typeof extra.url === "string" && extra.url.trim() !== ""
+        ? [extra.url]
+        : [];
+  const urls: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    try {
+      const u = new URL(item.trim());
+      if (u.protocol === "http:" || u.protocol === "https:") urls.push(item.trim());
+    } catch {
+      // Not a URL — never lands in argv.
+    }
+  }
+  return urls.length > 0 ? urls : ["about:blank"];
 }
 
 /**

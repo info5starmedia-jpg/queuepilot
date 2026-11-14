@@ -274,13 +274,23 @@ Sub-steps:
     refresh); ADR if it changes the proxy model.
 Goal check: D-002 test green; D-003 ADR merged.
 
-### 9. Fury 0.5.5 additions scan (from their 2026-11-14 update)
-- **Bookmark sets** (0.5.3): named link folders deployed at launch, written
-  at the front of the bookmarks bar with the set id in meta_info;
-  browser-made bookmarks never touched. Sub-steps: schema → launch wiring →
-  claim → docs.
-- **Start pages on every launch** (0.5.2): profile start URLs passed at
-  every start, not just the first. Sub-steps: launch wiring → test → docs.
+### 9. Fury 0.5.5 additions scan (from their 2026-11-14 update) — ✅ DONE 2026-11-14
+- **Bookmark sets** — ✅ implemented at the runtime layer (our engine's
+  config schema has no bookmark key; a C++ rebuild for a file-format feature
+  would be waste): `profile.extra.bookmarkSets` is merged into Chromium's
+  own `Default/Bookmarks` before launch — folders at the bar front,
+  `meta_info.qp_set_id` marker, re-launch replaces managed folders (a
+  removed set disappears), browser-made bookmarks never touched, checksum
+  dropped (Chromium regenerates), atomic write. Validation: named errors for
+  bad URLs / duplicate ids / non-http schemes. 6 unit tests.
+- **Start pages on every launch** — ✅ `startUrlsOf()` reads
+  `profile.extra.startUrls[]` (array) or the Jancy `url` column (single) at
+  EVERY launch and puts them in argv in place of about:blank; non-URL and
+  non-http(s) entries never reach argv. 4 unit tests.
+- **Live**: verify suite sets both on the probe profile; new claims
+  `start-pages-launched` and `bookmark-sets` PASS — 27/27 standard,
+  24/29+4sk proxy, 24/29+4sk socks5. In proxy modes the start page itself
+  transits the recording upstream.
 - Skipped deliberately: commercial store/partner UI, account-recovery
   server (not our mission).
 

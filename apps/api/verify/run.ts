@@ -372,6 +372,18 @@ export async function runVerification(
     : args.proxy
       ? { kind: "http" as const, ...(await startRecordingUpstream()) }
       : null;
+  // P7.9 proof inputs: the profile asks for the probe page as its start URL
+  // and carries a bookmark set. The claims below check both materialized.
+  profile.extra = {
+    url: probe.url,
+    bookmarkSets: [
+      {
+        id: "verify-set",
+        name: "Verify",
+        links: [{ name: "Probe", url: probe.url }],
+      },
+    ],
+  };
   try {
     session = await runtime.launch({
       profile,
@@ -450,6 +462,46 @@ export async function runVerification(
           detail: "session recorded no egress facts (relay/exit-IP) for the diagnostics surface",
         });
       }
+    }
+
+    // P7.9 claims: start pages opened at launch, bookmark set materialized.
+    // Both are engine-independent behaviors our runtime layer owns.
+    {
+      const norm = (u: string) => u.replace(/\/+$/, "");
+      const targets = (await (
+        await fetch(`http://127.0.0.1:${session.debugPort}/json`)
+      ).json()) as { url?: string }[];
+      const opened = targets.some((t) => norm(t.url ?? "") === norm(probe.url));
+      results.push({
+        id: "start-pages-launched",
+        pass: opened,
+        detail: opened
+          ? `engine opened the profile start URL ${probe.url} at launch`
+          : `no tab shows ${probe.url}; engine tabs: ${targets
+              .map((t) => t.url ?? "?")
+              .join(", ")
+              .slice(0, 120)}`,
+      });
+
+      const bmPath = path.join(args.dataDir, "verify-profile", "Default", "Bookmarks");
+      let bmPass = false;
+      let bmDetail = "Bookmarks file not written";
+      try {
+        const bm = JSON.parse(fs.readFileSync(bmPath, "utf8")) as {
+          roots?: { bookmark_bar?: { children?: { name?: string; meta_info?: Record<string, string>; children?: { url?: string }[] }[] } };
+        };
+        const folder = (bm.roots?.bookmark_bar?.children ?? []).find(
+          (n) => n?.meta_info?.qp_set_id === "verify-set",
+        );
+        const link = folder?.children?.find((l) => (l.url ?? "").startsWith("http"));
+        bmPass = Boolean(folder && link);
+        bmDetail = bmPass
+          ? `set "${folder!.name}" with ${folder!.children!.length} link(s) on the bar`
+          : "managed folder/link missing from the bar";
+      } catch (err) {
+        bmDetail = `Bookmarks unreadable: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      results.push({ id: "bookmark-sets", pass: bmPass, detail: bmDetail });
     }
 
     let failed = 0;
