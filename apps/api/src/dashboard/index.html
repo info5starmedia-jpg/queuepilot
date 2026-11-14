@@ -36,6 +36,29 @@
       </section>
 
       <section>
+        <div class="section-head">
+          <h2>Import profiles (CSV)</h2>
+          <span class="hint">dry-run first, then apply</span>
+        </div>
+        <div id="import">
+          <div class="import-controls">
+            <input type="file" id="import-file" accept=".csv,text/csv" />
+            <textarea
+              id="import-csv"
+              rows="5"
+              placeholder="name,group,proxyType,proxyHost,proxyPort,proxyUsername,proxyPassword,tags,notes"
+            ></textarea>
+            <label><input type="checkbox" id="import-upsert" /> update existing profiles with the same name</label>
+            <div class="actions">
+              <button id="import-preview" class="secondary">Preview (dry run)</button>
+              <button id="import-apply" disabled>Apply import</button>
+            </div>
+          </div>
+          <div id="import-result"></div>
+        </div>
+      </section>
+
+      <section>
         <div class="section-head"><h2>Proxies</h2></div>
         <table id="proxies">
           <thead>

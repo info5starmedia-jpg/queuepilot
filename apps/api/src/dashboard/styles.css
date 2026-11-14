@@ -227,3 +227,21 @@ td.mono {
 .events li.tab-opened .type {
   color: var(--green);
 }
+
+/* CSV import */
+#import textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, monospace;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin: 8px 0;
+}
+.import-controls .actions { display: flex; gap: 8px; margin-top: 8px; }
+#import-result { margin-top: 10px; }
+.import-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.import-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.import-err td { color: var(--red); }

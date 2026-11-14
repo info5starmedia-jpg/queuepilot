@@ -164,6 +164,78 @@ async function loadProxies() {
   }
 }
 
+/* ---------------- CSV import ---------------- */
+
+let lastImportCsv = null; // csv text that passed a dry run
+
+function renderImportResult(data, applied) {
+  const box = $("#import-result");
+  const rows = (data.results ?? [])
+    .map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.action)}</td></tr>`)
+    .join("");
+  const errs = (data.errors ?? [])
+    .map(
+      (e) =>
+        `<tr class="import-err"><td>${esc(e.name)}</td><td>row ${esc(e.row)}: ${esc(e.message)}</td></tr>`,
+    )
+    .join("");
+  box.innerHTML = `
+    <p class="hint">${applied ? "Imported" : "Dry run"}: ${data.succeeded}/${data.total} ok${data.errors?.length ? `, ${data.errors.length} error${data.errors.length === 1 ? "" : "s"}` : ""}</p>
+    <table class="import-table"><tbody>${rows}${errs}</tbody></table>`;
+}
+
+async function runImport(dryRun) {
+  const csv = $("#import-csv").value.trim();
+  if (!csv) return;
+  const data = await api("/profiles/import", {
+    method: "POST",
+    body: JSON.stringify({
+      csv,
+      dryRun,
+      upsert: $("#import-upsert").checked,
+    }),
+  });
+  renderImportResult(data, !dryRun);
+  $("#import-apply").disabled = dryRun ? data.succeeded === 0 : true;
+  if (dryRun) lastImportCsv = csv;
+  if (!dryRun) await loadProfiles();
+}
+
+$("#import-file").addEventListener("change", (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    $("#import-csv").value = String(reader.result ?? "");
+    $("#import-apply").disabled = true;
+  };
+  reader.readAsText(f);
+});
+
+$("#import-csv").addEventListener("input", () => {
+  $("#import-apply").disabled = true;
+});
+
+$("#import-preview").addEventListener("click", async () => {
+  try {
+    await runImport(true);
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+});
+
+$("#import-apply").addEventListener("click", async () => {
+  if ($("#import-csv").value.trim() !== lastImportCsv) {
+    $("#import-apply").disabled = true;
+    return;
+  }
+  try {
+    await runImport(false);
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+});
+
 /* ---------------- live events (SSE) ---------------- */
 
 function pushEvent(e) {
