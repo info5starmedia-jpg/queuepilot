@@ -169,20 +169,23 @@ are green — (a) code, (b) tests proving the behavior, (c) docs updated
 (roadmap + parity row), (d) live verify on our own binary where the item
 touches the engine. No green checkbox without a live check.
 
-### 1. os-crypt wiring (parity 0110) — THE LONG POLE, start first
-Goal: cookies never sit in engine-side plaintext; they live behind the
-SecretStore port (DPAPI), matching Chrome's own os-crypt model.
-Sub-steps:
-- a. Port Fury parity-0110 patch (cookie encryption service) into
-  `engine/core/patches/` with provenance + license header.
-- b. Runtime wiring: cookie read/write path goes through SecretStore;
-  pre-existing plaintext cookies migrate lazily on first read.
-- c. `verify-0110` claim: cookies encrypted at rest on OUR binary,
-  decryptable only by this user. Add to claim suite.
-- d. Full engine rebuild (est. 6–12h machine time — schedule overnight),
-  then Fury harness + full claim suite + parity audit re-run.
-Goal check: parity 0110 row flips to done; claim suite all green on the
-new binary.
+### 1. os-crypt wiring (parity 0110) — ✅ DONE 2026-11-14 (no rebuild needed)
+Goal: cookies encrypt at rest under a per-profile key; a moved profile still
+opens its jar. Result: the patch was ALREADY built into our binary (series
+line 429) — the gap was runtime wiring only, so the predicted overnight
+rebuild turned out to be unnecessary.
+- a. ✅ Patch present in `engine/patches/0110-os-crypt-key.patch` + series.
+- b. ✅ Runtime wiring: `runtime/oscrypt-key.ts` mints a per-profile 32-byte
+    key at `<profileDataDir>/.queuepilot/oscrypt.key` (0o600; wrong-size files
+    are set aside, never overwritten); the PowerShell bootstrap hands it over
+    as an inherited HANDLE via `--fury-oscrypt-file-handle` alongside the
+    persona config handle. Key lives in the profile dir (not DPAPI) so it
+    travels with the profile per Fury's 0110 design; the trade-off is
+    documented in parity.md.
+- c. ✅ `engine/verify/verify-0110.py` on OUR binary: **7/7 claims PASS** —
+    ciphertext on disk, same key reads back, wrong key degrades to an empty
+    jar, control proves the key (not the file) does the work.
+- d. ✅ Parity row flipped; unit tests for key management (3 tests).
 
 ### 2. socks5 in proxy-relay
 Goal: `PROXY_UNSUPPORTED` never fires for socks5 upstreams.

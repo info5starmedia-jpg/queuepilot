@@ -20,6 +20,7 @@ import { CdpConnection } from "./cdp/cdp-connection.js";
 import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
 import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
 import { egressIpViaRelay } from "./egress-check.js";
+import { getOrCreateOscryptKey } from "./oscrypt-key.js";
 import {
   claimedScreenArea,
   cdpWindowDriver,
@@ -41,7 +42,10 @@ import {
  * command line containing the whole persona would leak it to any local
  * observer. The browser refuses to start on an unparseable config rather than
  * run half-configured. Our attestation endpoint then proves the persona
- * materialized — the spike's acceptance gate.
+ * materialized — the spike's acceptance gate. The same HANDLE contract
+ * carries the per-profile os-crypt key (0110,
+ * `--fury-oscrypt-file-handle=<uint32>`); unlike the config, a missing key
+ * degrades to the machine key, never a refusal.
  *
  * Node cannot mint an inheritable HANDLE or read its raw value, so the actual
  * spawn goes through a short PowerShell bootstrap (-EncodedCommand, no file
@@ -104,6 +108,12 @@ export class FuryCoreRuntime implements BrowserRuntime {
     const configPath = path.join(request.profileDataDir, "fury-config.json");
     fs.writeFileSync(configPath, JSON.stringify(config));
 
+    // Parity 0110: per-profile os-crypt key so cookies/passwords encrypt at
+    // rest under a key that travels with the profile. Missing key is NOT
+    // fatal (engine falls back to the machine key) — but a profile we own
+    // always has one.
+    const oscryptKeyPath = getOrCreateOscryptKey(request.profileDataDir);
+
     const fitArea = claimedScreenArea(request.identity);
     const initialSize = initialWindowSize(request.identity);
     const engineArgs = [
@@ -121,7 +131,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
     // bare "launch failed" the operator has to guess at.
     let child: ChildProcess;
     try {
-      child = spawnFuryWithConfig(binary, configPath, engineArgs);
+      child = spawnFuryWithConfig(binary, configPath, oscryptKeyPath, engineArgs);
     } catch (err) {
       if (relay) await relay.close().catch(() => {});
       throw new DomainError(
@@ -251,9 +261,17 @@ function argvQuote(value: string): string {
   return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
 }
 
+/**
+ * Spawn the engine through the PowerShell bootstrap, handing over TWO
+ * inherited HANDLEs: the persona config (0001) and the per-profile os-crypt
+ * key (0110). Node cannot mint inheritable HANDLEs itself; .NET file handles
+ * are made inheritable with SetHandleInformation and only the handle numbers
+ * travel in argv — never the contents.
+ */
 function spawnFuryWithConfig(
   binary: string,
   configPath: string,
+  oscryptKeyPath: string,
   engineArgs: string[],
 ): ChildProcess {
   const argLine = engineArgs.map(argvQuote).join(" ");
@@ -269,14 +287,19 @@ function spawnFuryWithConfig(
     // Windows guarantees HANDLEs fit in 32 bits (WOW64 interop); IntPtr has
     // no ToUInt32 on PowerShell 5.1, so mask the Int64.
     "$h = [uint32]($raw.ToInt64() -band 0xFFFFFFFF)",
+    `$ks = [System.IO.File]::Open(${psQuote(oscryptKeyPath)}, 'Open', 'Read', 'ReadWrite')`,
+    "$kraw = $ks.SafeFileHandle.DangerousGetHandle()",
+    "[void][QueuePilotLaunch.K32]::SetHandleInformation($kraw, 1, 1)",
+    "$kh = [uint32]($kraw.ToInt64() -band 0xFFFFFFFF)",
     "$psi = New-Object System.Diagnostics.ProcessStartInfo",
     `$psi.FileName = ${psQuote(binary)}`,
-    `$psi.Arguments = "--fury-fp-file-handle=$h " + ${psQuote(argLine)}`,
+    `$psi.Arguments = "--fury-fp-file-handle=$h --fury-oscrypt-file-handle=$kh " + ${psQuote(argLine)}`,
     "$psi.UseShellExecute = $false",
     "$p = [System.Diagnostics.Process]::Start($psi)",
     "Write-Output (\"QPID:\" + $p.Id)",
     "$p.WaitForExit()",
     "$fs.Close()",
+    "$ks.Close()",
     "exit $p.ExitCode",
   ].join("\n");
   const encoded = Buffer.from(script, "utf16le").toString("base64");

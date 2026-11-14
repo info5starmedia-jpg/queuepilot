@@ -57,7 +57,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | 0080/0081 | timezone / Intl locale everywhere | ✅ | `persona-timezone`, `persona-locale` | ✅ |
 | 0082 | geolocation provider seam | ✅ | none | ❌ claim owed (needs persona geolocation field first) |
 | 0090 | permissions consistency | ✅ | `permissions-consistent` | ✅ |
-| 0110 | per-profile os-crypt key | ✅ in binary | not wired — our runtime doesn't pass the oscrypt handle | ❌ P2 (needed for portable profiles) |
+| 0110 | per-profile os-crypt key | ✅ in binary | ✅ `verify-0110` 7/7 on our binary (2026-11-14); runtime passes the key via inherited HANDLE, key travels in the profile dir `.queuepilot/oscrypt.key` | ✅ |
 | 0120 | performance.memory | ✅ | `performance-memory-present` | ✅ |
 | 0121 | battery (desktop-mains tuple) | ✅ | `battery-desktop-mains` (skips on non-secure context) | ✅ |
 | 0122 | network information | ⬜ upstream retired: Chrome's own designed noise; pinning would be a NEW tell | — | ⬜ |
