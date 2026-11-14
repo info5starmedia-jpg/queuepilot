@@ -23,7 +23,7 @@ const DIST = process.env.QP_ENGINE_DIST ?? "C:\\queuepilot-engine\\dist";
 // Repo root = parent of this script's scripts/ directory.
 const REPO = path.dirname(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")));
 const MANIFEST = path.join(REPO, "engines.manifest.json");
-const VERSION_BASE = "0.5.1-qp";
+const VERSION_BASE = "0.5.5-qp";
 
 function fail(msg) {
   console.error(`!! publish-engine: ${msg}`);

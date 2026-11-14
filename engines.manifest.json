@@ -3,11 +3,11 @@
   "engines": [
     {
       "kind": "fury-core",
-      "version": "0.5.1-qp.2",
+      "version": "0.5.5-qp.3",
       "platform": "windows-x64",
-      "url": "file:///C:/queuepilot-engine/dist/queuepilot-core-0.5.1-qp.2-windows-x64.tar.xz",
-      "sha256": "717256d38f2cc79eb58161c311a0c30ebdfeea829ad411c06dbd9f1d164e47e7",
-      "sizeBytes": 283422312,
+      "url": "file:///C:/queuepilot-engine/dist/queuepilot-core-0.5.5-qp.3-windows-x64.tar.xz",
+      "sha256": "064726cb32f8c869a82fc9ea4e833679a061ca26448c525538f1d43fc27be25c",
+      "sizeBytes": 283423228,
       "archive": "tar.xz",
       "binaryPath": "Fury/chrome.exe"
     }
