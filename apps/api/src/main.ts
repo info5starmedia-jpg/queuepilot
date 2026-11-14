@@ -137,7 +137,7 @@ export async function main(): Promise<void> {
   const bundles = new BundleService(profiles, lifecycle, {
     export: exportCookiesViaCdp,
     import: importCookiesViaCdp,
-  });
+  }, proxies);
 
   const app = buildApp({
     config,

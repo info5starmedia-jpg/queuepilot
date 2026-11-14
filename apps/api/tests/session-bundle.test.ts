@@ -7,6 +7,7 @@ import {
 } from "../src/application/bundles/session-bundle.js";
 import { BundleService } from "../src/application/bundles/bundle.service.js";
 import { ErrorCodes as Codes } from "@queuepilot/contracts";
+import { makeTestContext } from "./helpers.js";
 
 const COOKIES: BundleCookie[] = [
   {
@@ -75,7 +76,16 @@ describe("BundleService", () => {
     const exported: BundleCookie[][] = [];
     const imported: BundleCookie[][] = [];
     const service = new BundleService(
-      { get: (id: string) => ({ id, name: "p1" }) } as never,
+      {
+        get: (id: string) => ({
+          id,
+          name: "p1",
+          group: "default",
+          tags: [],
+          notes: "",
+          proxyId: null,
+        }),
+      } as never,
       {
         activeRun: () => (opts.running === false ? null : ({ id: "r1" } as never)),
         sessionFor: () =>
@@ -83,6 +93,7 @@ describe("BundleService", () => {
             ? null
             : ({ wsEndpoint: "ws://127.0.0.1:9222" } as never),
         engineKind: () => "fury",
+        listTabs: () => ({ tabs: [], partitions: [] }),
       } as never,
       {
         export: async () => {
@@ -128,5 +139,81 @@ describe("BundleService", () => {
       code: Codes.BUNDLE_INVALID,
     });
     expect(imported).toHaveLength(0);
+  });
+});
+
+describe("BundleService v2 restore", () => {
+  function ctx() {
+    const { profiles, proxies, lifecycle } = makeTestContext();
+    const imported: BundleCookie[][] = [];
+    const service = new BundleService(profiles, lifecycle, {
+      export: async () => COOKIES,
+      import: async (_ws: string, cookies: BundleCookie[]) => {
+        imported.push(cookies);
+      },
+    }, proxies);
+    return { service, profiles, proxies, imported };
+  }
+
+  it("restores a bundle into a NEW profile with metadata and cookies", async () => {
+    const { service, profiles, imported } = ctx();
+    const bundle = createSessionBundle("pw", {
+      ...MANIFEST,
+      profileName: "roam-me",
+      group: "family",
+      tags: ["a", "b"],
+      notes: "from the other machine",
+      tabUrls: ["https://example.com/one"],
+
+    }, COOKIES);
+    const out = await service.restoreBundle("pw", bundle.toString("base64"), { startNow: true });
+    expect(out.created).toBe(true);
+    expect(out.cookiesImported).toBe(COOKIES.length);
+    expect(imported).toHaveLength(1);
+    const p = profiles.get(out.profileId);
+    expect(p.group).toBe("family");
+    expect(p.tags).toEqual(["a", "b"]);
+  });
+
+  it("matches an existing local proxy and never invents credentials", async () => {
+    const { service, profiles, proxies } = ctx();
+    const proxy = proxies.create({ name: "home", type: "http", host: "1.2.3.4", port: 8080, username: "u", password: "p" });
+    const bundle = createSessionBundle("pw", {
+      ...MANIFEST,
+      profileName: "with-proxy",
+      proxy: { type: "http", host: "1.2.3.4", port: 8080, username: "u" },
+      // cookieCount is computed by createSessionBundle
+    }, []);
+    const out = await service.restoreBundle("pw", bundle.toString("base64"));
+    expect(out.proxyMatched).toBe(true);
+    expect(profiles.get(out.profileId).proxyId).toBe(proxy.id);
+
+    const unknown = createSessionBundle("pw", {
+      ...MANIFEST,
+      profileName: "no-proxy-match",
+      proxy: { type: "http", host: "9.9.9.9", port: 1, username: null },
+      // cookieCount is computed by createSessionBundle
+    }, []);
+    const out2 = await service.restoreBundle("pw", unknown.toString("base64"));
+    expect(out2.proxyMatched).toBe(false);
+    expect(out2.warnings.join(" ")).toMatch(/not on this machine/);
+    expect(profiles.get(out2.profileId).proxyId).toBeNull();
+  });
+
+  it("upserts an existing profile by name instead of duplicating", async () => {
+    const { service, profiles } = ctx();
+    const first = await service.restoreBundle("pw", createSessionBundle("pw", { ...MANIFEST, profileName: "twice" }, []).toString("base64"));
+    const second = await service.restoreBundle("pw", createSessionBundle("pw", { ...MANIFEST, profileName: "twice", group: "g2" }, []).toString("base64"));
+    expect(second.created).toBe(false);
+    expect(profiles.get(second.profileId).group).toBe("g2");
+    expect(profiles.list().filter((p) => p.name === "twice")).toHaveLength(1);
+  });
+
+  it("wrong passphrase refuses before touching anything", async () => {
+    const { service, profiles } = ctx();
+    await expect(
+      service.restoreBundle("nope", createSessionBundle("pw", { ...MANIFEST, profileName: "ghost" }, []).toString("base64")),
+    ).rejects.toMatchObject({ code: ErrorCodes.BUNDLE_INVALID });
+    expect(profiles.list().filter((p) => p.name === "ghost")).toHaveLength(0);
   });
 });

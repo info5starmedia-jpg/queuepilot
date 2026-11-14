@@ -41,6 +41,19 @@ export interface SessionBundleManifest {
   engineKind: string;
   exportedAt: string;
   cookieCount: number;
+  /** v2 additions (all optional — v1 bundles keep importing). */
+  group?: string;
+  tags?: string[];
+  notes?: string;
+  /** Open tab URLs at export time (roaming restores them after import). */
+  tabUrls?: string[];
+  /**
+   * Sanitized proxy reference: no password — on Windows passwords live in
+   * the DPAPI SecretStore and are machine-bound BY DESIGN. A restore matches
+   * an existing local proxy by type/host/port/username; it never invents
+   * credentials.
+   */
+  proxy?: { type: string; host: string; port: number; username: string | null } | null;
 }
 
 /** Envelope: header plaintext (format/version for future migrations), body ciphertext. */
