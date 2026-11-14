@@ -45,6 +45,7 @@ import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
+import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
@@ -104,6 +105,8 @@ export async function main(): Promise<void> {
     parserReg,
   );
   await pluginReg.rescan();
+  const jyl = new JylRegistry(path.join(config.dataDir, "jyl"));
+  await jyl.rescan();
 
   const google = new GoogleAuthService({
     secrets: secretStore,
@@ -172,6 +175,7 @@ export async function main(): Promise<void> {
     google,
     bundles,
     plugins: pluginReg,
+    jyl,
     resolvers,
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),

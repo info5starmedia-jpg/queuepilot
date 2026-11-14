@@ -27,6 +27,8 @@ import type { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import type { ResolverRegistry } from "./application/resolvers/resolver-registry.js";
 import type { ParserRegistry } from "./application/parsers/parser-registry.js";
 import type { AliasStore } from "./application/resolvers/token-aliases.js";
+import type { JylRegistry } from "./application/jyl/jyl-registry.js";
+import { registerJylRoutes } from "./http/jyl.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -42,6 +44,7 @@ export interface AppDeps {
   resolvers?: ResolverRegistry;
   parsers?: ParserRegistry;
   aliases?: AliasStore;
+  jyl?: JylRegistry;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -86,6 +89,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       profiles: deps.profiles,
     });
   }
+  if (deps.jyl) registerJylRoutes(app, { jyl: deps.jyl });
 
   return app;
 }
