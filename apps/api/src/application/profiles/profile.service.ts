@@ -9,6 +9,7 @@ import {
 } from "@queuepilot/contracts";
 import type { ProfileRepository, FingerprintIdentityRepository } from "./profile.repository.js";
 import { generateIdentity } from "./fingerprint-generator.js";
+import { hostPrimaryDisplay } from "./host-display.js";
 import type { ProxyRepository } from "../proxies/proxy.repository.js";
 
 export class ProfileService {
@@ -29,6 +30,8 @@ export class ProfileService {
         input.platform ?? "windows",
         input.timezone ?? "UTC",
         input.locale ?? "en-US",
+        undefined,
+        hostPrimaryDisplay(),
       );
       this.identities.create(identity);
       identityId = identity.id;
@@ -96,6 +99,8 @@ export class ProfileService {
       platform ?? current?.platform ?? "windows",
       current?.timezone ?? "UTC",
       current?.locale ?? "en-US",
+      undefined,
+      hostPrimaryDisplay(),
     );
     this.identities.create(identity);
     const next: Profile = { ...p, identityId: identity.id, updatedAt: new Date().toISOString() };

@@ -7,6 +7,7 @@ import { FuryCoreRuntime, resolveFuryBinary } from "../src/application/runtime/f
 import { CamoufoxRuntime, defaultCamoufoxPath } from "../src/application/runtime/camoufox.runtime.js";
 import type { BrowserRuntime } from "../src/application/runtime/browser-runtime.js";
 import { generateIdentity } from "../src/application/profiles/fingerprint-generator.js";
+import { hostPrimaryDisplay } from "../src/application/profiles/host-display.js";
 import { cleanProfileDirStaleness } from "../src/application/runtime/profile-hygiene.js";
 
 /**
@@ -71,7 +72,7 @@ export async function runColdstart(
 ): Promise<number> {
   const args = parseArgs(argv);
   const runtime = runtimeFor(args.engine, args.dataDir);
-  const identity = generateIdentity("windows");
+  const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay());
   const hitAt: { current: number | null } = { current: null };
   const probe = await serveProbe(hitAt);
   const profileDataDir = path.join(args.dataDir, "coldstart-profile");

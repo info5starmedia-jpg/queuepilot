@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   claimedScreenArea,
+  claimedAvailArea,
   fitWindow,
   initialWindowSize,
   WindowFitWatcher,
@@ -94,6 +95,18 @@ describe("window-fit pure geometry", () => {
     expect(size.height).toBeLessThan(1080);
     expect(size.width).toBeGreaterThanOrEqual(320);
     expect(size.height).toBeGreaterThanOrEqual(240);
+  });
+
+  it("claimedAvailArea is the screen minus the persona taskbar and bounds the window", () => {
+    const identity = { screenWidth: 1440, screenHeight: 900 } as Parameters<
+      typeof claimedAvailArea
+    >[0];
+    const avail = claimedAvailArea(identity);
+    expect(avail).toEqual({ left: 0, top: 0, width: 1440, height: 852 });
+    // The opening window must fit the WORKAREA so outerHeight <= availHeight.
+    const size = initialWindowSize(identity);
+    expect(size.height).toBeLessThan(avail.height);
+    expect(size.width).toBeLessThanOrEqual(avail.width);
   });
 });
 

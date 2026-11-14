@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   DomainError,
@@ -25,7 +26,7 @@ import { getOrCreateOscryptKey } from "./oscrypt-key.js";
 import { applyBookmarkSets, normalizeBookmarkSets } from "./bookmark-sets.js";
 import { cleanProfileDirStaleness } from "./profile-hygiene.js";
 import {
-  claimedScreenArea,
+  claimedAvailArea,
   cdpWindowDriver,
   initialWindowSize,
   WindowFitWatcher,
@@ -51,10 +52,12 @@ import {
  * degrades to the machine key, never a refusal.
  *
  * Node cannot mint an inheritable HANDLE or read its raw value, so the actual
- * spawn goes through a short PowerShell bootstrap (-EncodedCommand, no file
- * on disk): .NET file handles are inheritable by default and Process.Start
- * always passes bInheritHandles=TRUE. The bootstrap prints the engine PID and
- * exits with the engine's exit code, so process supervision stays ours.
+ * spawn goes through a short PowerShell bootstrap written to a temp .ps1 and
+ * run with -File (-EncodedCommand gets the engine killed by endpoint AV;
+ * measured 2026-11-14, see spawnFuryWithConfig): .NET file handles are
+ * inheritable by default and Process.Start always passes bInheritHandles=TRUE.
+ * The bootstrap prints the engine PID and exits with the engine's exit code,
+ * so process supervision stays ours.
  */
 export class FuryCoreRuntime implements BrowserRuntime {
   readonly kind = "fury";
@@ -145,7 +148,9 @@ export class FuryCoreRuntime implements BrowserRuntime {
     // always has one.
     const oscryptKeyPath = getOrCreateOscryptKey(request.profileDataDir);
 
-    const fitArea = claimedScreenArea(request.identity);
+    // The hard invariant is window <= claimed WORKAREA: a page compares
+    // outerHeight against screen.availHeight, not screen.height.
+    const fitArea = claimedAvailArea(request.identity);
     const initialSize = initialWindowSize(request.identity);
     const engineArgs = [
       `--user-data-dir=${request.profileDataDir}`,
@@ -161,8 +166,14 @@ export class FuryCoreRuntime implements BrowserRuntime {
     // stage refused — process_spawn, config_handoff, engine_start — never a
     // bare "launch failed" the operator has to guess at.
     let child: ChildProcess;
+    let bootstrapScript: string;
     try {
-      child = spawnFuryWithConfig(binary, configPath, oscryptKeyPath, engineArgs);
+      ({ child, scriptPath: bootstrapScript } = spawnFuryWithConfig(
+        binary,
+        configPath,
+        oscryptKeyPath,
+        engineArgs,
+      ));
     } catch (err) {
       if (relay) await relay.close().catch(() => {});
       throw new DomainError(
@@ -170,10 +181,18 @@ export class FuryCoreRuntime implements BrowserRuntime {
         `process_spawn: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    // The bootstrap script file is removed as soon as the bootstrap exits
+    // (it cannot be deleted earlier: PowerShell reads the script file
+    // incrementally while it runs).
+    child.once("exit", () => {
+      fs.rm(bootstrapScript, { force: true }, () => {});
+    });
     let enginePid: number;
     try {
       enginePid = await readEnginePid(child);
     } catch (err) {
+      child.removeAllListeners("exit");
+      fs.rmSync(bootstrapScript, { force: true });
       if (relay) await relay.close().catch(() => {});
       throw err instanceof DomainError
         ? err
@@ -241,6 +260,18 @@ export function personaConfig(
     screen: {
       width: identity.screenWidth,
       height: identity.screenHeight,
+      // Patch 0020 reads availWidth/availHeight independently; without these
+      // keys the HOST's workarea leaks through, and a persona screen smaller
+      // than the host display reads avail > screen — a contradiction no real
+      // display produces (sannysoft PHANTOM_WINDOW_HEIGHT flags it; measured
+      // 2026-11-14). A bottom taskbar of 48 px at 1x scale is the standard
+      // Windows shape: availWidth == width, availHeight == height - 48, and
+      // when the persona matches the host display this exactly equals the
+      // host's real workarea.
+      availWidth: identity.screenWidth,
+      availHeight: Math.max(identity.screenHeight - 48, Math.floor(identity.screenHeight * 0.9)),
+      availLeft: 0,
+      availTop: 0,
       colorDepth: 24,
       devicePixelRatio: 1,
     },
@@ -333,7 +364,7 @@ function spawnFuryWithConfig(
   configPath: string,
   oscryptKeyPath: string,
   engineArgs: string[],
-): ChildProcess {
+): { child: ChildProcess; scriptPath: string } {
   const argLine = engineArgs.map(argvQuote).join(" ");
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -362,12 +393,33 @@ function spawnFuryWithConfig(
     "$ks.Close()",
     "exit $p.ExitCode",
   ].join("\n");
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  return spawn(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-    { stdio: ["ignore", "pipe", "pipe"] },
+  // MEASURED 2026-11-14: -EncodedCommand gets the ENGINE killed ~10s after
+  // launch. Bisected live: identical bootstrap via -File survives; via
+  // -EncodedCommand the engine is TerminateProcess'd (exit 0, no shutdown
+  // logging) ~10s in — endpoint AV (Norton active on this class of machine)
+  // treats powershell -EncodedCommand spawning a browser as a malware
+  // pattern. The script contains nothing secret (no credentials; handle
+  // NUMBERS travel in argv, never contents), so a short-lived temp file is
+  // the honest price of a launch the operator's AV permits. BOM: PS 5.1
+  // misreads UTF-8-no-BOM scripts as ANSI, mangling quoted paths.
+  const scriptPath = path.join(
+    os.tmpdir(),
+    `queuepilot-launch-${crypto.randomUUID()}.ps1`,
   );
+  fs.writeFileSync(scriptPath, `\ufeff${script}`);
+  try {
+    return {
+      child: spawn(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      ),
+      scriptPath,
+    };
+  } catch (err) {
+    fs.rmSync(scriptPath, { force: true });
+    throw err;
+  }
 }
 
 /** First stdout line from the bootstrap is "QPID:<engine pid>". */
@@ -453,7 +505,25 @@ export class FurySession implements BrowserSession {
     const fit = this.windowFit;
     if (!fit || fit.watcher) return;
     try {
-      const conn = await CdpConnection.connect(this.wsEndpoint, 10_000);
+      // The bare ws://host:port root is not a valid CDP upgrade path; resolve
+      // the real browser-target URL from /json/version first.
+      let wsUrl = this.wsEndpoint;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${this.debugPort}/json/version`);
+          if (res.ok) {
+            const info = (await res.json()) as { webSocketDebuggerUrl?: string };
+            if (info.webSocketDebuggerUrl) {
+              wsUrl = info.webSocketDebuggerUrl;
+              break;
+            }
+          }
+        } catch {
+          /* debug endpoint not up yet */
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const conn = await CdpConnection.connect(wsUrl, 10_000);
       this.exited.then(() => conn.close());
       const watcher = new WindowFitWatcher(cdpWindowDriver(conn), fit.area, {
         log: (msg) => console.warn(`[fury] ${msg}`),

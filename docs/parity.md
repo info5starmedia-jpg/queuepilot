@@ -151,6 +151,45 @@ Fix shape (AliasMode's proven pattern, re-implemented):
 
 ---
 
+## 5. External checker results (third-party surfaces against OUR binary)
+
+Runner: `npx tsx verify/external-check.ts --engine fury` — launches the
+engine exactly as the product does, then reads sannysoft verdict cells by
+COMPUTED COLOR (never CSS classes) and CreepJS percentage verdicts.
+Exit 0 = ran, no critical red; 1 = definitive bot signal; 2 = site/harness
+unverifiable (never a pass, never a silent skip).
+
+| Date | Checker | Signal | Result | Verdict |
+| --- | --- | --- | --- | --- |
+| 2026-11-14 | sannysoft | all 31 verdict rows (UA, WebDriver (New), WebDriver Advanced, Chrome, Permissions, Plugins x2, Languages, WebGL vendor/renderer, Broken Image, PHANTOM_* x7, MQ_SCREEN, HEADCHR_* x5, CHR_DEBUG_TOOLS, SELENIUM_DRIVER, CHR_BATTERY, CHR_MEMORY, TRANSPARENT_PIXEL, SEQUENTUM, VIDEO_CODECS) | 31 pass / 0 fail | ✅ green |
+| 2026-11-14 | sannysoft | WebDriver (New) | "missing (passed)" | ✅ green |
+| 2026-11-14 | self facts | navigator.webdriver | false | ✅ green |
+| 2026-11-14 | CreepJS | headless / stealth percentages | 0% / 0% (trust-score line retired by the site; percentages are its verdict shape today) | ✅ green |
+
+Two real defects were found and fixed BY this check (commit P7.4):
+1. **Engine killed ~10s after launch**: PowerShell `-EncodedCommand`
+   bootstrap → the engine was TerminateProcess'd ~10s in (exit 0, no
+   shutdown logging) by endpoint AV. Bisected live: identical bootstrap via
+   `-File` survives. Fix: bootstrap runs from a temp .ps1 (unique name,
+   deleted on bootstrap exit; script carries no secrets — handle NUMBERS
+   travel in argv, never contents).
+2. **PHANTOM_WINDOW_HEIGHT red**: persona screen (e.g. 1440x900) with the
+   HOST's workarea leaking through as screen.avail* (1920x1032) →
+   avail > screen, a contradiction no real display produces. Fixes:
+   `personaConfig` now declares `screen.availWidth/availHeight` (patch 0020
+   reads them independently), identities are generated with a host-display
+   clamp (`generateIdentity(..., hostPrimaryDisplay())`), and the window-fit
+   invariant targets the claimed WORKAREA (avail), so outerHeight ≤
+   availHeight on every window.
+
+Residual accepted risk: an identity generated on a larger host and launched
+on a smaller one could again read avail > screen; the launcher always
+regenerates with the local host display, so this only affects hand-copied
+profile dirs. Engine-side belt (persona avail always declared) is in place;
+the portable-profile case is documented, not silently assumed.
+
+---
+
 ## 4. Ordered next tasks (each ships as its own commit)
 
 1. ~~**P0 proxy leak fix**~~ — DONE v0.12.0 (relay + refuse-loudly +

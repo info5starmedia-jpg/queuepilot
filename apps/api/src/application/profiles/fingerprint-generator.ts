@@ -51,8 +51,23 @@ export function generateIdentity(
   timezone = "UTC",
   locale = "en-US",
   seed: number = randomInt(1, 2 ** 31 - 1),
+  hostDisplay: { width: number; height: number } | null = null,
 ): FingerprintIdentity {
-  const [w, h] = pick(SCREENS, seed, 0x9e3779b9);
+  // A claimed screen larger than the host's real display is not just a lie —
+  // it is a physically unrealizable one: the launch sizes the window to the
+  // claimed screen minus decorations, Windows clamps the window back onto the
+  // real display, and the page reads inner/outer geometry no real windowed
+  // browser produces. sannysoft's PHANTOM_WINDOW_HEIGHT flags exactly that
+  // (measured 2026-11-14: 2560x1440 persona on a 1920x1080 host -> FAIL).
+  // When the caller knows the host display, the claimed screen MUST fit it;
+  // with no candidate fitting, claim the host's own size (a profile on this
+  // machine, like AliasMode profiles, presents this machine's display).
+  let screens = SCREENS;
+  if (hostDisplay) {
+    const fitting = SCREENS.filter(([w, h]) => w <= hostDisplay.width && h <= hostDisplay.height);
+    screens = fitting.length > 0 ? fitting : [[hostDisplay.width, hostDisplay.height]];
+  }
+  const [w, h] = pick(screens, seed, 0x9e3779b9);
   const mem = pick(platform === "windows" ? MEMORY_WINDOWS : MEMORY, seed, 0x85ebca6b);
   // Core counts that actually ship with each memory tier: a 4 GB machine
   // claiming 32 cores is a detectable incoherence.

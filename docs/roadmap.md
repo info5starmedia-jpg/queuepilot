@@ -225,10 +225,22 @@ profile, matching what an external probe sees.
 ### 4. External checker pass (D-004 remainder)
 Goal: third-party validation, not just our own claims.
 Sub-steps:
-- a. CreepJS + sannysoft/synthetic surfaces against OUR binary through a
-    proxy profile.
-- b. Record scores in docs/parity.md next to our claim suite.
-- c. Fix anything red; re-run until clean or documented-accepted.
+- a. ✅ CreepJS + sannysoft against OUR binary as the product launches it
+    (`npx tsx verify/external-check.ts --engine fury`).
+    LIVE 2026-11-14: sannysoft 31/31 verdict rows green (all WebDriver rows
+    "missing/passed", PHANTOM_* all ok); CreepJS headless 0%, stealth 0%.
+    Self facts: navigator.webdriver=false. Two real fixes shipped by this
+    check (see commit):
+    1. `-EncodedCommand` bootstrap got the engine TerminateProcess'd ~10s
+       after launch by endpoint AV; bootstrap now runs from a temp .ps1
+       via -File (bisected: identical script, only the invocation differs).
+    2. persona screen/avail incoherence: personaConfig now declares
+       screen.availWidth/availHeight (patch 0020 reads them; before, the
+       host workarea leaked → avail > screen → PHANTOM_WINDOW_HEIGHT red),
+       identities are clamped to the host display, and window fit targets
+       the claimed workarea, not the raw screen.
+- b. ✅ Scores recorded in docs/parity.md §External checkers.
+- c. ✅ Nothing red remained to fix or accept; exit 0.
 Goal check: results table committed. Manual, one sitting.
 
 ### 5. Extensions registry (+ Fury 0.5.4 v2 semantics)

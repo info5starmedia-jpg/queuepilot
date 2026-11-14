@@ -54,6 +54,22 @@ export function claimedScreenArea(identity: FingerprintIdentity | null): ScreenA
 }
 
 /**
+ * The profile's claimed WORKAREA (screen minus the persona's 48 px taskbar,
+ * exactly what personaConfig declares as screen.availWidth/availHeight).
+ * Windows must fit THIS, not the raw screen: a page that reads
+ * outerHeight > availHeight sees a window no real window manager allows.
+ */
+export function claimedAvailArea(identity: FingerprintIdentity | null): ScreenArea {
+  const screen = claimedScreenArea(identity);
+  return {
+    left: 0,
+    top: 0,
+    width: screen.width,
+    height: Math.max(screen.height - 48, Math.floor(screen.height * 0.9)),
+  };
+}
+
+/**
  * On Windows, CDP reports a maximized window with its hidden resize border,
  * which hangs off the monitor: (-8,-8,1936,1048) for a page that reads
  * (0,0,1920,1032). The border is the same on every side and at most 16 px at
@@ -252,7 +268,9 @@ export function initialWindowSize(identity: FingerprintIdentity | null): {
   width: number;
   height: number;
 } {
-  const area = claimedScreenArea(identity);
+  // Sized against the claimed WORKAREA (avail), not the raw screen: the
+  // opening window must read as smaller than screen.availHeight.
+  const area = claimedAvailArea(identity);
   return {
     width: Math.max(320, area.width - 16),
     height: Math.max(240, area.height - 40),

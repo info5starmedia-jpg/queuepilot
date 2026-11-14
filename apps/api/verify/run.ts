@@ -8,6 +8,7 @@ import { CamoufoxRuntime, defaultCamoufoxPath } from "../src/application/runtime
 import { FuryCoreRuntime, resolveFuryBinary } from "../src/application/runtime/fury-core.runtime.js";
 import type { BrowserRuntime, BrowserSession } from "../src/application/runtime/browser-runtime.js";
 import { generateIdentity } from "../src/application/profiles/fingerprint-generator.js";
+import { hostPrimaryDisplay } from "../src/application/profiles/host-display.js";
 import { withPage } from "../src/application/runtime/cdp/cdp-page.js";
 import { egressIpViaRelay } from "../src/application/runtime/egress-check.js";
 import { CLAIMS, expectationClaims, type ClaimResult, type PersonaExpectation } from "./claims.js";
@@ -343,7 +344,7 @@ export async function runVerification(
 ): Promise<number> {
   const args = parseArgs(argv);
   const runtime = runtimeFor(args.engine, args.dataDir);
-  const identity = generateIdentity("windows");
+  const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay());
   const profile: Profile = {
     id: "00000000-0000-4000-8000-000000000000",
     name: "verify-probe",
