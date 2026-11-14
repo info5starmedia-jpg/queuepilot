@@ -77,10 +77,20 @@ BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
    (path per publish output; repeat with `--proxy`).
    Status 2026-11-13: FIRST build (out\w64f3) 25/25 non-proxy, 22/22 + 4
    secure-context skips proxy (egress proof PASS).
+   Status 2026-11-14: Fury-0.5.5-parity build (out\windows-x64.noindex,
+   manifest 0.5.5-qp.3) **25/25 non-proxy, 22/22 + 4 skips proxy, both
+   GREEN** — after adding the desktop-mains battery tuple to the persona
+   (host battery was leaking through 0121's pass-through) and re-basing the
+   WebRTC claim on the 0070+0071 contract (mDNS host name, srflx raddr
+   0.0.0.0 rport 0, no private addresses).
 2. Fury verify harness on the official-build binary:
    `python /c/qe/verify/run-all.py "C:\qe\src\out\<outdir>\chrome.exe"` — all
-   per-patch checks green. Status 2026-11-13: FIRST build all 40/40 passed
-   (768s). The Windows half upstream marked "never run" now runs: fd-passing
+   per-patch checks green.
+   Status 2026-11-13: FIRST build all 40/40 passed (768s).
+   Status 2026-11-14: **43/43 passed** (761s) on the Fury-0.5.5-parity build —
+   40 base + new 0052 (font access), 0071 (WebRTC synthetic candidates), 0123
+   (built-in AI), all verified against the real binary on Windows.
+   The Windows half upstream marked "never run" now runs: fd-passing
    ported to inherited HANDLEs (--fury-fp-file-handle /
    --fury-oscrypt-file-handle, see fpconfig.py + harness.py), environment-bound
    controls SKIP loudly instead of faking (persona == host platform/screen,

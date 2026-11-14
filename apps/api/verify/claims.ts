@@ -266,13 +266,13 @@ export const CLAIMS: Claim[] = [
         }
       })()`)) as { cands: { addr: string; type: string; rest: string }[] };
       const privateIp = (a: string) =>
-        /^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/.test(a);
+        /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
       const problems: string[] = [];
       for (const c of v.cands) {
         if (privateIp(c.addr)) problems.push(`${c.type} ${c.addr} is a local address`);
         if (c.type === "host" && !c.addr.endsWith(".local"))
           problems.push(`host candidate ${c.addr} is not an mDNS name`);
-        if (c.type === "srflx" && c.rest && !/raddr 0\\.0\\.0\\.0 rport 0/.test(c.rest))
+        if (c.type === "srflx" && c.rest && !/raddr 0\.0\.0\.0 rport 0/.test(c.rest))
           problems.push(`srflx leaks related address: ${c.rest}`);
       }
       return result(
