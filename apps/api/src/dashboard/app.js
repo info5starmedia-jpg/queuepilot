@@ -49,6 +49,61 @@ async function refreshHealth() {
   }
 }
 
+/* ---------------- setup checklist (P5.5 first-run) ---------------- */
+
+async function loadChecklist() {
+  const ul = $("#checklist");
+  const items = [];
+  // 1. engine binary present
+  try {
+    const h = await api("/engine/health");
+    items.push({
+      ok: h.binaryPresent,
+      label: h.binaryPresent
+        ? `engine installed (${h.installs.length} verified install${h.installs.length === 1 ? "" : "s"})`
+        : "engine binary missing — run setup.ps1 from the engine package",
+      action: h.binaryPresent
+        ? null
+        : { text: "AV notes", href: "https://github.com/info5starmedia-jpg/queuepilot/blob/main/docs/av-notes.md" },
+    });
+  } catch {
+    items.push({ ok: false, label: "engine health unreachable" });
+  }
+  // 2. proxies configured
+  try {
+    const { proxies } = await api("/proxies");
+    items.push({
+      ok: proxies.length > 0,
+      label: proxies.length
+        ? `${proxies.length} prox${proxies.length === 1 ? "y" : "ies"} configured`
+        : "no proxies yet — profiles will use your real IP",
+    });
+  } catch {
+    items.push({ ok: false, label: "proxy list unreachable" });
+  }
+  // 3. profiles exist
+  try {
+    const { profiles } = await api("/profiles");
+    items.push({
+      ok: profiles.length > 0,
+      label: profiles.length
+        ? `${profiles.length} profile${profiles.length === 1 ? "" : "s"} ready`
+        : "no profiles yet — create one above or import a CSV",
+    });
+  } catch {
+    items.push({ ok: false, label: "profile list unreachable" });
+  }
+  ul.innerHTML = "";
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = it.ok ? "check-ok" : "check-warn";
+    li.innerHTML = `<span class="mark">${it.ok ? "✓" : "!"}</span> ${esc(it.label)}${
+      it.action ? ` <a href="${esc(it.action.href)}" target="_blank" rel="noreferrer">${esc(it.action.text)}</a>` : ""
+    }`;
+    ul.appendChild(li);
+  }
+}
+
 /* ---------------- profiles ---------------- */
 
 async function loadProfiles() {
@@ -277,6 +332,7 @@ function connectEvents() {
 /* ---------------- boot ---------------- */
 
 refreshHealth();
+loadChecklist();
 loadProfiles();
 loadProxies();
 connectEvents();

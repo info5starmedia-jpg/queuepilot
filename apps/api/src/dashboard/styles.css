@@ -245,3 +245,10 @@ td.mono {
 .import-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .import-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .import-err td { color: var(--red); }
+
+/* setup checklist */
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.checklist .mark { display: inline-block; width: 22px; font-weight: 700; }
+.check-ok .mark { color: var(--green); }
+.check-warn .mark { color: var(--amber); }

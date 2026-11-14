@@ -60,10 +60,10 @@ DRM will not work without it.
 
 ## P5.5 — Installer for family/friends
 
-- [ ] `scripts/package-installer.ps1`: NSIS or simple zip + setup.ps1 that
+- [x] `scripts/package-installer.ps1`: NSIS or simple zip + setup.ps1 that
       drops the engine into `%LOCALAPPDATA%\QueuePilot\engines\...`, writes
       the install receipt, and prints the AV-exclusion note.
-- [ ] First-run checklist in the console: engine present, claim suite quick
+- [x] First-run checklist in the console: engine present, claim suite quick
       pass, proxy test.
 
 ## P5.6 — Perf & startup
