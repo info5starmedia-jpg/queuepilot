@@ -164,27 +164,130 @@ the repo (Kimi_Agent_Jancy Clone Repo Search.zip) + public Jancy docs.
 
 ## P7 — Post-engine batch (parity audit PASSED 2026-11-14 — this batch is now unblocked)
 
-Ordered by dependency, not size. Every item ships with its claim/verify proof
-— no green checkbox without a live check, same rule as everything above.
+Standing rule for EVERY item below: no item is done until all four sub-steps
+are green — (a) code, (b) tests proving the behavior, (c) docs updated
+(roadmap + parity row), (d) live verify on our own binary where the item
+touches the engine. No green checkbox without a live check.
 
-1. **os-crypt wiring (parity 0110)** — cookies move off engine-side plaintext
-   onto the SecretStore port (DPAPI first). Acceptance: `verify-0110` green on
-   our own binary, parity row flips to done.
-2. **socks5 in proxy-relay** — currently refuses loudly (PROXY_UNSUPPORTED);
-   implement the upstream-chain path so the refusal never fires. Acceptance:
-   `egress-via-proxy` claim passes with a socks5 upstream.
-3. **Egress diagnostics API** — surface the proxy chain, DNS and WebRTC leak
-   state per running profile in the console. Acceptance: diagnostics endpoint
-   + claim proving the values match an external probe.
-4. **External checker pass (D-004 remainder)** — CreepJS / sannysoft against
-   our own binary, results recorded in docs/parity.md. Manual, one sitting.
-5. **Extensions registry** — per-profile extension install/list/remove.
-6. **TOTP field for personas** — completes the speech-persona gap too.
-7. **Team server (P5 remainder)** — self-hosted sync, roles, multi-user
-   leases, on top of the v0.12.6 encrypted bundle format.
-8. **D-002 / D-003** — PID-reuse hardening (start tokens), proxy rotation
-   links design.
-9. **React console (ADR-0005)** — optional; vanilla console is shippable.
+### 1. os-crypt wiring (parity 0110) — THE LONG POLE, start first
+Goal: cookies never sit in engine-side plaintext; they live behind the
+SecretStore port (DPAPI), matching Chrome's own os-crypt model.
+Sub-steps:
+- a. Port Fury parity-0110 patch (cookie encryption service) into
+  `engine/core/patches/` with provenance + license header.
+- b. Runtime wiring: cookie read/write path goes through SecretStore;
+  pre-existing plaintext cookies migrate lazily on first read.
+- c. `verify-0110` claim: cookies encrypted at rest on OUR binary,
+  decryptable only by this user. Add to claim suite.
+- d. Full engine rebuild (est. 6–12h machine time — schedule overnight),
+  then Fury harness + full claim suite + parity audit re-run.
+Goal check: parity 0110 row flips to done; claim suite all green on the
+new binary.
+
+### 2. socks5 in proxy-relay
+Goal: `PROXY_UNSUPPORTED` never fires for socks5 upstreams.
+Sub-steps:
+- a. Implement socks5 upstream chain in the relay (no-auth + user/pass).
+- b. Test: relay round-trip through a local socks5 server fixture.
+- c. `egress-via-proxy` claim variant with a socks5 upstream.
+Goal check: claim passes live.
+
+### 3. Egress diagnostics API
+Goal: operator sees proxy chain, DNS and WebRTC leak state per running
+profile, matching what an external probe sees.
+Sub-steps:
+- a. Diagnostics endpoint aggregating relay state + agent WebRTC keys +
+  DNS exit from the per-launch exit-IP check.
+- b. Console panel rendering it.
+- c. Claim: diagnostics values == external probe values.
+Goal check: claim green + console screenshot in docs.
+
+### 4. External checker pass (D-004 remainder)
+Goal: third-party validation, not just our own claims.
+Sub-steps:
+- a. CreepJS + sannysoft/synthetic surfaces against OUR binary through a
+    proxy profile.
+- b. Record scores in docs/parity.md next to our claim suite.
+- c. Fix anything red; re-run until clean or documented-accepted.
+Goal check: results table committed. Manual, one sitting.
+
+### 5. Extensions registry (+ Fury 0.5.4 v2 semantics)
+Goal: per-profile extension install/list/remove, ids stable across versions
+and profiles.
+Sub-steps:
+- a. Install from .crx/.zip/unpacked folder; store under the profile dir.
+- b. Pinned extension ids: generated RSA key per extension name, kept
+    machine-side (SecretStore).
+- c. Copy-from-profile WITHOUT storage (shared storage ties personas
+    together — deliberate).
+- d. Tests for install/list/remove + id stability; docs row.
+Goal check: live install + Fury parity row done.
+
+### 6. TOTP field for personas
+Goal: persona model carries TOTP seed; completes the speech-persona gap.
+Sub-steps:
+- a. Schema: persona TOTP field (stored via SecretStore, never SQLite
+    plaintext).
+- b. Generator: current code via API (used by resolvers/macros).
+- c. Tests + import-column support in CSV/Sheets providers.
+Goal check: `POST /profiles/:id/totp` returns a valid rotating code.
+
+### 7. Team server (P5 remainder) — NEXT WEEK, not this week
+Goal: self-hosted sync between family/friends machines: encrypted bundles,
+roles, multi-user leases. Foundation (encrypted bundle format, storage-level
+locking) already shipped v0.12.6.
+Sub-steps:
+- a. Server package (`apps/server`): bundle push/pull, auth tokens.
+- b. Roles: admin/operator/viewer; per-profile leases.
+- c. Client sync loop + conflict policy (machine-bound secrets never sync).
+- d. Multi-machine test: two API instances against one server.
+Goal check: profile created on machine A appears on machine B, secrets
+intact, lease prevents double-start.
+
+### 8. D-002 / D-003 hardening
+Goal: recovery proves process identity, not just liveness; rotation links
+designed.
+Sub-steps:
+- a. D-002: capture process start tokens at launch (Windows creation time),
+    store in run record, verify on recovery; test with PID-reuse simulation.
+- b. D-003: design doc for proxy rotation links (per-launch endpoint
+    refresh); ADR if it changes the proxy model.
+Goal check: D-002 test green; D-003 ADR merged.
+
+### 9. Fury 0.5.5 additions scan (from their 2026-11-14 update)
+- **Bookmark sets** (0.5.3): named link folders deployed at launch, written
+  at the front of the bookmarks bar with the set id in meta_info;
+  browser-made bookmarks never touched. Sub-steps: schema → launch wiring →
+  claim → docs.
+- **Start pages on every launch** (0.5.2): profile start URLs passed at
+  every start, not just the first. Sub-steps: launch wiring → test → docs.
+- Skipped deliberately: commercial store/partner UI, account-recovery
+  server (not our mission).
+
+### 10. JYL remainder
+Goal: Jancy's five capabilities all adopted.
+Sub-steps:
+- a. JYL web endpoints: user `.mjs` modules can register HTTP routes
+    (`POST /jyl/endpoint/...` → module handler), auth-gated by the API token.
+- b. Settings bundles: export/import of `.json` settings (aliases, plugin
+    toggles, provider configs) — portable, no secrets.
+- c. Both with tests + parity-jancy rows flipped.
+Goal check: §6 JYL row fully green.
+
+### 11. React console (ADR-0005) — optional, only if console outgrows vanilla
+Goal: migrate `src/dashboard/` to React 19 + Vite (`apps/web/`) without
+touching the API. Trigger condition: console-depth track (tabs mass-select,
+Tab Thinger, Cookie Thinger) hits vanilla maintainability limits. Sub-steps
+then: scaffold → port panels → same e2e checks → delete vanilla.
+
+### 12. P5.6 Perf & startup
+Goal: cold start < 2.5 s on this machine; no profile-dir staleness after
+hard kills.
+Sub-steps:
+- a. Measure launch → first page on the official build, record in docs.
+- b. Hygiene audit: DevToolsActivePort, Singleton* locks after kill -9;
+    fix whatever leaks.
+Goal check: numbers committed.
 
 ## Done since P7 was queued (2026-11-13/14, v0.12.6)
 
@@ -204,18 +307,8 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
 
 ## P7 additions from the Fury 0.5.5 / AliasMode update scan (2026-11-14)
 
-- **Bookmark sets** (Fury 0.5.3): named folders of links deployed to many
-  profiles at launch, written at the front of the bookmarks bar with the
-  set's id in meta_info; browser-made bookmarks never touched.
-- **Extensions registry v2** (Fury 0.5.4): install from .crx/.zip/unpacked
-  folder, pinned extension ids (generated RSA key per extension name kept
-  machine-side so ids and storage survive versions and profiles); copy from
-  another profile deliberately WITHOUT storage (shared storage = two
-  personas tied together).
-- **Start pages on every launch** (Fury 0.5.2): pass the profile's start
-  URLs at every start, not just the first.
-- Skipped deliberately: Fury's commercial store/partner UI and their
-  account-recovery server (not our family/friends mission).
+Moved into the P7 numbered list above (items 5 and 9) so every task carries
+its sub-steps and goal in one place.
 
 ## P7 Jancy-gap items (from parity-jancy.md)
 
@@ -237,9 +330,6 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
    macros as `.mjs` modules with ctx {args, profileId, log, store, fetch};
    `/jyl/run` API. Remaining: JYL web endpoints + settings bundles.
 
-## P5.6 — Perf & startup (open)
+## P5.6 — Perf & startup
 
-- Cold-start measurement (launch → first page) on the official build;
-  budget < 2.5 s on this machine.
-- Profile dir hygiene: confirm no `DevToolsActivePort` staleness, no
-  leftover Singleton* locks after hard kills.
+Folded into the P7 numbered list (item 12) with sub-steps and goal.
