@@ -184,6 +184,15 @@ export function personaConfig(
       clientRectsSeed: (seed * 3 + 2) % 2_147_483_647,
     },
     automation: { hideTraces: true },
+    // Patch 0121: our personas are desktops on mains. Without these keys the
+    // engine passes the HOST's battery tuple through — a laptop host (or a
+    // UPS at 0.98) leaks. dischargingTime -1 is the patch's Infinity sentinel.
+    battery: {
+      charging: true,
+      level: 1.0,
+      chargingTime: 0,
+      dischargingTime: -1,
+    },
     // Patch 0070: the enterprise policy shape — mDNS host candidate only,
     // never the machine's real IP. The M150 switch is read nowhere in
     // //chrome; only the preference (which this config sets) works.

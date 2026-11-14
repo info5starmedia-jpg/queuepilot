@@ -232,12 +232,19 @@ export const CLAIMS: Claim[] = [
   },
   {
     id: "webrtc-no-host-candidates",
-    title: "WebRTC SDP contains no host/srflx (local network) candidates",
+    title: "WebRTC SDP leaks no local address (0070 policy + 0071 synthetic shape)",
     async check(page) {
-      // Fury patch 0070 (WebRTC IP policy). Control measured on stock Chrome:
-      // with no proxy policy, createOffer gathers typ host AND typ srflx
-      // candidates from every local interface — that leak is exactly what the
-      // patch kills. A proxied/patched engine yields relay-only or none.
+      // Fury patches 0070+0071. Control measured on stock Chrome: with no
+      // proxy policy, createOffer gathers typ host AND typ srflx candidates
+      // from every local interface — that leak is exactly what 0070 kills.
+      // 0071 changed "gathers nothing" (a detectable "WebRTC disabled"
+      // fingerprint) into a stock Chrome's shape: an mDNS-named host
+      // candidate and, when the page names a STUN server, an srflx carrying
+      // the launch's exit address with raddr 0.0.0.0 rport 0. So the leak
+      // claim is about ADDRESSES, not candidate types:
+      //   - no candidate address is private/loopback/link-local
+      //   - host candidates are mDNS names (<uuid>.local), never an IP
+      //   - srflx candidates clear their related address (raddr 0.0.0.0)
       const v = (await page.evaluate(`(async () => {
         const pc = new RTCPeerConnection();
         try {
@@ -250,17 +257,30 @@ export const CLAIMS: Claim[] = [
             });
             setTimeout(res, 8000);
           });
-          const m = pc.localDescription ? pc.localDescription.sdp.match(/typ \\w+/g) : null;
-          return { types: m ? [...new Set(m)] : [] };
+          const sdp = pc.localDescription ? pc.localDescription.sdp : '';
+          const cands = [...sdp.matchAll(/candidate:\\S+ 1 \\S+ \\d+ (\\S+) \\d+ typ (\\w+)([^\\r\\n]*)/g)]
+            .map(x => ({ addr: x[1], type: x[2], rest: x[3].trim() }));
+          return { cands };
         } finally {
           try { pc.close(); } catch {}
         }
-      })()`)) as { types: string[] };
-      const bad = v.types.filter((t) => /host|srflx/.test(t));
+      })()`)) as { cands: { addr: string; type: string; rest: string }[] };
+      const privateIp = (a: string) =>
+        /^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/.test(a);
+      const problems: string[] = [];
+      for (const c of v.cands) {
+        if (privateIp(c.addr)) problems.push(`${c.type} ${c.addr} is a local address`);
+        if (c.type === "host" && !c.addr.endsWith(".local"))
+          problems.push(`host candidate ${c.addr} is not an mDNS name`);
+        if (c.type === "srflx" && c.rest && !/raddr 0\\.0\\.0\\.0 rport 0/.test(c.rest))
+          problems.push(`srflx leaks related address: ${c.rest}`);
+      }
       return result(
         "webrtc-no-host-candidates",
-        bad.length === 0,
-        bad.length ? `leaks: ${v.types.join(" ")}` : `clean (${v.types.join(" ") || "no candidates"})`,
+        problems.length === 0,
+        problems.length
+          ? problems.join("; ")
+          : `clean (${v.cands.map((c) => c.type).join(" ") || "no candidates"})`,
       );
     },
   },

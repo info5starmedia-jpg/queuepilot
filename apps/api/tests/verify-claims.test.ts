@@ -94,14 +94,41 @@ describe("detection claims", () => {
     expect((await platformClaim.check(bad)).pass).toBe(false);
   });
 
-  it("webrtc-no-host-candidates passes relay-only, fails host/srflx leaks", async () => {
+  it("webrtc-no-host-candidates passes mDNS/relay shapes, fails local leaks", async () => {
     const c = claim("webrtc-no-host-candidates");
-    const clean: PageProbe = { evaluate: async () => ({ types: ["typ relay"] }) };
-    const empty: PageProbe = { evaluate: async () => ({ types: [] }) };
-    const host: PageProbe = { evaluate: async () => ({ types: ["typ host", "typ srflx"] }) };
-    expect((await c.check(clean)).pass).toBe(true);
+    // Post-0071 clean shapes: relay-only, nothing at all, or the stock
+    // synthetic shape (mDNS host + srflx with cleared raddr).
+    const relay: PageProbe = {
+      evaluate: async () => ({ cands: [{ addr: "203.0.113.9", type: "relay", rest: "" }] }),
+    };
+    const empty: PageProbe = { evaluate: async () => ({ cands: [] }) };
+    const mdns: PageProbe = {
+      evaluate: async () => ({
+        cands: [
+          { addr: "9f1c2a.local", type: "host", rest: "" },
+          { addr: "203.0.113.7", type: "srflx", rest: "raddr 0.0.0.0 rport 0" },
+        ],
+      }),
+    };
+    expect((await c.check(relay)).pass).toBe(true);
     expect((await c.check(empty)).pass).toBe(true);
-    expect((await c.check(host)).pass).toBe(false);
+    expect((await c.check(mdns)).pass).toBe(true);
+    // Leaks: a private host IP, a host candidate that is not mDNS, an srflx
+    // with a related address.
+    const hostLeak: PageProbe = {
+      evaluate: async () => ({ cands: [{ addr: "192.168.1.5", type: "host", rest: "" }] }),
+    };
+    const plainIpHost: PageProbe = {
+      evaluate: async () => ({ cands: [{ addr: "203.0.113.5", type: "host", rest: "" }] }),
+    };
+    const srflxRelated: PageProbe = {
+      evaluate: async () => ({
+        cands: [{ addr: "203.0.113.7", type: "srflx", rest: "raddr 192.168.1.5 rport 51234" }],
+      }),
+    };
+    expect((await c.check(hostLeak)).pass).toBe(false);
+    expect((await c.check(plainIpHost)).pass).toBe(false);
+    expect((await c.check(srflxRelated)).pass).toBe(false);
   });
 
   it("audio-deterministic requires two context hashes to match", async () => {
