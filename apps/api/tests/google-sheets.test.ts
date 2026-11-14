@@ -3,9 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ErrorCodes } from "@queuepilot/contracts";
-import { GoogleAuthService } from "../src/application/google/google-auth.service.js";
+import {
+  GoogleAuthService,
+  SHEETS_SCOPE,
+  GMAIL_SCOPE,
+} from "../src/application/google/google-auth.service.js";
 import { SheetsClient } from "../src/application/google/sheets-client.js";
-import { makeTestContext } from "./helpers.js";
+import { makeTestContext, MapSecretStore } from "./helpers.js";
 
 function mockResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,102 +24,122 @@ describe("GoogleAuthService", () => {
     token: "https://auth.example/token",
   };
 
-  it("authUrl carries client id, loopback redirect and the readonly sheets scope", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
-    const auth = new GoogleAuthService({
+  function makeAuth(
+    dir: string,
+    overrides: Partial<ConstructorParameters<typeof GoogleAuthService>[0]> = {},
+  ) {
+    return new GoogleAuthService({
+      secrets: new MapSecretStore(),
       dataDir: dir,
       clientId: "cid",
       clientSecret: "csecret",
       redirectUri: "http://127.0.0.1:50325/google/auth/callback",
       endpoints,
+      ...overrides,
     });
-    const url = new URL(auth.authUrl("state-1"));
-    expect(url.origin + url.pathname).toBe(endpoints.auth);
-    expect(url.searchParams.get("client_id")).toBe("cid");
-    expect(url.searchParams.get("redirect_uri")).toBe(
+  }
+
+  it("start URL carries client id, loopback redirect, scope and PKCE", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
+    const auth = makeAuth(dir);
+    const { url } = auth.start("sheets", [SHEETS_SCOPE]);
+    const u = new URL(url);
+    expect(u.origin + u.pathname).toBe(endpoints.auth);
+    expect(u.searchParams.get("client_id")).toBe("cid");
+    expect(u.searchParams.get("redirect_uri")).toBe(
       "http://127.0.0.1:50325/google/auth/callback",
     );
-    expect(url.searchParams.get("scope")).toContain("spreadsheets.readonly");
-    expect(url.searchParams.get("access_type")).toBe("offline");
-    expect(url.searchParams.get("state")).toBe("state-1");
+    expect(u.searchParams.get("scope")).toContain("spreadsheets.readonly");
+    expect(u.searchParams.get("access_type")).toBe("offline");
+    expect(u.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(u.searchParams.get("code_challenge")).toBeTruthy();
   });
 
   it("refuses without configured client credentials", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
-    const auth = new GoogleAuthService({
-      dataDir: dir,
-      clientId: null,
-      clientSecret: null,
-      redirectUri: "http://127.0.0.1:0/google/auth/callback",
-      endpoints,
-    });
-    expect(() => auth.authUrl("s")).toThrowError(
+    const auth = makeAuth(dir, { clientId: null, clientSecret: null });
+    expect(() => auth.start("sheets", [SHEETS_SCOPE])).toThrowError(
       expect.objectContaining({ code: ErrorCodes.GOOGLE_NOT_CONFIGURED }),
     );
     expect(auth.status()).toEqual({
       configured: false,
       connected: false,
+      accounts: [],
       expiresAt: null,
     });
   });
 
-  it("exchanges the callback code, persists the token, and refreshes when expired", async () => {
+  it("exchanges the callback code, persists per-account tokens, refreshes when expired", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
     const calls: { url: string; body: string }[] = [];
     const fetcher = (async (url: string, init?: { body?: string }) => {
       calls.push({ body: String(init?.body ?? ""), url: String(url) });
-      if (String(init?.body).includes("authorization_code")) {
+      if (String(init?.body).includes("grant_type=authorization_code")) {
         return mockResponse({
           access_token: "access-1",
           refresh_token: "refresh-1",
           expires_in: 3600,
-          scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
         });
       }
       return mockResponse({ access_token: "access-2", expires_in: 3600 });
     }) as unknown as typeof fetch;
 
-    const auth = new GoogleAuthService({
-      dataDir: dir,
-      clientId: "cid",
-      clientSecret: "csecret",
-      redirectUri: "http://127.0.0.1:50325/google/auth/callback",
-      endpoints,
-      fetcher,
-    });
-
-    await auth.handleCallback("the-code");
+    const auth = makeAuth(dir, { fetcher });
+    const { state } = auth.start("sheets", [SHEETS_SCOPE]);
+    await auth.complete(state, "the-code");
     expect(calls[0]!.url).toBe(endpoints.token);
     expect(calls[0]!.body).toContain("code=the-code");
     expect(calls[0]!.body).toContain("grant_type=authorization_code");
+    expect(calls[0]!.body).toContain("code_verifier=");
     expect(auth.status().connected).toBe(true);
+    expect(auth.accounts()).toEqual(["sheets"]);
 
     // Fresh token: no refresh call.
+    expect(await auth.accessToken("sheets")).toBe("access-1");
     expect(await auth.getAccessToken()).toBe("access-1");
     expect(calls).toHaveLength(1);
 
-    // Force expiry: rewrite the token file with a past expiry.
-    const tokenFile = path.join(dir, "google", "token.json");
-    const token = JSON.parse(fs.readFileSync(tokenFile, "utf8"));
+    // Force expiry: rewrite the stored token with a past expiry.
+    const secrets = (auth as unknown as { deps: { secrets: { get(k: string): string | null; set(k: string, v: string): void } } }).deps.secrets;
+    const token = JSON.parse(secrets.get("google.oauth.sheets")!);
     token.expiresAt = new Date(Date.now() - 10_000).toISOString();
-    fs.writeFileSync(tokenFile, JSON.stringify(token));
+    secrets.set("google.oauth.sheets", JSON.stringify(token));
 
-    expect(await auth.getAccessToken()).toBe("access-2");
+    expect(await auth.accessToken("sheets")).toBe("access-2");
     expect(calls).toHaveLength(2);
     expect(calls[1]!.body).toContain("grant_type=refresh_token");
     expect(calls[1]!.body).toContain("refresh_token=refresh-1");
   });
 
-  it("getAccessToken before connecting is GOOGLE_NOT_CONNECTED", async () => {
+  it("multi-account: gmail and sheets tokens are isolated", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
-    const auth = new GoogleAuthService({
-      dataDir: dir,
-      clientId: "cid",
-      clientSecret: "csecret",
-      redirectUri: "http://127.0.0.1:0/cb",
-      endpoints,
+    const fetcher = (async (_url: string, init?: { body?: string }) => {
+      const acct = String(init?.body).includes("code=gmail-code") ? "gmail" : "sheets";
+      return mockResponse({
+        access_token: `access-${acct}`,
+        refresh_token: `refresh-${acct}`,
+        expires_in: 3600,
+      });
+    }) as unknown as typeof fetch;
+    const auth = makeAuth(dir, { fetcher });
+    const s1 = auth.start("sheets", [SHEETS_SCOPE]);
+    const s2 = auth.start("main@gmail.com", [GMAIL_SCOPE]);
+    await auth.complete(s1.state, "sheets-code");
+    await auth.complete(s2.state, "gmail-code");
+    expect(await auth.accessToken("sheets")).toBe("access-sheets");
+    expect(await auth.accessToken("main@gmail.com")).toBe("access-gmail");
+    expect(auth.accounts()).toEqual(["main@gmail.com", "sheets"]);
+    auth.disconnect("sheets");
+    expect(auth.accounts()).toEqual(["main@gmail.com"]);
+    await expect(auth.accessToken("sheets")).rejects.toMatchObject({
+      code: ErrorCodes.GOOGLE_NOT_CONNECTED,
     });
-    await expect(auth.getAccessToken()).rejects.toMatchObject({
+  });
+
+  it("accessToken before connecting is GOOGLE_NOT_CONNECTED", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
+    const auth = makeAuth(dir);
+    await expect(auth.accessToken("sheets")).rejects.toMatchObject({
       code: ErrorCodes.GOOGLE_NOT_CONNECTED,
     });
   });
@@ -210,10 +234,10 @@ describe("Google Sheets providers", () => {
 describe("SheetsClient", () => {
   it("reads values with a bearer token and reports HTTP failures by name", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
-    // Pre-seed a valid token so no refresh happens.
-    fs.mkdirSync(path.join(dir, "google"), { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, "google", "token.json"),
+    // Pre-seed a valid sheets token so no refresh happens.
+    const secrets = new MapSecretStore();
+    secrets.set(
+      "google.oauth.sheets",
       JSON.stringify({
         accessToken: "tok-1",
         refreshToken: "r",
@@ -222,6 +246,7 @@ describe("SheetsClient", () => {
       }),
     );
     const auth = new GoogleAuthService({
+      secrets,
       dataDir: dir,
       clientId: "cid",
       clientSecret: "cs",

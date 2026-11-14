@@ -25,6 +25,7 @@ import {
 } from "../src/application/providers/provider.service.js";
 import { GoogleAuthService } from "../src/application/google/google-auth.service.js";
 import type { SheetReader } from "../src/application/google/sheets-client.js";
+import type { SecretStore } from "../src/application/secrets/secret-store.js";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/config.js";
@@ -83,6 +84,7 @@ export function makeTestContext(
   );
   const sheets = new FakeSheets();
   const google = new GoogleAuthService({
+    secrets: new MapSecretStore(),
     dataDir,
     clientId: "test-client-id",
     clientSecret: "test-client-secret",
@@ -129,4 +131,19 @@ export function makeTestContext(
     sheets,
     dataDir,
   };
+}
+
+/** Test SecretStore — plain in-memory, tests only, never production. */
+export class MapSecretStore implements SecretStore {
+  readonly kind = "map";
+  private readonly m = new Map<string, string>();
+  set(key: string, value: string): void {
+    this.m.set(key, value);
+  }
+  get(key: string): string | null {
+    return this.m.get(key) ?? null;
+  }
+  delete(key: string): void {
+    this.m.delete(key);
+  }
 }

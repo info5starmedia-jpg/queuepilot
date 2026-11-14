@@ -44,6 +44,7 @@ import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
+import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
@@ -105,11 +106,13 @@ export async function main(): Promise<void> {
   await pluginReg.rescan();
 
   const google = new GoogleAuthService({
+    secrets: secretStore,
     dataDir: config.dataDir,
     clientId: config.googleClientId ?? null,
     clientSecret: config.googleClientSecret ?? null,
     redirectUri: `http://${config.host}:${config.port}/google/auth/callback`,
   });
+  registerGmailResolver(resolvers, google);
   const sheets = new SheetsClient(google);
 
   const profileProviders = new ProfileProviderService(
