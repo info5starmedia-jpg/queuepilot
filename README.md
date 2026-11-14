@@ -81,9 +81,62 @@ What works today, covered by 138 tests:
   `POST /proxy-providers/:id/next`.
 
 Not yet: resolver/parser registries, plugin system, warmup recorder,
-external checker sweeps (CreepJS/sannysoft — deliberately manual), team
-mode. See
+team mode (external checker tooling has since shipped — see v0.13 notes
+below; the sweeps themselves stay manual by design). See
 [docs/roadmap.md](docs/roadmap.md) and [docs/build-plan.md](docs/build-plan.md).
+
+## What's new in v0.13 — the P7 batch (2026-11-14)
+
+Nine commits, one theme: **third-party validation and real-world robustness**.
+Every item has code + tests + live verification; 295 tests green, the
+27-claim suite holds on our fury-core build, and two defects were found
+and fixed *by* external checkers that our own claims could never see.
+
+- **External checker pass** (`apps/api/verify/external-check.ts`) — runs
+  sannysoft and CreepJS against OUR binary exactly as the product launches
+  it, reading verdict cells by computed color (never CSS classes). Live
+  2026-11-14: **sannysoft 31/31 green** (all WebDriver rows
+  "missing/passed"), **CreepJS 0% headless / 0% stealth**,
+  `navigator.webdriver=false`. Results table: [docs/parity.md](docs/parity.md) §5.
+- **Fix: engine killed ~10s after launch on AV-active machines.** The
+  PowerShell `-EncodedCommand` bootstrap pattern got the engine
+  TerminateProcess'd by endpoint AV. Bisected live: identical bootstrap via
+  `-File` survives. The bootstrap now runs from a temp `.ps1` (deleted on
+  exit; no secrets in it — handle numbers travel in argv, never contents).
+- **Fix: screen/avail contradiction** (sannysoft PHANTOM_WINDOW_HEIGHT).
+  The persona screen is now declared together with
+  `screen.availWidth/availHeight`, identities are clamped to the host's
+  real display, and window-fit targets the claimed workarea — so
+  `outerHeight ≤ availHeight` on every window, on every machine.
+- **SOCKS5 relay** (RFC 1928 + 1929) — username/password SOCKS5 proxies
+  work end-to-end through the same refuse-loudly launch path as HTTP
+  proxies; live egress proof included.
+- **Egress diagnostics** — every proxied launch durably records the exit
+  IP it measured (relay port, WebRTC candidates, timestamp); the
+  diagnostics endpoint serves exactly what the launch measured, never a
+  racing re-check.
+- **Per-profile os-crypt keys** (patch 0110 parity) — cookies/passwords
+  encrypt at rest under a key that travels with the profile.
+- **Extensions registry + TOTP personas** — per-profile extension
+  install/list/remove with Fury 0.5.4 v2 semantics (pinned ids, no shared
+  storage between copied profiles); personas carry a TOTP seed via the
+  SecretStore.
+- **Bookmark sets + start pages on every launch** (Fury 0.5.3/0.5.2
+  parity) — managed bookmark folders merge into Chromium's own Bookmarks
+  file (browser-made bookmarks untouched); `startUrls`/`url` open on every
+  start, not just the first.
+- **Process-start tokens (D-002)** — `browser_runs` records a
+  process-start token so PID reuse can never resurrect a dead run as
+  "alive"; rotation-links design recorded in ADR-0007.
+- **JYL endpoints + settings bundles** — runtime modules can serve their
+  own `/jyl/endpoint/<module>` routes; profiles/settings export+import as
+  secrets-free JSON.
+- **Cold-start performance + profile hygiene** — measured cold start
+  1417 ms (budget 2500 ms); a hard-killed engine leaves zero singleton
+  residue and relaunches clean.
+
+Full per-item detail with live results: [docs/roadmap.md](docs/roadmap.md)
+Phase P7, and [docs/parity.md](docs/parity.md).
 
 ## Quickstart
 
