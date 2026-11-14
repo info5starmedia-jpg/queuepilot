@@ -334,6 +334,12 @@ export const CLAIMS: Claim[] = [
           return { api: true, rejected: true, adapter: false };
         }
       })()`)) as { api: boolean; rejected: boolean; adapter: boolean };
+      if (!v.api && !(await page.evaluate("window.isSecureContext"))) {
+        // WebGPU is secure-context-only; the proxy-mode probe page is plain
+        // HTTP on a LAN IP, so the API is spec-hidden there. Covered by the
+        // non-proxy run.
+        return { id: "webgpu-present-or-null", pass: false, skipped: true, detail: "navigator.gpu spec-hidden (non-secure context)" };
+      }
       const ok = v.api && !v.rejected;
       return result(
         "webgpu-present-or-null",
@@ -374,6 +380,12 @@ export const CLAIMS: Claim[] = [
       // Fury patch 0060 (media device surface). Claim is coherence, not a
       // fabricated list: the API must resolve and report the sink the page
       // actually has. Stock Chrome always yields >= 1 audiooutput.
+      if (!(await page.evaluate("window.isSecureContext"))) {
+        // mediaDevices is secure-context-only; the proxy-mode probe page is
+        // plain HTTP on a LAN IP, so the API is spec-hidden there. Covered by
+        // the non-proxy run.
+        return { id: "media-devices-sane", pass: false, skipped: true, detail: "mediaDevices spec-hidden (non-secure context)" };
+      }
       const v = (await page.evaluate(`(async () => {
         const ds = await navigator.mediaDevices.enumerateDevices();
         return {

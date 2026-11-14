@@ -149,6 +149,10 @@ export function personaConfig(
       clientRectsSeed: (seed * 3 + 2) % 2_147_483_647,
     },
     automation: { hideTraces: true },
+    // Patch 0070: the enterprise policy shape — mDNS host candidate only,
+    // never the machine's real IP. The M150 switch is read nowhere in
+    // //chrome; only the preference (which this config sets) works.
+    webrtc: { ipHandlingPolicy: "disable_non_proxied_udp" },
   };
 }
 
