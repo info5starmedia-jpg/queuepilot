@@ -43,6 +43,7 @@ import {
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
+import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
@@ -93,6 +94,7 @@ export async function main(): Promise<void> {
   // Plugin + resolver + parser registries (Jancy workflow layer, P7).
   const resolvers = new ResolverRegistry();
   registerBuiltinResolvers(resolvers);
+  registerImapResolver(resolvers);
   const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
   await parserReg.rescan();
   const pluginReg = new PluginRegistry(

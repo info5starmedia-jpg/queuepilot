@@ -20,6 +20,9 @@ export interface ResolverContext {
   field?: string | undefined;
   /** Injectable for tests; defaults to global fetch. */
   fetch?: typeof fetch;
+  /** Alias store forwarded by resolve() — resolvers like imap use it for
+   *  `@alias` credentials inside their spec. */
+  aliases?: import("./token-aliases.js").AliasStore | undefined;
 }
 
 export type ResolverFn = (
@@ -67,8 +70,9 @@ export class ResolverRegistry {
     const fn = this.resolvers.get(name);
     if (!fn) return `#NO RESOLVER ${name}`;
     const args = idx === -1 ? "" : expanded.slice(idx + 1);
+    const withAliases = aliases ? { ...ctx, aliases } : ctx;
     try {
-      return await fn(args, ctx);
+      return await fn(args, withAliases);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return msg.startsWith("#") ? msg : `#API ERROR ${msg.slice(0, 200)}`;
