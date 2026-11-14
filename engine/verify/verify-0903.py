@@ -135,7 +135,7 @@ def main():
         )
         stayed = not exits(proc, GRACE)
         if proc.poll() is None:
-            proc.send_signal(signal.SIGHUP)
+            (proc.send_signal(signal.SIGHUP) if os.name != "nt" else proc.terminate())
             if not exits(proc, 12):
                 proc.kill()
     finally:

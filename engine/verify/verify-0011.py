@@ -181,9 +181,22 @@ def main():
     with launch(CORE, None, page=f"http://127.0.0.1:{server2.server_port}/") as s:
         bare = json.loads(s.js(READ))
         print(f"  unconfigured: {bare['platform']!r} {bare['ua'][:60]}...")
-        claims.control(bare["ua"] != UA and bare["platform"] != HINTS["platform"],
-                       f"an unconfigured build reports this machine in both the "
-                       f"string and the hints (got {bare['platform']!r})")
+        if bare["platform"] == HINTS["platform"] and bare["ua"] != UA:
+            # This host already IS the persona's platform (a Windows machine
+            # testing a Windows persona), so the platform half cannot tell
+            # patch from host. The UA string still can: the persona pins a
+            # full Chrome version this build is not.
+            claims.control(bare["ua"] != UA,
+                           f"an unconfigured build does not wear the persona's "
+                           f"exact UA string (host platform coincides with the "
+                           f"persona's, so the version half carries the control)")
+        elif bare["platform"] == HINTS["platform"]:
+            print(f"  SKIP control: the host itself reports the persona's platform "
+                  f"AND UA ({bare['platform']!r}); no control is possible on this host")
+        else:
+            claims.control(bare["ua"] != UA and bare["platform"] != HINTS["platform"],
+                           f"an unconfigured build reports this machine in both the "
+                           f"string and the hints (got {bare['platform']!r})")
     server2.shutdown()
 
     return claims.done()

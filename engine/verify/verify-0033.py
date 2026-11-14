@@ -55,7 +55,7 @@ READ = """
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:37px;top:53px;font:16px serif;white-space:nowrap';
   const a = document.createElement('span');
-  a.textContent = 'Fury \\u2014 geometry 0033 \\u2014 mmmmiiiillll';
+  a.textContent = 'Fury \\u2014 geometry 0033 \\u2014 mmmmiiiillll!';
   const b = document.createElement('span');
   b.textContent = 'xyzzy';
   host.append(a, b);

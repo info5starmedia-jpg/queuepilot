@@ -28,7 +28,8 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -72,15 +73,14 @@ URL = f"http://127.0.0.1:{server.server_address[1]}/"
 
 def launch(config):
     d = tempfile.mkdtemp(prefix="fury-0132-")
-    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
-            "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
-            "--window-position=0,0", "--window-size=700,900", "--fury-fp-fd=3"]
     cfg = os.path.join(d, "config.json")
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
-    p = subprocess.Popen(args, preexec_fn=lambda: os.dup2(fd, 3), close_fds=False,
+    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
+            "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
+            "--window-position=0,0", "--window-size=700,900", fpconfig.config_switch(fd)]
+    p = subprocess.Popen(args, preexec_fn=fpconfig.config_preexec(fd), close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     pf = os.path.join(d, "DevToolsActivePort")

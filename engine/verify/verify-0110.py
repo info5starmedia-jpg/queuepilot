@@ -54,7 +54,13 @@ GET = "document.cookie"
 
 
 def cookies_file(profile):
-    return os.path.join(profile, "Default", "Cookies")
+    # Chrome moved the cookie store to Default/Network/Cookies in M96;
+    # accept whichever this build writes.
+    for cand in (os.path.join(profile, "Default", "Network", "Cookies"),
+                 os.path.join(profile, "Default", "Cookies")):
+        if os.path.exists(cand):
+            return cand
+    return os.path.join(profile, "Default", "Network", "Cookies")
 
 
 def main():
@@ -67,8 +73,25 @@ def main():
             print(f"  wrote: {wrote}")
             claims.check(COOKIE_VALUE in wrote,
                          "the cookie was set in the first session")
-            # Let the store flush before the process goes away.
-            time.sleep(2)
+            # Let the store flush before the process goes away. On macOS the
+            # SIGHUP shutdown flushes it inside 2s; on Windows the
+            # Browser.close shutdown returns before the cookie store's commit
+            # task runs, so poll the database for the row (Chrome commits at
+            # least every 30s) rather than trusting a fixed wait.
+            db = cookies_file(profile)
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                try:
+                    import sqlite3
+                    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+                    got = list(con.execute(
+                        "select 1 from cookies where name='furyverify'"))
+                    con.close()
+                    if got:
+                        break
+                except Exception:
+                    pass
+                time.sleep(2)
 
         db = cookies_file(profile)
         claims.check(os.path.exists(db),

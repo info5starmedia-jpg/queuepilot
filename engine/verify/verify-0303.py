@@ -108,8 +108,14 @@ READ_ONE_PASSWORD = """
       list = await chrome.passwordsPrivate.getSavedPasswordList();
     }
     if (!list.length) return {error: 'the password store never accepted one'};
-    const p = await chrome.passwordsPrivate.requestPlaintextPassword(
-      list[0].id, 'VIEW');
+    // On Windows this call is gated by the OS credential prompt (Windows
+    // Hello), which an unattended run never answers: race it so the harness
+    // can say so instead of hanging.
+    const p = await Promise.race([
+      chrome.passwordsPrivate.requestPlaintextPassword(list[0].id, 'VIEW'),
+      sleep(8000).then(() => ({__osPrompt: true})),
+    ]);
+    if (p && p.__osPrompt) return {error: 'os prompt did not answer in 8s'};
     return {ok: true, value: p};
   } catch (e) {
     return {ok: false, message: String(e.message || e)};
@@ -170,18 +176,27 @@ def main():
               "docstring.")
 
     # The second refusal, which is a separate function from the first.
-    claims.control(
-        free_read.get("ok") is True and free_read.get("value") == "secret-0303",
-        f"without the switch a saved password can be read back one at a time "
-        f"(got {free_read})",
-    )
-    locked_read = probe("chrome://password-manager/passwords", READ_ONE_PASSWORD,
-                        (SWITCH,))
-    print(f"  read one, locked:     {locked_read}")
-    claims.check(locked_read.get("ok") is False,
-                 f"and with the switch that read is refused too — blocking the "
-                 f"batch export alone would leave the same leak running slower "
-                 f"(got {locked_read})")
+    if free_read.get("error") != "os prompt did not answer in 8s":
+        claims.control(
+            free_read.get("ok") is True and free_read.get("value") == "secret-0303",
+            f"without the switch a saved password can be read back one at a time "
+            f"(got {free_read})",
+        )
+    if free_read.get("error") == "os prompt did not answer in 8s":
+        # Windows Hello sits in front of RequestPlaintextPassword on this
+        # host, so neither side of the switch is reachable unattended. The
+        # entry-point control above still stands; the read-half needs --human.
+        print("  NOTE — requestPlaintextPassword is gated by the operating "
+              "system's prompt on this host; neither side of the switch is "
+              "reachable unattended. Run with --human for the read-half.")
+    else:
+        locked_read = probe("chrome://password-manager/passwords", READ_ONE_PASSWORD,
+                            (SWITCH,))
+        print(f"  read one, locked:     {locked_read}")
+        claims.check(locked_read.get("ok") is False,
+                     f"and with the switch that read is refused too — blocking the "
+                     f"batch export alone would leave the same leak running slower "
+                     f"(got {locked_read})")
 
     print("  NOTE — the bookmark_html_writer refusal is NOT exercised: "
           "bookmarkManagerPrivate.export() waits on a native file dialog, so "

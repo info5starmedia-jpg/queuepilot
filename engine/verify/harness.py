@@ -48,6 +48,24 @@ PAGE = "https://example.com"
 class Session:
     """One running browser, attached and ready to evaluate."""
 
+    # --- Windows port (QueuePilot, 2026-11-13) -------------------------------
+    # POSIX passes the config/key on dup2'd descriptors named by --fury-fp-fd
+    # / --fury-oscrypt-fd; the core's Windows half (same patches) reads an
+    # inherited HANDLE named by --fury-fp-file-handle /
+    # --fury-oscrypt-file-handle instead. preexec_fn does not exist on
+    # Windows, so handles are marked inheritable and ride close_fds=False.
+    WINDOWS = os.name == "nt"
+
+    @staticmethod
+    def _inherit_handle(fd):
+        """CRT fd -> inheritable OS HANDLE, masked to its 32-bit value."""
+        import msvcrt
+        import ctypes
+        h = msvcrt.get_osfhandle(fd)
+        # HANDLE_FLAG_INHERIT = 1; without this the child never sees it.
+        ctypes.windll.kernel32.SetHandleInformation(h, 1, 1)
+        return h & 0xFFFFFFFF
+
     def __init__(self, core, config, page=PAGE, extra_args=(),
                  os_crypt_key=None, user_data_dir=None):
         self.dir = user_data_dir or tempfile.mkdtemp(prefix="fury-verify-")
@@ -90,8 +108,13 @@ class Session:
             os.write(w, os_crypt_key)
             os.close(w)
             key_fd = r
-            os.set_inheritable(key_fd, True)
-            args.append("--fury-oscrypt-fd=4")
+            if self.WINDOWS:
+                args.append(
+                    f"--fury-oscrypt-file-handle={self._inherit_handle(key_fd)}"
+                )
+            else:
+                os.set_inheritable(key_fd, True)
+                args.append("--fury-oscrypt-fd=4")
 
         fd = None
         if config is not None:
@@ -101,8 +124,13 @@ class Session:
             with open(path, "w") as f:
                 json.dump(config, f)
             fd = os.open(path, os.O_RDONLY)
-            os.set_inheritable(fd, True)
-            args.append("--fury-fp-fd=3")
+            if self.WINDOWS:
+                args.append(
+                    f"--fury-fp-file-handle={self._inherit_handle(fd)}"
+                )
+            else:
+                os.set_inheritable(fd, True)
+                args.append("--fury-fp-fd=3")
 
         def place_descriptors():
             # dup2 into fixed slots, because the switches name numbers rather
@@ -114,7 +142,9 @@ class Session:
 
         self.proc = subprocess.Popen(
             args,
-            preexec_fn=place_descriptors if (fd or key_fd) else None,
+            preexec_fn=(
+                None if self.WINDOWS else (place_descriptors if (fd or key_fd) else None)
+            ),
             close_fds=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -183,8 +213,15 @@ class Session:
         # SIGHUP, as the agent sends (platform-rs/src/process.rs). From 155 a
         # SIGTERM on macOS takes the session-ending path and exits without
         # writing the cookie jar, and 0110 then fails for a reason that is
-        # not 0110's.
-        self.proc.send_signal(signal.SIGHUP)
+        # not 0110's. Windows has no SIGHUP — Browser.close is the same
+        # session-ending path there (TerminateProcess would lose the jar).
+        if self.WINDOWS:
+            try:
+                self.ws.call("Browser.close")
+            except Exception:
+                self.proc.terminate()
+        else:
+            self.proc.send_signal(signal.SIGHUP)
         try:
             self.proc.wait(timeout=12)
         except subprocess.TimeoutExpired:

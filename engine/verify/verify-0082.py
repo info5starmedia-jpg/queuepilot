@@ -15,6 +15,7 @@ See core/verify/README.md.
 """
 
 import json
+import fpconfig
 import os
 import shutil
 import subprocess
@@ -47,13 +48,12 @@ def launch(config):
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
     # Move it to 3 in the child. posix_spawn keeps the number we ask for.
     proc = subprocess.Popen(
         [
             CORE,
             f"--user-data-dir={datadir}",
-            "--fury-fp-fd=3",
+            fpconfig.config_switch(fd),
             "--remote-debugging-port=0",
             "--no-first-run",
             "--use-mock-keychain",  # see harness.py
@@ -69,7 +69,7 @@ def launch(config):
             "--window-position=-4000,-4000",
             "--window-size=600,400",
         ],
-        preexec_fn=(lambda: os.dup2(fd, 3)),
+        preexec_fn=fpconfig.config_preexec(fd),
         close_fds=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,

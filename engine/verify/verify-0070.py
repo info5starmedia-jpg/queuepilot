@@ -28,7 +28,8 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -74,9 +75,8 @@ def gather(config, label):
         with open(cfg, "w") as f:
             json.dump(config, f)
         fd = os.open(cfg, os.O_RDONLY)
-        os.set_inheritable(fd, True)
-        args.append("--fury-fp-fd=3")
-    pre = (lambda: os.dup2(fd, 3)) if fd is not None else None
+        args.append(fpconfig.config_switch(fd))
+    pre = fpconfig.config_preexec(fd)
     p = subprocess.Popen(args, preexec_fn=pre, close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if fd is not None:

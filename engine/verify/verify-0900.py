@@ -62,43 +62,51 @@ READ = """
 def main():
     claims = Claims("0900 — branding, visible to the operator only", CORE)
 
-    # The bundle on disk.
-    app = os.path.abspath(os.path.join(os.path.dirname(CORE), "..", ".."))
-    outdir = os.path.dirname(app)
-    print(f"  bundle: {app}")
+    if sys.platform != "darwin":
+        # The .app/Info.plist/helper checks are macOS packaging. On Windows
+        # the operator-visible artifacts are the exe/dll names, which the
+        # build config owns; the page-readable half below is platform-neutral
+        # and still runs. SKIP is stated, not faked (QueuePilot port).
+        print(f"  SKIP — no .app bundle on {sys.platform}; the page-half "
+              f"of the branding check still runs")
+    else:
+        # The bundle on disk.
+        app = os.path.abspath(os.path.join(os.path.dirname(CORE), "..", ".."))
+        outdir = os.path.dirname(app)
+        print(f"  bundle: {app}")
 
-    claims.check(os.path.basename(app) == "Fury.app",
-                 f"the bundle is Fury.app (got {os.path.basename(app)!r})")
+        claims.check(os.path.basename(app) == "Fury.app",
+                     f"the bundle is Fury.app (got {os.path.basename(app)!r})")
 
-    plist_path = os.path.join(app, "Contents", "Info.plist")
-    with open(plist_path, "rb") as f:
-        plist = plistlib.load(f)
-    print(f"  Info.plist: name={plist.get('CFBundleName')!r} "
-          f"exe={plist.get('CFBundleExecutable')!r} "
-          f"id={plist.get('CFBundleIdentifier')!r}")
-    claims.check(plist.get("CFBundleName") == "Fury"
-                 and plist.get("CFBundleExecutable") == "Fury",
-                 f"and Info.plist agrees, so the Dock and About box do too "
-                 f"({plist.get('CFBundleName')!r}, "
-                 f"{plist.get('CFBundleExecutable')!r})")
-    claims.check("chromium" not in plist.get("CFBundleIdentifier", "").lower(),
-                 f"the bundle identifier was renamed too — a Fury.app with "
-                 f"org.chromium.Chromium inside shares macOS state with a real "
-                 f"Chromium install (got {plist.get('CFBundleIdentifier')!r})")
+        plist_path = os.path.join(app, "Contents", "Info.plist")
+        with open(plist_path, "rb") as f:
+            plist = plistlib.load(f)
+        print(f"  Info.plist: name={plist.get('CFBundleName')!r} "
+              f"exe={plist.get('CFBundleExecutable')!r} "
+              f"id={plist.get('CFBundleIdentifier')!r}")
+        claims.check(plist.get("CFBundleName") == "Fury"
+                     and plist.get("CFBundleExecutable") == "Fury",
+                     f"and Info.plist agrees, so the Dock and About box do too "
+                     f"({plist.get('CFBundleName')!r}, "
+                     f"{plist.get('CFBundleExecutable')!r})")
+        claims.check("chromium" not in plist.get("CFBundleIdentifier", "").lower(),
+                     f"the bundle identifier was renamed too — a Fury.app with "
+                     f"org.chromium.Chromium inside shares macOS state with a real "
+                     f"Chromium install (got {plist.get('CFBundleIdentifier')!r})")
 
-    # The helpers the app runs are the ones inside its framework. A build
-    # directory also has loose copies beside the bundle; a signed bundle
-    # (signed/stable/) has only the ones inside, which this used to miss.
-    inside = glob.glob(os.path.join(app, "Contents", "Frameworks", "*.framework",
-                                    "Versions", "Current", "Helpers"))
-    where = [outdir] + inside
-    helpers = sorted({n for d in where for n in os.listdir(d)
-                      if n.endswith("Helper.app") or "Helper (" in n})
-    print(f"  helpers: {helpers}")
-    claims.check(helpers and all(h.startswith("Fury Helper") for h in helpers),
-                 f"every helper is renamed with it — Fury.app spawning "
-                 f"'Chromium Helper' is what an operator meets at first launch "
-                 f"({helpers})")
+        # The helpers the app runs are the ones inside its framework. A build
+        # directory also has loose copies beside the bundle; a signed bundle
+        # (signed/stable/) has only the ones inside, which this used to miss.
+        inside = glob.glob(os.path.join(app, "Contents", "Frameworks", "*.framework",
+                                        "Versions", "Current", "Helpers"))
+        where = [outdir] + inside
+        helpers = sorted({n for d in where for n in os.listdir(d)
+                          if n.endswith("Helper.app") or "Helper (" in n})
+        print(f"  helpers: {helpers}")
+        claims.check(helpers and all(h.startswith("Fury Helper") for h in helpers),
+                     f"every helper is renamed with it — Fury.app spawning "
+                     f"'Chromium Helper' is what an operator meets at first launch "
+                     f"({helpers})")
 
     # And none of it reaches a page.
     with launch(CORE, None) as s:
@@ -126,11 +134,17 @@ def main():
                      f"(got {got['main']['vendor']!r})")
 
         # The control: the rename IS real, and this proves the checks above are
-        # not passing because nothing was renamed at all.
+        # not passing because nothing was renamed at all. On Windows there is
+        # no .app rename; the disk half becomes "the shipped exe is really
+        # there under its stock name" (QueuePilot port).
         version = s.js("navigator.userAgent.match(/Chrome\\/([\\d.]+)/)[1]")
         print(f"  reported Chrome version: {version}")
+        if sys.platform == "darwin":
+            renamed = os.path.basename(app) == "Fury.app"
+        else:
+            renamed = os.path.basename(CORE).lower() == "chrome.exe" and os.path.exists(CORE)
         claims.control(
-            os.path.basename(app) == "Fury.app"
+            renamed
             and "Chrome/" in got["main"]["ua"]
             and "Fury" not in got["main"]["ua"],
             f"the binary IS renamed on disk and still says Chrome/{version} to "

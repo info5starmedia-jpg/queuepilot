@@ -255,16 +255,31 @@ def main():
                      f"reports them, not in the persona's order: a sorted list "
                      f"is no Chrome's, and demo.fingerprint.com scored it "
                      f"(got {a['extensions']}, native {native})")
-        claims.control(
-            bare["renderer"] != PARAMS["RENDERER"]
-            and bare["viewportDims"] != [32767, 32767]
-            and len(bare["extensions"]) != len(EXTENSIONS)
-            and bare["pixels"] != a["pixels"],
-            f"an unconfigured build reports this machine's card, its viewport "
-            f"limits, its full extension list and its untouched pixels "
-            f"(got {bare['renderer']!r}, {bare['viewportDims']}, "
-            f"{len(bare['extensions'])} extensions)",
-        )
+        if "SwiftShader" in bare["renderer"] or bare["renderer"] in ("WebKit WebGL", ""):
+            # No real GPU on this host (headless session / RDP): Chrome falls
+            # back to SwiftShader, whose generic viewport limits coincide with
+            # the persona catalogue's. The renderer string, the extension
+            # count and the rendered pixels still tell patch from host.
+            claims.control(
+                bare["renderer"] != PARAMS["RENDERER"]
+                and len(bare["extensions"]) != len(EXTENSIONS)
+                and bare["pixels"] != a["pixels"],
+                f"an unconfigured build reports this machine's own renderer, "
+                f"extension list and pixels (host has no real GPU, so the "
+                f"viewport-limits half of the upstream control is dropped: "
+                f"got {bare['renderer']!r}, {len(bare['extensions'])} extensions)",
+            )
+        else:
+            claims.control(
+                bare["renderer"] != PARAMS["RENDERER"]
+                and bare["viewportDims"] != [32767, 32767]
+                and len(bare["extensions"]) != len(EXTENSIONS)
+                and bare["pixels"] != a["pixels"],
+                f"an unconfigured build reports this machine's card, its viewport "
+                f"limits, its full extension list and its untouched pixels "
+                f"(got {bare['renderer']!r}, {bare['viewportDims']}, "
+                f"{len(bare['extensions'])} extensions)",
+            )
 
     return claims.done()
 

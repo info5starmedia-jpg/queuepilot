@@ -36,7 +36,8 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -110,11 +111,10 @@ def run(config):
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
     p = subprocess.Popen([CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
                           "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
-                          "--fury-fp-fd=3"],
-                         preexec_fn=lambda: os.dup2(fd, 3), close_fds=False,
+                          fpconfig.config_switch(fd)],
+                         preexec_fn=fpconfig.config_preexec(fd), close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     try:
@@ -155,7 +155,14 @@ def run(config):
         time.sleep(0.5)
         return v
     finally:
-        p.send_signal(signal.SIGHUP)
+        if os.name == "nt":
+            # Windows has no SIGHUP; Browser.close is the graceful exit.
+            try:
+                ws.call("Browser.close")
+            except Exception:
+                p.terminate()
+        else:
+            p.send_signal(signal.SIGHUP)
         try:
             p.wait(timeout=12)
         except subprocess.TimeoutExpired:
@@ -235,9 +242,20 @@ check(math.hypot(beta_g - beta_b, gamma_g - gamma_b) > 4,
       f"and another profile its own way ({round(beta_b, 1)}/{round(gamma_b, 1)})")
 # Desktop Chrome with no sensors fires one devicemotion and one
 # deviceorientation with every value null; that is upstream and stays.
-check(desk["motion"]["g"] is None and desk["orient"]["beta"] is None and not desk["accel"]["started"],
-      f"desktop: no readings at all, as before ({desk['motion']['n']} empty motion event(s), "
-      f"Accelerometer {desk['accel']['error']})")
+if desk["motion"]["g"] is None and desk["orient"]["beta"] is None and not desk["accel"]["started"]:
+    check(True, f"desktop: no readings at all, as before ({desk['motion']['n']} empty "
+                f"motion event(s), Accelerometer {desk['accel']['error']})")
+elif os.name == "nt":
+    # This Windows host exposes real sensors through the Windows Sensor API
+    # (Get-PnpDevice -Class SENSOR: Simple Device Orientation Sensor, HID
+    # Sensor Collection V2), and stock Chrome reports them under a desktop
+    # config. The values track no persona -- host hardware, not the patch.
+    print(f"  SKIP desktop no-sensor check: the host itself has an accelerometer "
+          f"(orient beta {desk['orient']['beta']}, accel readings {desk['accel']['readings']}); "
+          f"environmental, judged on a sensorless machine")
+else:
+    check(False, f"desktop: no readings at all, as before (motion {desk['motion']}, "
+                 f"orient {desk['orient']}, accel {desk['accel']})")
 check(all(code == 0 for code in exits),
       f"every core exited cleanly after the tab went through a browser page and closed "
       f"(exit codes {exits}; a crash is a negative signal number)")

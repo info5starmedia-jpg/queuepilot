@@ -33,3 +33,29 @@ never uses answers questions nobody asked. Park the window off-screen
 Watch what the harness itself changes. `Browser.grantPermissions` *replaces* an
 origin's permissions — everything not in the list becomes denied — which cost a
 rebuild spent blaming patch 0090 for a result the test had caused.
+
+## Windows (QueuePilot port, 2026-11-13)
+
+Upstream's Windows half was written but never run; it now runs. On Windows
+the config and the os_crypt key ride INHERITED HANDLES instead of fixed fds:
+`--fury-fp-file-handle=<h>` and `--fury-oscrypt-file-handle=<h>` (the core's
+Windows half of the same patches reads them). `fpconfig.py` is the shim —
+`config_switch(fd)`, `config_preexec(fd)`, `process_command_line(pid)` —
+and `harness.py` marks handles inheritable and launches with
+`close_fds=False` (preexec_fn does not exist on Windows). Graceful shutdown
+is CDP `Browser.close` (there is no SIGHUP).
+
+Run: `python run-all.py "C:\qe\src\out\<outdir>\chrome.exe"`.
+
+Host-dependent controls SKIP loudly rather than fake green:
+persona==host platform (0011), persona==host screen (0020), no real GPU /
+SwiftShader (0031), host at 100% on mains (0121 picks a discharging tuple
+instead), Windows Hello gating the password APIs (0303, use --human), a host
+sensor stack feeding desktop devicemotion (0135). A SKIP prints why; the
+claim it guards is documented in the script.
+
+Windows quirks found by running, not guessing: chrome:// pages draw a
+classic 15px scrollbar (0131), DWM adds a ~16px invisible frame to outer
+window width (0134), Chrome's cookie store commits on a 30s timer and
+Browser.close does not wait for it (0110 polls the DB), and the cookie DB
+lives at `Default\Network\Cookies` since M96.

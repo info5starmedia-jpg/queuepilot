@@ -41,7 +41,8 @@ import time
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 
@@ -135,10 +136,10 @@ def png_rows(png):
 def run(config):
     d = tempfile.mkdtemp(prefix="fury-dpr-")
     open(d + "/c.json", "w").write(json.dumps(config))
-    fd = os.open(d + "/c.json", os.O_RDONLY); os.set_inheritable(fd, True)
+    fd = os.open(d + "/c.json", os.O_RDONLY)
     p = subprocess.Popen([CORE, f"--user-data-dir={d}", "--remote-debugging-port=0", "--no-first-run",
-                          "--no-default-browser-check", "--use-mock-keychain", "--fury-fp-fd=3"],
-                         preexec_fn=lambda: os.dup2(fd, 3), close_fds=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                          "--no-default-browser-check", "--use-mock-keychain", fpconfig.config_switch(fd)],
+                         preexec_fn=fpconfig.config_preexec(fd), close_fds=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     try:
         for _ in range(200):
@@ -174,7 +175,7 @@ def run(config):
                              " visualViewport.width, visualViewport.height]", "returnByValue": True}, session=s)["result"]["value"]
         return out
     finally:
-        p.send_signal(signal.SIGHUP); p.wait(timeout=12); shutil.rmtree(d, ignore_errors=True)
+        (p.send_signal(signal.SIGHUP) if os.name != "nt" else p.terminate()); p.wait(timeout=12); shutil.rmtree(d, ignore_errors=True)
 
 
 results = []
@@ -196,7 +197,10 @@ PHONE = {"schema_version": 1, "navigator": {"maxTouchPoints": 5},
 
 host = run({"schema_version": 1, "screen": {"scrollbarWidth": 15}})
 print(f"  host    {json.dumps(host)}")
-check(host["dpr"] == 2, "this host is a 2x screen, so a persona at another ratio can be told from it")
+# Upstream's control host was a 2x Mac. Any host whose ratio differs from
+# the persona's 1.25 distinguishes persona from host just as well.
+check(host["dpr"] != 1.25,
+      f"this host is not a 1.25x screen (got {host['dpr']}), so a 1.25x persona can be told from it")
 # What a desktop persona must keep from the host run.
 SAME = ("iw", "ih", "ow", "oh", "sw", "sh", "saw", "sah", "win", "shot", "hits")
 

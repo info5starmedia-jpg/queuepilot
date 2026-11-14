@@ -26,6 +26,7 @@ Usage: core/verify/verify-0001.py <core binary>
 """
 
 import os
+import fpconfig
 import subprocess
 import sys
 
@@ -93,18 +94,19 @@ def main():
                      f"and all of them read {CORES}")
 
         # And the persona is not on the command line, where `ps` would have it.
-        argv = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(s.proc.pid)],
-            capture_output=True, text=True,
-        ).stdout
+        argv = fpconfig.process_command_line(s.proc.pid)
+        named = "--fury-fp-fd=3" if os.name != "nt" else "--fury-fp-file-handle="
         claims.check(
-            "--fury-fp-fd=3" in argv,
-            "argv names the descriptor the config arrived on",
+            named in argv,
+            f"argv names where the config arrived ({named})",
         )
-        claims.check(
-            "hardwareConcurrency" not in argv and f"={CORES}" not in argv,
-            "and does not contain the persona itself",
-        )
+        # "=<cores>" with non-digit edges: the Windows form of the switch is
+        # --fury-fp-file-handle=<n>, and a handle like 612 must not read as
+        # the persona value 6.
+        import re
+        leaked = ("hardwareConcurrency" in argv
+                  or re.search(rf"={CORES}(?!\d)", argv))
+        claims.check(not leaked, "and does not contain the persona itself")
 
     # The control. Without it, every check above also passes on a build where
     # 0001 does nothing and the host happens to have six cores.

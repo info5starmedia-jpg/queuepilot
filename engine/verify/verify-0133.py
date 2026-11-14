@@ -26,6 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cdp import browser  # noqa: E402
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -40,17 +41,16 @@ def launch(config, d, extra=()):
     # No --window-size: Fury's launcher never passes one, and Chrome applies
     # that switch after every other decision about the window
     # (browser_window_state.cc, UpdateWindowBoundsAndShowStateFromCommandLine).
-    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0", "--no-first-run",
-            "--no-default-browser-check", "--use-mock-keychain", "--fury-fp-fd=3", *extra]
     cfg = os.path.join(d, "config.json")
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
+    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0", "--no-first-run",
+            "--no-default-browser-check", "--use-mock-keychain", fpconfig.config_switch(fd), *extra]
     pf = os.path.join(d, "DevToolsActivePort")
     if os.path.exists(pf):
         os.remove(pf)
-    p = subprocess.Popen(args, preexec_fn=lambda: os.dup2(fd, 3), close_fds=False,
+    p = subprocess.Popen(args, preexec_fn=fpconfig.config_preexec(fd), close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     port = None
@@ -78,7 +78,7 @@ def window(ws):
 def close(p):
     # SIGHUP, not SIGTERM: on macOS SIGTERM is session-ending and skips
     # writing the session that the second launch restores.
-    p.send_signal(signal.SIGHUP)
+    (p.send_signal(signal.SIGHUP) if os.name != "nt" else p.terminate())
     try:
         p.wait(timeout=15)
     except subprocess.TimeoutExpired:

@@ -27,7 +27,8 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -103,9 +104,8 @@ def launch(config):
         with open(cfg, "w") as f:
             json.dump(config, f)
         fd = os.open(cfg, os.O_RDONLY)
-        os.set_inheritable(fd, True)
-        args.append("--fury-fp-fd=3")
-    p = subprocess.Popen(args, preexec_fn=((lambda: os.dup2(fd, 3)) if fd else None),
+        args.append(fpconfig.config_switch(fd))
+    p = subprocess.Popen(args, preexec_fn=fpconfig.config_preexec(fd),
                          close_fds=False, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
     if fd is not None:
@@ -153,28 +153,50 @@ def stop(p, d):
 MAINS = {"schema_version": 1,
          "battery": {"charging": True, "level": 1.0,
                      "chargingTime": 0.0, "dischargingTime": -1.0}}
+# A second tuple for hosts that already sit at 100% on mains (a plugged-in
+# laptop, a desktop behind a UPS): the claim is configured-vs-host, so the
+# tuple just has to differ from the host.
+CELL = {"schema_version": 1,
+        "battery": {"charging": False, "level": 0.60,
+                    "chargingTime": -1.0, "dischargingTime": 34680.0}}
+
+
+def expected(cfg):
+    b = cfg["battery"]
+    return {"charging": b["charging"], "level": b["level"],
+            "chargingTime": "Infinity" if b["chargingTime"] < 0 else b["chargingTime"],
+            "dischargingTime": "Infinity" if b["dischargingTime"] < 0 else b["dischargingTime"]}
 
 print("\n--- the host's real battery, with nothing configured ---")
 p, ws, s, d = launch({"schema_version": 1})
 host = js(ws, s, READ)
 print(f"  host reports {json.dumps(host)}")
 stop(p, d)
-# The whole test is worthless on a machine that is already at 100% on mains,
-# because the configured tuple and the real one would be the same.
-meaningful = not (host.get("charging") is True and host.get("level") == 1.0)
-check(meaningful,
-      "this host's real battery differs from the tuple under test, so a pass "
-      "cannot be a coincidence"
-      if meaningful else
-      "THIS HOST IS AT 100% ON MAINS — unplug it and run again, every check "
-      "below would pass for the wrong reason")
+# The whole test is worthless on a machine whose real battery already matches
+# the tuple under test, because a pass would be a coincidence. Pick whichever
+# tuple this host does not match.
+CFG, EXP = MAINS, expected(MAINS)
+if host.get("charging") is EXP["charging"] and host.get("level") == EXP["level"]:
+    CFG, EXP = CELL, expected(CELL)
+    if host.get("charging") is EXP["charging"] and host.get("level") == EXP["level"]:
+        check(False, f"this host matches both tuples under test ({json.dumps(host)}) — "
+                     "no configured tuple could be told from it")
+    else:
+        print(f"  NOTE the host matches the mains tuple, so the tuple under test is "
+              f"the discharging one {json.dumps(EXP)} — same claim, other side")
+        check(True, "this host's real battery differs from the tuple under test, so a "
+                    "pass cannot be a coincidence")
+else:
+    check(True, "this host's real battery differs from the tuple under test, so a pass "
+                "cannot be a coincidence")
 
 print("\n--- with battery configured ---")
-p, ws, s, d = launch(MAINS)
+p, ws, s, d = launch(CFG)
 got = js(ws, s, READ)
 print(f"  browser reports {json.dumps(got)}")
-check(got.get("charging") is True and got.get("level") == 1.0
-      and got.get("chargingTime") == 0 and got.get("dischargingTime") == "Infinity",
+check(got.get("charging") is EXP["charging"] and got.get("level") == EXP["level"]
+      and got.get("chargingTime") == EXP["chargingTime"]
+      and got.get("dischargingTime") == EXP["dischargingTime"],
       f"all four values are the configured ones: {json.dumps(got)}")
 check(got.get("native"),
       "navigator.getBattery is still [native code] — values substituted, not "

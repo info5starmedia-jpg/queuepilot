@@ -48,8 +48,13 @@ def main():
     for path in scripts:
         name = os.path.basename(path)
         started = time.monotonic()
+        # encoding is explicit: on Windows the locale codec (cp1252) cannot
+        # read the scripts' UTF-8 em-dashes and the reader thread dies, which
+        # used to crash this driver with proc.stdout = None (QueuePilot port).
         proc = subprocess.run([sys.executable, path, core],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         took = time.monotonic() - started
         results.append((name, proc.returncode, took, proc.stdout, proc.stderr))
         print(f"== {name}")

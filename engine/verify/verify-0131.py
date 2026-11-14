@@ -30,7 +30,8 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -72,15 +73,14 @@ BASE = f"http://127.0.0.1:{server.server_address[1]}"
 
 def launch(config):
     d = tempfile.mkdtemp(prefix="fury-0131-")
-    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
-            "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
-            "--window-position=0,0", "--window-size=700,900", "--fury-fp-fd=3"]
     cfg = os.path.join(d, "config.json")
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
-    p = subprocess.Popen(args, preexec_fn=lambda: os.dup2(fd, 3), close_fds=False,
+    args = [CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
+            "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
+            "--window-position=0,0", "--window-size=700,900", fpconfig.config_switch(fd)]
+    p = subprocess.Popen(args, preexec_fn=fpconfig.config_preexec(fd), close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     pf = os.path.join(d, "DevToolsActivePort")
@@ -181,7 +181,11 @@ check(bare["ow"] == 384 and bare["oh"] == 832,
       f"pixels ({bare['ow']}x{bare['oh']})")
 check(clicked == 1 and d_clicked == 1,
       f"a real mouse click lands on the button under emulation (phone {clicked}, desktop {d_clicked})")
-check(browser_page["iw"] != 980 and abs(browser_page["iw"] - browser_page["vw"]) < 1,
+# Windows draws a classic 15px scrollbar inside chrome:// pages (macOS
+# overlays it), so the visual viewport is iw - 15 there. The claim is the
+# layout width, not the chrome.
+_slop = 20 if os.name == "nt" else 1
+check(browser_page["iw"] != 980 and abs(browser_page["iw"] - browser_page["vw"]) < _slop,
       f"chrome:// pages keep the desktop layout, not Android's 980 zoomed out "
       f"({browser_page['iw']} wide, visual {browser_page['vw']}; 0134 makes the view phone-wide)")
 

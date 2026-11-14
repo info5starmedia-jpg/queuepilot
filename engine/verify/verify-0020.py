@@ -265,11 +265,18 @@ def main():
             "JSON.stringify({w: screen.width, h: screen.height, "
             "css1920: matchMedia('(device-width: 1920px)').matches})"))
         print(f"  unconfigured: {bare}")
-        claims.control(
-            (bare["w"], bare["h"]) != (SCREEN["width"], SCREEN["height"])
-            and not bare["css1920"],
-            f"an unconfigured build reports the host's own screen (got {bare})",
-        )
+        if (bare["w"], bare["h"]) == (SCREEN["width"], SCREEN["height"]):
+            # This host's own screen IS the persona's (a 1920x1080 machine
+            # testing a 1920x1080 persona): the control cannot tell patch
+            # from host here. The configured claims above still stand.
+            print(f"  SKIP control: the host's own screen is {bare['w']}x{bare['h']}, "
+                  f"identical to the persona under test")
+        else:
+            claims.control(
+                (bare["w"], bare["h"]) != (SCREEN["width"], SCREEN["height"])
+                and not bare["css1920"],
+                f"an unconfigured build reports the host's own screen (got {bare})",
+            )
 
     server.shutdown()
     return claims.done()

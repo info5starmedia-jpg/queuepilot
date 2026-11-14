@@ -32,7 +32,8 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cdp import browser  # noqa: E402
+from cdp import browser
+import fpconfig  # noqa: E402
 
 CORE = sys.argv[1]
 results = []
@@ -72,11 +73,10 @@ def measure(config):
     with open(cfg, "w") as f:
         json.dump(config, f)
     fd = os.open(cfg, os.O_RDONLY)
-    os.set_inheritable(fd, True)
     p = subprocess.Popen([CORE, f"--user-data-dir={d}", "--remote-debugging-port=0",
                           "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
-                          "--fury-fp-fd=3"],
-                         preexec_fn=lambda: os.dup2(fd, 3), close_fds=False,
+                          fpconfig.config_switch(fd)],
+                         preexec_fn=fpconfig.config_preexec(fd), close_fds=False,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.close(fd)
     try:
@@ -115,7 +115,7 @@ def measure(config):
         hits = js(s2, "window.hits || 0")
         return win["width"], view, hits
     finally:
-        p.send_signal(signal.SIGHUP)
+        (p.send_signal(signal.SIGHUP) if os.name != "nt" else p.terminate())
         try:
             p.wait(timeout=12)
         except subprocess.TimeoutExpired:
@@ -135,7 +135,12 @@ print(f"  desktop: window {d_win}, view {d_view}, clicks {d_hits}")
 win, view, hits = measure(PHONE)
 print(f"  phone:   window {win}, view {view}, clicks {hits}; column at {(win - view) / 2:.0f} px from each side")
 
-check(d_view == d_win, f"desktop: the view fills the window ({d_view} of {d_win})")
+# Windows frames a window with an invisible DWM border (~8px per side at 100%
+# scale), so the outer width the patch sets includes up to ~20px the view never
+# sees. Same claim, measured through the platform's frame.
+d_frame = d_win - d_view
+check(d_view == d_win or (os.name == "nt" and 0 < d_frame <= 20),
+      f"desktop: the view fills the window ({d_view} of {d_win}, frame {d_frame})")
 check(view == 384 and win > 384,
       f"phone: the view is a 384-wide column in a {win}-wide window, not the whole width")
 check(hits == 1 and d_hits == 1,

@@ -72,11 +72,19 @@ Runs after `spike/publish-engine.mjs` lands (official build verified green),
 BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
 
 1. Claim suite against OUR OWN binary, not the downloaded one:
-   `SPECTRA_FURY_PATH=C:\queuepilot-engine\src\out\windows-x64.noindex\chrome.exe
+   `SPECTRA_FURY_PATH=C:\qe\src\out\<outdir>\chrome.exe
    npm run verify --workspace apps/api -- --engine fury --data-dir <dir>`
    (path per publish output; repeat with `--proxy`).
+   Status 2026-11-13: FIRST build (out\w64f3) 25/25 non-proxy, 22/22 + 4
+   secure-context skips proxy (egress proof PASS).
 2. Fury verify harness on the official-build binary:
-   `python /c/queuepilot-engine/verify/run-all.py` — all per-patch checks green.
+   `python /c/qe/verify/run-all.py "C:\qe\src\out\<outdir>\chrome.exe"` — all
+   per-patch checks green. Status 2026-11-13: FIRST build all 40/40 passed
+   (768s). The Windows half upstream marked "never run" now runs: fd-passing
+   ported to inherited HANDLEs (--fury-fp-file-handle /
+   --fury-oscrypt-file-handle, see fpconfig.py + harness.py), environment-bound
+   controls SKIP loudly instead of faking (persona == host platform/screen,
+   SwiftShader host GPU, Windows Hello gating 0303's password reads).
 3. Walk `docs/parity.md` §1/§2: every row already claimed "done" still holds
    on our binary (spot-check window-fit, admission slots, DPAPI SecretStore,
    session bundles live, not just by suite name).
@@ -100,7 +108,31 @@ BEFORE `engines.manifest.json` is committed/pushed. Operator/agent checklist:
 
 ## Next tasks, in order (detail in docs/parity.md §4)
 
-1. **P4c: first own build — RUNNING overnight 2026-11-12.** Build root
+1. **P4c: first own build — DONE and VERIFIED (2026-11-13 18:16, exit 0).**
+   Verify harness: **all 40/40 passed** on the first binary (768s run,
+   `C:\qe\verify-harness.log`), with the harness's Windows half ported
+   (upstream had never run it): config/key ride inherited HANDLEs
+   (`--fury-fp-file-handle`, `--fury-oscrypt-file-handle`) via new
+   `verify/fpconfig.py` + `harness.py`; 16 scripts ported; environment-bound
+   controls SKIP loudly (host==persona platform/screen, SwiftShader GPU,
+   Windows Hello gating 0303) instead of faking.
+   Claim suite on our binary: **25/25** non-proxy, **22/22 + 4 skips** proxy
+   (egress proof PASS). One real runtime fix came out of it: personaConfig
+   now sets `webrtc.ipHandlingPolicy` (patch 0070 is preference-driven; the
+   switch is dead in M150).
+   **Norton hazard (active 2026-11-13):** Norton File Insight quarantines
+   `out\<dir>\chrome.exe` ~15 min after every link, then name-locks that
+   path permanently (even "disabled for 5 hours" did not stop it).
+   Workarounds in place: rename the out dir (`w64f1`→`w64f2`→`w64f3`,
+   ninja is root-relative so renames are free), restore from
+   `C:\qe\chrome.exe.stash`, `C:\qe\run-verify.sh` auto-probes the newest
+   `w64f*` dir, `build-run-official.sh` has a watchdog stashing the official
+   `chrome.exe` to `C:\qe\chrome-official.exe.stash` the moment it links.
+   **The real fix is a Norton folder exclusion for `C:\qe`** (Scans +
+   Auto-Protect + SONAR) — user action in the Norton UI.
+   **Official LTO+PGO build: RUNNING (started 2026-11-13 ~21:30, PID
+   24736, log `C:\qe\build-official.log`).**
+   History: Build root
    `C:\queuepilot-engine` (outside the repo, deliberate). Sync done (exit 0),
    41/41 patches applied, compile config `windows-x64-first-16gb` (first-build
    isolation + `concurrent_links = 1` for the 16 GB machine). Machine fixes
