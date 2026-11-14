@@ -228,8 +228,10 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
    verbatim args), Site-column specs in `profile.extra.sites` (wildcard +
    most-specific), `@alias` tokens via DPAPI SecretStore, user `.mjs` parser
    modules from `<dataDir>/parsers`. 224/224 tests green.
-3. ⬜ **Provider resolvers as plugins** — gmail/imap/sms-gateway resolver
-   plugins on top of the registry (the registries exist; these are content).
+3. 🟡 **Provider resolvers as plugins** — imap resolver ✅ (2026-11-14,
+   f890417, gmail app-password path, `@alias` credentials, scripted-server
+   tests). Remaining: sms-gateway variants beyond the generic webhook,
+   oauth-based gmail (needs the Google OAuth flow).
 4. ⬜ **JYL capability adoption** — macros, commands, web endpoints as
    JS/TS modules (parsers half-adopted already).
 

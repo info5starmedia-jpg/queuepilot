@@ -28,7 +28,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Feature | Status |
 | --- | --- |
 | `Site:` columns with resolver syntax | 🟡 | `profile.extra.sites`, wildcard `*`, most-specific wins; `resolveSiteField` + `POST /profiles/:id/resolve` |
-| Resolver registry (gmail, imap, smsgateway, textchest, …) | 🟡 | Core registry ✅ (static/env/webhook builtins, named `#...` errors, verbatim args). gmail/imap/provider resolvers ship as plugins |
+| Resolver registry (gmail, imap, smsgateway, textchest, …) | 🟡 | Core registry ✅ (static/env/webhook/imap builtins, named `#...` errors, verbatim args). imap covers the gmail app-password path; provider-specific APIs ship as plugins |
 | Email/SMS parser registry (`jancy://parsers`) | 🟡 | `ParserRegistry` loads user `.mjs` from `<dataDir>/parsers` ✅; auto-fetch mailboxes ❌ |
 | Token aliases (@alias → real key in settings) | ✅ | `@name` → SecretStore (DPAPI), `PUT/DELETE /aliases/:alias` |
 | User-defined parsers without a release (JYL) | 🟡 | `.mjs` parser modules ✅; JYL macros/commands/web-endpoints ❌ |
