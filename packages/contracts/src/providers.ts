@@ -79,6 +79,12 @@ export const ImportedProfileSchema = z.object({
   ),
   /** Multiple allowed: "Passcode", "Passcode2", ... (presale / verified-fan). */
   passcodes: z.array(z.string()),
+  /**
+   * TOTP seed (base32, as printed by authenticator apps). A SECRET: import
+   * stores it in the SecretStore keyed by the profile's identity, never in
+   * the profile row or extra bag.
+   */
+  totp: z.string().nullable(),
   /** Free 1 … Free 10 arbitrary columns, referenceable by autofill later. */
   free: z.record(z.string()),
   /** Per-profile proxies: "host:port:user:pass", "host:port", or "system connection". */
@@ -335,6 +341,7 @@ export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
       phone: get("Phone Number"),
       smsNumbers,
       passcodes,
+      totp: get("TOTP"),
       free,
       proxies,
       notes: get("Notes"),

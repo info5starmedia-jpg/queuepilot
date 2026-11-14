@@ -9,6 +9,7 @@ import { FuryCoreRuntime, resolveFuryBinary } from "../src/application/runtime/f
 import type { BrowserRuntime, BrowserSession } from "../src/application/runtime/browser-runtime.js";
 import { generateIdentity } from "../src/application/profiles/fingerprint-generator.js";
 import { withPage } from "../src/application/runtime/cdp/cdp-page.js";
+import { egressIpViaRelay } from "../src/application/runtime/egress-check.js";
 import { CLAIMS, expectationClaims, type ClaimResult, type PersonaExpectation } from "./claims.js";
 
 /**
@@ -274,6 +275,29 @@ export async function runVerification(
               ? "upstream saw ZERO requests — the engine bypassed the proxy (real-IP leak)"
               : "upstream saw requests with missing/wrong credentials",
       });
+
+      // Diagnostics claim: the egress facts the launch recorded must exist
+      // and still match an independent probe through the SAME relay. The
+      // relay is static for the run, so a fresh check through it is a real
+      // external probe of the same upstream chain — no rotation race.
+      const diag = session?.egress ?? null;
+      if (diag && diag.exitIp) {
+        const now = await egressIpViaRelay(diag.relayPort!).catch(() => null);
+        results.push({
+          id: "diagnostics-egress",
+          pass: now === diag.exitIp,
+          detail:
+            now === diag.exitIp
+              ? `launch exit ${diag.exitIp} matches the live probe through relay :${diag.relayPort}`
+              : `launch exit ${diag.exitIp} but live probe says ${now ?? "unreachable"} — diagnostics would mislead the operator`,
+        });
+      } else {
+        results.push({
+          id: "diagnostics-egress",
+          pass: false,
+          detail: "session recorded no egress facts (relay/exit-IP) for the diagnostics surface",
+        });
+      }
     }
 
     let failed = 0;

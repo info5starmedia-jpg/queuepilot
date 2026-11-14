@@ -57,6 +57,7 @@ export interface TestContext {
   proxyProviders: ProxyProviderService;
   google: GoogleAuthService;
   sheets: FakeSheets;
+  secrets: MapSecretStore;
   dataDir: string;
 }
 
@@ -83,8 +84,9 @@ export function makeTestContext(
     snapshots,
   );
   const sheets = new FakeSheets();
+  const secrets = new MapSecretStore();
   const google = new GoogleAuthService({
-    secrets: new MapSecretStore(),
+    secrets,
     dataDir,
     clientId: "test-client-id",
     clientSecret: "test-client-secret",
@@ -95,6 +97,7 @@ export function makeTestContext(
     profileRepo,
     identityRepo,
     sheets,
+    secrets,
   );
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
@@ -129,6 +132,7 @@ export function makeTestContext(
     proxyProviders,
     google,
     sheets,
+    secrets,
     dataDir,
   };
 }

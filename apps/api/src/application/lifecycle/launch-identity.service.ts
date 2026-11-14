@@ -37,6 +37,8 @@ export class LaunchIdentityService {
     /** Where the launched proxy came from; "temporary" dies with the run. */
     proxySource: "profile" | "temporary" | "none";
     engineKind: string;
+    /** Egress facts the runtime measured at launch (relay/exit/WebRTC). */
+    egress?: LaunchIdentitySnapshot["egress"];
   }): LaunchIdentitySnapshot {
     const snapshot: LaunchIdentitySnapshot = {
       id: randomUUID(),
@@ -48,6 +50,7 @@ export class LaunchIdentityService {
       proxyId: args.proxyId,
       proxyUrl: args.proxyUrl,
       proxySource: args.proxySource,
+      ...(args.egress ? { egress: args.egress } : {}),
       capturedAt: new Date().toISOString(),
     };
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);

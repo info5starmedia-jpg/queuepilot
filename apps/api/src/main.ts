@@ -46,6 +46,8 @@ import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolv
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
+import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
+import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
@@ -107,6 +109,7 @@ export async function main(): Promise<void> {
   await pluginReg.rescan();
   const jyl = new JylRegistry(path.join(config.dataDir, "jyl"));
   await jyl.rescan();
+  const extensionReg = new ExtensionRegistry(config.dataDir, secretStore);
 
   const google = new GoogleAuthService({
     secrets: secretStore,
@@ -123,7 +126,9 @@ export async function main(): Promise<void> {
     profileRepo,
     identityRepo,
     sheets,
+    secretStore,
   );
+  const totp = new TotpService(profiles, secretStore);
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
     proxyRepo,
@@ -176,6 +181,8 @@ export async function main(): Promise<void> {
     bundles,
     plugins: pluginReg,
     jyl,
+    extensions: extensionReg,
+    totp,
     resolvers,
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),

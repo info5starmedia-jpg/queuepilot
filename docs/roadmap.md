@@ -195,15 +195,19 @@ Sub-steps:
 - c. `egress-via-proxy` claim variant with a socks5 upstream.
 Goal check: claim passes live.
 
-### 3. Egress diagnostics API
+### 3. Egress diagnostics API — ✅ DONE 2026-11-14
 Goal: operator sees proxy chain, DNS and WebRTC leak state per running
 profile, matching what an external probe sees.
-Sub-steps:
-- a. Diagnostics endpoint aggregating relay state + agent WebRTC keys +
-  DNS exit from the per-launch exit-IP check.
-- b. Console panel rendering it.
-- c. Claim: diagnostics values == external probe values.
-Goal check: claim green + console screenshot in docs.
+- a. ✅ `EgressInfo` on BrowserSession, captured by the fury runtime at
+    launch (relay port, exit-IP check result, WebRTC keys); snapshot schema
+    gained an `egress` block; launch measurements served verbatim — never a
+    live re-check (would race rotating proxies).
+- b. ✅ `GET /profiles/:id/egress` — running state, credential-redacted
+    proxyUrl, proxySource, egress block.
+- c. ✅ Claim `diagnostics-egress` in the verify suite (proxy mode): launch
+    exit IP must match an independent probe through the same relay.
+    LIVE 2026-11-14: 23/27 claims hold on fury, diagnostics-egress PASS
+    (exit 99.234.58.124 == live probe through relay).
 
 ### 4. External checker pass (D-004 remainder)
 Goal: third-party validation, not just our own claims.

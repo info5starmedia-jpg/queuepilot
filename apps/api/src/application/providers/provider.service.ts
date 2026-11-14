@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { SecretStore } from "../secrets/secret-store.js";
+import { normalizeTotpSeed, totpSecretKey } from "../profiles/totp.service.js";
 import fs from "node:fs";
 import {
   DomainError,
@@ -68,6 +70,12 @@ export class ProfileProviderService {
     private readonly profiles: ProfileRepository,
     private readonly identities: FingerprintIdentityRepository,
     private readonly sheets?: SheetReader,
+    /**
+     * SecretStore for the TOTP import column: seeds land keyed by identity
+     * (persona), never in the profile row. Optional so test contexts without
+     * secrets simply skip seeding (the column is dropped loudly in issues).
+     */
+    private readonly secrets?: SecretStore | undefined,
   ) {}
 
   async create(
@@ -128,6 +136,7 @@ export class ProfileProviderService {
           updatedAt: now,
         });
         updated++;
+        this.storeTotpSeed(existing.identityId, row);
       } else {
         const identity = generateIdentity("windows");
         this.identities.create(identity);
@@ -148,6 +157,7 @@ export class ProfileProviderService {
           updatedAt: now,
         });
         created++;
+        this.storeTotpSeed(identity.id, row);
       }
     }
 
@@ -164,6 +174,22 @@ export class ProfileProviderService {
     this.get(id);
     this.profiles.detachProvider(id);
     this.providers.delete(id);
+  }
+
+  /**
+   * TOTP import column → SecretStore, keyed by the profile's identity
+   * (the persona owns the seed). Without a SecretStore or an identity the
+   * seed is dropped loudly rather than silently landing in `extra`.
+   */
+  private storeTotpSeed(identityId: string | null, row: ImportedProfile): void {
+    if (!row.totp) return;
+    if (!this.secrets || !identityId) {
+      throw new DomainError(
+        ErrorCodes.VALIDATION_FAILED,
+        `row "${row.key}": TOTP seed present but no secret store / identity to hold it`,
+      );
+    }
+    this.secrets.set(totpSecretKey(identityId), normalizeTotpSeed(row.totp));
   }
 
   /** Source rows: CSV file via the RFC-4180 reader, or a live Google Sheet. */

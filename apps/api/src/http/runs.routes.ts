@@ -62,4 +62,14 @@ export function registerRunRoutes(
     const { id } = req.params as { id: string };
     return lifecycle.attest(id);
   });
+
+  /**
+   * Egress diagnostics: the launch-time proxy chain, relay port, exit
+   * address and WebRTC keys for the occupying run. Launch measurements
+   * verbatim — never a live re-check. proxyUrl arrives credential-redacted.
+   */
+  app.get("/profiles/:id/egress", async (req) => {
+    const { id } = req.params as { id: string };
+    return lifecycle.egressDiagnostics(id);
+  });
 }

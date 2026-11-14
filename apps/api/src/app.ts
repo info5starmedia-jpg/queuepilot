@@ -29,6 +29,9 @@ import type { ParserRegistry } from "./application/parsers/parser-registry.js";
 import type { AliasStore } from "./application/resolvers/token-aliases.js";
 import type { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { registerJylRoutes } from "./http/jyl.routes.js";
+import type { ExtensionRegistry } from "./application/extensions/extension-registry.js";
+import type { TotpService } from "./application/profiles/totp.service.js";
+import { registerExtensionRoutes } from "./http/extensions.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -45,6 +48,8 @@ export interface AppDeps {
   parsers?: ParserRegistry;
   aliases?: AliasStore;
   jyl?: JylRegistry;
+  extensions?: ExtensionRegistry;
+  totp?: TotpService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -69,7 +74,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get("/health", async () => ({ status: "ok", service: "queuepilot" }));
 
-  registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle);
+  registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp);
   registerProxyRoutes(app, deps.proxies);
   registerRunRoutes(app, deps.lifecycle);
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
@@ -90,6 +95,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
   if (deps.jyl) registerJylRoutes(app, { jyl: deps.jyl });
+  if (deps.extensions) registerExtensionRoutes(app, { extensions: deps.extensions });
 
   return app;
 }

@@ -30,7 +30,24 @@ import type {
   BrowserSession,
 } from "../runtime/browser-runtime.js";
 import type { LaunchIdentityService } from "./launch-identity.service.js";
+import type { LaunchIdentitySnapshot } from "@queuepilot/contracts";
 import { TabRegistry } from "../tabs/tab-registry.js";
+
+/**
+ * Credential-redact a proxy URL for diagnostics: the operator needs host,
+ * port and scheme — never the user:pass that may sit in the authority.
+ */
+export function redactProxyUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.username || u.password) u.username = "***";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return "(unparseable proxy url)";
+  }
+}
 
 export interface StartOptions {
   /**
@@ -190,6 +207,7 @@ export class BrowserLifecycleService {
         proxyUrl: launchProxyUrl,
         proxySource,
         engineKind: this.runtime.kind,
+        egress: session.egress ?? undefined,
       });
       void session.exited.then(({ code, signal }) =>
         this.onEngineExit(profileId, live.id, code, signal),
@@ -414,6 +432,34 @@ export class BrowserLifecycleService {
       identityId: profile.identityId,
       proxyId: profile.proxyId,
     });
+  }
+
+  /**
+   * Egress diagnostics (P7): what the running launch measured at launch —
+   * proxy chain, relay port, exit address, WebRTC keys. Serves the LAUNCH
+   * measurements verbatim, never a fresh re-check (a re-check would race a
+   * rotating proxy and could contradict the running engine). proxyUrl is
+   * credential-redacted: the operator sees where traffic exits, the response
+   * never carries proxy passwords.
+   */
+  egressDiagnostics(profileId: string): {
+    profileId: string;
+    running: boolean;
+    engineKind: string;
+    proxyUrl: string | null;
+    proxySource: "profile" | "temporary" | "none";
+    egress: LaunchIdentitySnapshot["egress"] | null;
+  } | null {
+    const run = this.runs.occupyingForProfile(profileId);
+    const snapshot = run && this.snapshots ? this.snapshots.forRun(run.id) : null;
+    return {
+      profileId,
+      running: run !== null && run.status === "running",
+      engineKind: snapshot?.engineKind ?? this.runtime.kind,
+      proxyUrl: redactProxyUrl(snapshot?.proxyUrl ?? null),
+      proxySource: snapshot?.proxySource ?? "none",
+      egress: snapshot?.egress ?? null,
+    };
   }
 
   /**

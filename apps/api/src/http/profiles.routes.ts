@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { CreateProfileInputSchema, UpdateProfileInputSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
+import type { TotpService } from "../application/profiles/totp.service.js";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 import { importProfilesCsv } from "../application/profiles/profile-import.js";
 
@@ -16,6 +17,7 @@ export function registerProfileRoutes(
   service: ProfileService,
   proxies: ProxyService,
   lifecycle?: { ensureIdle(profileId: string): Promise<void> },
+  totp?: TotpService,
 ): void {
   // P6.1: bulk CSV import. Dry-run first, then apply — a bad row never
   // aborts the file.
@@ -65,4 +67,25 @@ export function registerProfileRoutes(
     service.delete(id);
     return reply.code(204).send();
   });
+
+  if (totp) {
+    const SeedSchema = z.object({ seed: z.string().min(8).max(200) });
+    // The seed is write-only over the API: PUT to set, GET answers the
+    // current code + rollover — the seed itself never leaves the SecretStore.
+    app.put("/profiles/:id/totp", async (req) => {
+      const { id } = req.params as { id: string };
+      const body = SeedSchema.parse(req.body);
+      totp.setSeed(id, body.seed);
+      return { seeded: true };
+    });
+    app.get("/profiles/:id/totp", async (req) => {
+      const { id } = req.params as { id: string };
+      return totp.current(id);
+    });
+    app.delete("/profiles/:id/totp", async (req) => {
+      const { id } = req.params as { id: string };
+      totp.removeSeed(id);
+      return { seeded: false };
+    });
+  }
 }

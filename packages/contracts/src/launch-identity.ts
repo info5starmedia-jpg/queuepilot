@@ -29,6 +29,23 @@ export const LaunchIdentitySnapshotSchema = z.object({
    * before this field existed keep their original meaning.
    */
   proxySource: z.enum(["profile", "temporary", "none"]).default("profile"),
+  /**
+   * Egress facts measured at launch (P7 diagnostics): the loopback relay
+   * port the engine proxies through, the exit address from the per-launch
+   * check, and the WebRTC keys handed to the engine. Absent on launches
+   * without a proxy (direct egress — nothing to diagnose) and on snapshots
+   * written before this field existed.
+   */
+  egress: z
+    .object({
+      relayPort: z.number().int().nullable(),
+      /** null = the exit check failed; engine gathers no WebRTC candidates. */
+      exitIp: z.string().nullable(),
+      webrtcPublicIp: z.string().nullable(),
+      webrtcHostName: z.string().nullable(),
+      checkedAt: z.string().datetime(),
+    })
+    .optional(),
   capturedAt: z.string().datetime(),
 });
 export type LaunchIdentitySnapshot = z.infer<

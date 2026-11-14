@@ -42,6 +42,23 @@ export interface BrowserSession {
    * than returning an unverified "match".
    */
   captureFingerprint?(): Promise<ObservedFingerprint>;
+  /**
+   * Optional egress facts measured at launch (relay port, exit address,
+   * WebRTC keys). Present when the runtime fronts the proxy with a relay —
+   * the diagnostics surface reads it. Absent = direct egress, nothing to
+   * diagnose beyond "no proxy".
+   */
+  readonly egress?: EgressInfo | null | undefined;
+}
+
+/** Egress facts captured at launch for the diagnostics surface. */
+export interface EgressInfo {
+  relayPort: number | null;
+  /** null = exit check failed; engine gathers no WebRTC candidates. */
+  exitIp: string | null;
+  webrtcPublicIp: string | null;
+  webrtcHostName: string | null;
+  checkedAt: string;
 }
 
 export interface OpenTabRequest {

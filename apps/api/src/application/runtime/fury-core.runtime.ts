@@ -12,6 +12,7 @@ import {
 import type {
   BrowserRuntime,
   BrowserSession,
+  EgressInfo,
   LaunchRequest,
   OpenTabRequest,
 } from "./browser-runtime.js";
@@ -86,6 +87,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
     // direct fallback would leak the operator's real IP, which is the one
     // failure this product may never have.
     let relay: ProxyRelay | null = null;
+    let egress: EgressInfo | null = null;
     if (request.proxyUrl) {
       relay = await startProxyRelay(request.proxyUrl);
 
@@ -96,13 +98,25 @@ export class FuryCoreRuntime implements BrowserRuntime {
       // sites see. Soft failure: no keys, engine gathers nothing (0.5.1
       // behavior), never a guessed address.
       const exitIp = await egressIpViaRelay(relay.port).catch(() => null);
+      const webrtcPublicIp = exitIp;
+      const webrtcHostName = exitIp ? `${crypto.randomUUID()}.local` : null;
       if (exitIp) {
         config.webrtc = {
           ...(config.webrtc as Record<string, unknown>),
           publicIp: exitIp,
-          hostName: `${crypto.randomUUID()}.local`,
+          hostName: webrtcHostName,
         };
       }
+      // Diagnostics surface (P7): what the launch measured, verbatim. The
+      // diagnostics endpoint serves exactly this — never a re-check, which
+      // would race a rotating proxy.
+      egress = {
+        relayPort: relay.port,
+        exitIp,
+        webrtcPublicIp,
+        webrtcHostName,
+        checkedAt: new Date().toISOString(),
+      };
     }
 
     const configPath = path.join(request.profileDataDir, "fury-config.json");
@@ -151,7 +165,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
             `engine_start: ${err instanceof Error ? err.message : String(err)}`,
           );
     }
-    return new FurySession(child, enginePid, debugPort, relay, fitArea);
+    return new FurySession(child, enginePid, debugPort, relay, fitArea, egress);
   }
 }
 
@@ -358,6 +372,8 @@ export class FurySession implements BrowserSession {
     private readonly relay: ProxyRelay | null = null,
     /** Claimed screen area the window-fit watcher enforces; null disables it. */
     fitArea: ScreenArea | null = null,
+    /** Egress facts measured at launch; null when launched without a proxy. */
+    readonly egress: EgressInfo | null = null,
   ) {
     this.wsEndpoint = `ws://127.0.0.1:${debugPort}`;
     this.tabs = new CdpTabController(this.wsEndpoint, async () => {
