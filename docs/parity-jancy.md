@@ -45,7 +45,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Provider actions (star default, refresh, trash, test) | 🟡 | refresh/test/delete ✅; star/default ❌ |
 | Per-proxy timezone applied at assignment | 🟡 | Timezone lives on identity, not per-proxy switch |
 | Temporary proxies per launch | ✅ | P1.5, never persisted |
-| socks5 upstream in relay | ❌ | Refuses loudly today; P7 item 2 |
+| socks5 upstream in relay | ✅ | P7.2 done; live `egress-via-socks5` PASS |
 | CLI `--proxy-provider` | ❌ | CLI exists; no provider flag |
 
 ## 4. Tabs

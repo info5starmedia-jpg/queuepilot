@@ -98,12 +98,13 @@ describe("launch proxy handling (P0 — never silently direct)", () => {
   it("refuses to launch with a proxy scheme the relay cannot honor", async () => {
     // process.execPath exists, so the binary check passes and the proxy
     // validation is what must throw — BEFORE any process is spawned.
+    // (socks5 is honored since P7.2; ftp never is.)
     const runtime = new FuryCoreRuntime(process.execPath);
     await expect(
       runtime.launch({
         profile,
         identity: null,
-        proxyUrl: "socks5://127.0.0.1:1080",
+        proxyUrl: "ftp://127.0.0.1:21",
         profileDataDir: fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-fury-launch-")),
       }),
     ).rejects.toMatchObject({ code: ErrorCodes.PROXY_UNSUPPORTED });

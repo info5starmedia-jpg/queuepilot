@@ -187,13 +187,26 @@ rebuild turned out to be unnecessary.
     jar, control proves the key (not the file) does the work.
 - d. ✅ Parity row flipped; unit tests for key management (3 tests).
 
-### 2. socks5 in proxy-relay
+### 2. socks5 in proxy-relay — ✅ DONE 2026-11-14
 Goal: `PROXY_UNSUPPORTED` never fires for socks5 upstreams.
 Sub-steps:
-- a. Implement socks5 upstream chain in the relay (no-auth + user/pass).
-- b. Test: relay round-trip through a local socks5 server fixture.
-- c. `egress-via-proxy` claim variant with a socks5 upstream.
-Goal check: claim passes live.
+- a. ✅ socks5/socks5h accepted by `parseUpstream` (default port 1080,
+    protocol-specific auth: RFC 1929 user/pass for socks5, Basic only for
+    http/https). Relay speaks RFC 1928 CONNECT (IPv4/domain/IPv6 ATYP,
+    remote resolution = socks5h semantics) with RFC 1929 subnegotiation;
+    session-reader handshake (single buffered reader — unshift-then-reattach
+    hangs on modern Node), leftover bytes pushed back before piping.
+    Fail-closed throughout: refused creds/CONNECT → 502 to the engine, never
+    a direct detour; refusals counted separately from network errors.
+    Plain-HTTP requests work too (origin-form rewrite, no header injection).
+- b. ✅ 4 new fixture tests against a fake socks5 server: CONNECT tunnel with
+    creds, wrong-creds fail-closed (upstream dial count stays 0), plain-HTTP
+    forwarding, hostname remote-resolution (ATYP 0x03). 13/13 relay tests.
+- c. ✅ New `--socks5` verify mode with a recording RFC 1929 upstream.
+    LIVE 2026-11-14: 23/27 claims hold on fury, `egress-via-socks5` PASS
+    (12 proxied connections, credentials injected), `diagnostics-egress`
+    PASS through the socks5 relay (exit IP == live probe).
+Goal check: claim passes live — YES.
 
 ### 3. Egress diagnostics API — ✅ DONE 2026-11-14
 Goal: operator sees proxy chain, DNS and WebRTC leak state per running

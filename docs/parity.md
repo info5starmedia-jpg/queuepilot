@@ -106,7 +106,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | TOTP 2FA per profile | ✅ | ❌ | ❌ P2 |
 | Portable profile bundles (cross-machine) | ✅ (needs os-crypt wiring) | ❌ | ❌ P2 |
 | xlsx import, trash/undo | ✅ | ❌ | ❌ P3 |
-| socks5 upstream proxies | ✅ | ❌ refused loudly (PROXY_UNSUPPORTED), never bypassed | ❌ P2 |
+| socks5 upstream proxies | ✅ | ✅ relay speaks RFC 1928 + 1929; live `egress-via-socks5` PASS | ✅ P7.2 |
 
 ### P0 — the proxy leak (found in this audit 2026-11-10, FIXED v0.12.0)
 

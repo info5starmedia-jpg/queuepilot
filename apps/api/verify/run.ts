@@ -29,6 +29,8 @@ interface RunArgs {
   dataDir: string;
   /** "upstream" = run the egress-via-proxy proof against a recording fake upstream. */
   proxy: boolean;
+  /** Same proof, but the upstream is a recording SOCKS5 server (RFC 1928/1929). */
+  socks5: boolean;
 }
 
 function parseArgs(argv: string[]): RunArgs {
@@ -36,11 +38,13 @@ function parseArgs(argv: string[]): RunArgs {
     engine: "fury",
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-verify-")),
     proxy: false,
+    socks5: false,
   };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--engine") args.engine = argv[++i] ?? "fury";
     else if (argv[i] === "--data-dir") args.dataDir = argv[++i] ?? args.dataDir;
     else if (argv[i] === "--proxy") args.proxy = true;
+    else if (argv[i] === "--socks5") args.socks5 = true;
   }
   return args;
 }
@@ -190,6 +194,149 @@ async function startRecordingUpstream(): Promise<{
   };
 }
 
+interface UpstreamHandle {
+  kind: "http" | "socks5";
+  port: number;
+  proxyUrl: string;
+  sawProbeRequest: () => number;
+  authAlwaysCorrect: () => boolean;
+  close: () => Promise<void>;
+}
+
+/** Recording SOCKS5 upstream for the --socks5 egress proof. Enforces RFC 1929
+ * user/pass, records what it saw, and actually dials the requested target so
+ * the probe page genuinely loads through the chain. */
+async function startRecordingSocks5Upstream(): Promise<UpstreamHandle> {
+  let connects = 0;
+  const auths: (string | null)[] = [];
+  const EXPECT = { user: "verify", pass: "pr0be" };
+
+  function makeReader(sock: net.Socket) {
+    let pending = Buffer.alloc(0);
+    let waiter: { n: number; res: (b: Buffer) => void; rej: (e: Error) => void } | null = null;
+    const onData = (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      if (waiter && pending.length >= waiter.n) {
+        const w = waiter;
+        waiter = null;
+        w.res(pending.subarray(0, w.n));
+        pending = pending.subarray(w.n);
+      }
+    };
+    const onErr = (err: Error) => {
+      if (waiter) {
+        const w = waiter;
+        waiter = null;
+        w.rej(err);
+      }
+    };
+    sock.on("data", onData);
+    sock.on("error", onErr);
+    return {
+      read(n: number): Promise<Buffer> {
+        if (pending.length >= n) {
+          const out = pending.subarray(0, n);
+          pending = pending.subarray(n);
+          return Promise.resolve(out);
+        }
+        return new Promise((res, rej) => {
+          waiter = { n, res, rej };
+        });
+      },
+      end() {
+        sock.off("data", onData);
+        sock.off("error", onErr);
+        if (pending.length > 0) {
+          sock.unshift(pending);
+          pending = Buffer.alloc(0);
+        }
+      },
+    };
+  }
+
+  const server = net.createServer((sock) => {
+    void (async () => {
+      const r = makeReader(sock);
+      try {
+        const greet = await r.read(2);
+        const n = greet[1]!;
+        const methods = await r.read(n);
+        if (!methods.includes(0x02)) {
+          auths.push(null);
+          sock.write(Buffer.from([0x05, 0xff]));
+          sock.end();
+          return;
+        }
+        sock.write(Buffer.from([0x05, 0x02]));
+        const ver = (await r.read(1))[0]!;
+        const ulen = (await r.read(1))[0]!;
+        const user = (await r.read(ulen)).toString("utf8");
+        const plen = (await r.read(1))[0]!;
+        const pass = (await r.read(plen)).toString("utf8");
+        auths.push(`${user}:${pass}`);
+        if (user !== EXPECT.user || pass !== EXPECT.pass) {
+          sock.write(Buffer.from([ver, 0x01]));
+          sock.end();
+          return;
+        }
+        sock.write(Buffer.from([ver, 0x00]));
+        const hdr = await r.read(4);
+        const atyp = hdr[3]!;
+        let host = "";
+        if (atyp === 0x01) host = Array.from(await r.read(4)).join(".");
+        else if (atyp === 0x03) {
+          const len = (await r.read(1))[0]!;
+          host = (await r.read(len)).toString("utf8");
+        } else {
+          sock.write(Buffer.from([0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          sock.end();
+          return;
+        }
+        const port = (await r.read(2)).readUInt16BE(0);
+        connects++;
+        const onDialError = () => {
+          // Pre-pipe dial failure: refuse the CONNECT, then quiet.
+          sock.write(Buffer.from([0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          sock.end();
+        };
+        const target = net.connect(port, host, () => {
+          target.removeListener("error", onDialError);
+          sock.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          r.end();
+          // Permanent error handlers: piped writes fail with EPIPE as a
+          // matter of course when either side hangs up; an unhandled 'error'
+          // would crash the whole verify harness.
+          sock.on("error", () => {
+            sock.destroy();
+            target.destroy();
+          });
+          target.on("error", () => {
+            sock.destroy();
+            target.destroy();
+          });
+          sock.pipe(target).pipe(sock);
+        });
+        target.on("error", onDialError);
+      } catch {
+        sock.destroy();
+      }
+    })();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = (server.address() as { port: number }).port;
+  return {
+    kind: "socks5",
+    port,
+    proxyUrl: `socks5://verify:pr0be@127.0.0.1:${port}`,
+    sawProbeRequest: () => connects,
+    authAlwaysCorrect: () => auths.length > 0 && auths.every((a) => a === `${EXPECT.user}:${EXPECT.pass}`),
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
 export async function runVerification(
   argv: string[],
   log: (m: string) => void = (m) => console.log(m),
@@ -214,12 +361,17 @@ export async function runVerification(
     updatedAt: new Date().toISOString(),
   };
 
-  log(`verify: engine=${runtime.kind} dataDir=${args.dataDir} proxy=${args.proxy}`);
+  log(`verify: engine=${runtime.kind} dataDir=${args.dataDir} proxy=${args.proxy} socks5=${args.socks5}`);
   let session: BrowserSession | null = null;
-  // Proxy mode: probe page on the LAN IP (loopback would bypass the proxy
+  // Proxy modes: probe page on the LAN IP (loopback would bypass the proxy
   // and prove nothing), traffic routed through a recording fake upstream.
-  const probe = await serveProbePage(args.proxy ? lanIPv4() : "127.0.0.1");
-  const upstream = args.proxy ? await startRecordingUpstream() : null;
+  const useUpstream = args.proxy || args.socks5;
+  const probe = await serveProbePage(useUpstream ? lanIPv4() : "127.0.0.1");
+  const upstream: UpstreamHandle | null = args.socks5
+    ? await startRecordingSocks5Upstream()
+    : args.proxy
+      ? { kind: "http" as const, ...(await startRecordingUpstream()) }
+      : null;
   try {
     session = await runtime.launch({
       profile,
@@ -251,7 +403,7 @@ export async function runVerification(
     // is NOT a secure context — Chromium spec-hides userAgentData there, so
     // uach-consistent cannot be observed. Skip it, never fake it; the claim
     // is covered by the standard loopback run (16/16 on fury-core).
-    if (args.proxy) {
+    if (args.proxy || args.socks5) {
       const idx = results.findIndex((r) => r.id === "uach-consistent");
       if (idx !== -1) {
         results[idx] = {
@@ -266,14 +418,14 @@ export async function runVerification(
     if (upstream) {
       const saw = upstream.sawProbeRequest();
       results.push({
-        id: "egress-via-proxy",
+        id: upstream.kind === "socks5" ? "egress-via-socks5" : "egress-via-proxy",
         pass: saw > 0 && upstream.authAlwaysCorrect(),
         detail:
           saw > 0 && upstream.authAlwaysCorrect()
-            ? `upstream saw ${saw} probe request(s), credentials injected by the relay`
+            ? `upstream saw ${saw} proxied connection(s), credentials injected by the relay`
             : saw === 0
-              ? "upstream saw ZERO requests — the engine bypassed the proxy (real-IP leak)"
-              : "upstream saw requests with missing/wrong credentials",
+              ? "upstream saw ZERO connections — the engine bypassed the proxy (real-IP leak)"
+              : "upstream saw connections with missing/wrong credentials",
       });
 
       // Diagnostics claim: the egress facts the launch recorded must exist
