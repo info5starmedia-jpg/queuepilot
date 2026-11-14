@@ -22,6 +22,11 @@ import { registerDashboardRoutes } from "./http/dashboard.routes.js";
 import { registerBundleRoutes } from "./http/bundle.routes.js";
 import type { GoogleAuthService } from "./application/google/google-auth.service.js";
 import type { BundleService } from "./application/bundles/bundle.service.js";
+import { registerPluginRoutes } from "./http/plugins.routes.js";
+import type { PluginRegistry } from "./application/plugins/plugin-registry.js";
+import type { ResolverRegistry } from "./application/resolvers/resolver-registry.js";
+import type { ParserRegistry } from "./application/parsers/parser-registry.js";
+import type { AliasStore } from "./application/resolvers/token-aliases.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -33,6 +38,10 @@ export interface AppDeps {
   engineHealth: EngineHealthService;
   google: GoogleAuthService;
   bundles?: BundleService;
+  plugins?: PluginRegistry;
+  resolvers?: ResolverRegistry;
+  parsers?: ParserRegistry;
+  aliases?: AliasStore;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -68,6 +77,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerGoogleRoutes(app, deps.google);
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);
+  if (deps.plugins && deps.resolvers && deps.parsers && deps.aliases) {
+    registerPluginRoutes(app, {
+      plugins: deps.plugins,
+      resolvers: deps.resolvers,
+      parsers: deps.parsers,
+      aliases: deps.aliases,
+      profiles: deps.profiles,
+    });
+  }
 
   return app;
 }

@@ -42,6 +42,11 @@ import {
 } from "./application/runtime/fury-core.runtime.js";
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
+import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
+import { ParserRegistry } from "./application/parsers/parser-registry.js";
+import { PluginRegistry } from "./application/plugins/plugin-registry.js";
+import { secretAliasStore } from "./application/resolvers/token-aliases.js";
+import path from "node:path";
 
 /**
  * CLI entry: `queuepilot engine install ...` runs and exits; anything else
@@ -84,6 +89,18 @@ export async function main(): Promise<void> {
   const secretStore = createSecretStore();
   const proxies = new ProxyService(proxyRepo, secretStore);
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
+
+  // Plugin + resolver + parser registries (Jancy workflow layer, P7).
+  const resolvers = new ResolverRegistry();
+  registerBuiltinResolvers(resolvers);
+  const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
+  await parserReg.rescan();
+  const pluginReg = new PluginRegistry(
+    path.join(config.dataDir, "plugins"),
+    resolvers,
+    parserReg,
+  );
+  await pluginReg.rescan();
 
   const google = new GoogleAuthService({
     dataDir: config.dataDir,
@@ -149,6 +166,10 @@ export async function main(): Promise<void> {
     engineHealth,
     google,
     bundles,
+    plugins: pluginReg,
+    resolvers,
+    parsers: parserReg,
+    aliases: secretAliasStore(secretStore),
   });
   await app.listen({ port: config.port, host: config.host });
   console.log(
