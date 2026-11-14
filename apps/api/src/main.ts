@@ -18,6 +18,8 @@ import { BrowserLifecycleService } from "./application/lifecycle/browser.lifecyc
 import { LaunchIdentityService } from "./application/lifecycle/launch-identity.service.js";
 import { EngineHealthService } from "./application/engine/engine-health.service.js";
 import { runEngineInstall } from "./cli/engine-install.js";
+import { runEngineUpdate } from "./cli/engine-update.js";
+import { runRemoteCli } from "./cli/remote.js";
 import { runScript } from "./cli/script-runner.js";
 import { GoogleAuthService } from "./application/google/google-auth.service.js";
 import { SheetsClient } from "./application/google/sheets-client.js";
@@ -52,8 +54,17 @@ async function dispatchCli(argv: string[]): Promise<number | null> {
       enginesDir: `${config.dataDir}/engines`,
     });
   }
+  if (argv[0] === "engine" && argv[1] === "update") {
+    const config = loadConfig();
+    return runEngineUpdate(argv.slice(2), {
+      enginesDir: `${config.dataDir}/engines`,
+    });
+  }
   if (argv[0] === "script") {
     return runScript(argv.slice(1));
+  }
+  if (argv[0] === "profiles" || argv[0] === "profile") {
+    return runRemoteCli(argv);
   }
   return null;
 }
