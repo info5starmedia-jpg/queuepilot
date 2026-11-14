@@ -97,12 +97,25 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   auth-injecting loopback relay, unsupported schemes refuse loudly
   (PROXY_UNSUPPORTED), and the `egress-via-proxy` claim proves the chain
   live: `npm run verify --workspace apps/api -- --engine fury --proxy`.
-- P4c own build (OPEN, approved 2026-11-10): Fury's BSD patchset + build
+- P4c own build (DONE v0.12.6, 2026-11-14): Fury's BSD patchset + build
   chain vendored into `engine/` (provenance, license and the engine-bump
   ritual in `engine/README.md`). First overnight build on the reference
   machine, then Fury's per-patch verify harness + our claim suite on OUR
   binary; only then publish our own tarball in the engine manifest.
   Hardware pre-flight done: 207GB free NVMe, 32GB RAM, 6c/12t (est. 6–12h).
+  **Shipped: official LTO+PGO build (58,720/58,720 steps), Fury harness
+  43/43 green, claim suite 25/25 + 22/22 proxy, manifest `0.5.5-qp.3`,
+  parity audit all 6 gates green (docs/handoff.md "Final gate").**
+- Fury 0.5.5 parity (DONE 2026-11-14): patches 0052 (Local Font Access
+  filter), 0071 (WebRTC synthetic candidates — agent does a fresh per-launch
+  exit-IP check through the relay and writes `webrtc.publicIp`/`hostName`),
+  0123 (built-in AI answers "downloadable" like Chrome, never downloads).
+  Persona now declares the desktop-mains battery tuple (0121 passes the
+  host's real battery through when unconfigured — the host UPS at 0.98 was
+  the audit's one red claim). AliasMode discipline adopted: delete waits out
+  in-flight start/stop (`ensureIdle`), launch refusals name their stage
+  (`process_spawn:`/`engine_start:`), engine fetcher resumes stalled
+  downloads with Range retries.
 
 ## P5 — Team mode
 
@@ -136,7 +149,7 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   Spike plan in ADR-0006 (P4a). Claim-based detection suite done (P4b,
   v0.11.0); external checker pass (CreepJS/sannysoft) still owed, manual.
 
-## P7 — Post-engine batch (queued 2026-11-12, starts after the parity audit passes)
+## P7 — Post-engine batch (parity audit PASSED 2026-11-14 — this batch is now unblocked)
 
 Ordered by dependency, not size. Every item ships with its claim/verify proof
 — no green checkbox without a live check, same rule as everything above.
@@ -159,3 +172,41 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
 8. **D-002 / D-003** — PID-reuse hardening (start tokens), proxy rotation
    links design.
 9. **React console (ADR-0005)** — optional; vanilla console is shippable.
+
+## Done since P7 was queued (2026-11-13/14, v0.12.6)
+
+- **P6.1 CSV import** — `POST /profiles/import` (dry-run + upsert, bad row
+  never aborts the file) + console UI (file/paste → preview → apply).
+- **P6.3 session bundles v2** — manifest carries group/tags/notes/tabUrls/
+  sanitized proxy reference (passwords stay DPAPI machine-bound);
+  `POST /bundles/restore` creates/upserts the profile, optionally starts it,
+  imports cookies, reopens tabs. Roaming without password travel.
+- **P6.4 CLI** — `queuepilot` command surface (profiles/bundles/engine).
+- **P5.5 installer** — `scripts/package-installer.ps1` packs the built engine
+  into a shareable zip; `setup.ps1` verifies SHA-256, installs under
+  `%LOCALAPPDATA%\QueuePilot\engines\`, writes the install receipt, prints
+  the AV note. `docs/av-notes.md` documents Norton/Defender/Avast exclusions
+  (self-built unsigned engine is expected to be flagged). Console gained a
+  first-run Setup checklist.
+
+## P7 additions from the Fury 0.5.5 / AliasMode update scan (2026-11-14)
+
+- **Bookmark sets** (Fury 0.5.3): named folders of links deployed to many
+  profiles at launch, written at the front of the bookmarks bar with the
+  set's id in meta_info; browser-made bookmarks never touched.
+- **Extensions registry v2** (Fury 0.5.4): install from .crx/.zip/unpacked
+  folder, pinned extension ids (generated RSA key per extension name kept
+  machine-side so ids and storage survive versions and profiles); copy from
+  another profile deliberately WITHOUT storage (shared storage = two
+  personas tied together).
+- **Start pages on every launch** (Fury 0.5.2): pass the profile's start
+  URLs at every start, not just the first.
+- Skipped deliberately: Fury's commercial store/partner UI and their
+  account-recovery server (not our family/friends mission).
+
+## P5.6 — Perf & startup (open)
+
+- Cold-start measurement (launch → first page) on the official build;
+  budget < 2.5 s on this machine.
+- Profile dir hygiene: confirm no `DevToolsActivePort` staleness, no
+  leftover Singleton* locks after hard kills.
