@@ -11,3 +11,4 @@ coverage/
 engine/src/
 engine/depot_tools/
 engine/out/
+__pycache__/
