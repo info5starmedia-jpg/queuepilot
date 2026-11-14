@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -18,6 +19,7 @@ import { CdpTabController } from "./cdp/cdp-tab-controller.js";
 import { CdpConnection } from "./cdp/cdp-connection.js";
 import { captureFingerprintViaDebugPort } from "./cdp/cdp-attestation.js";
 import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
+import { egressIpViaRelay } from "./egress-check.js";
 import {
   claimedScreenArea,
   cdpWindowDriver,
@@ -72,8 +74,6 @@ export class FuryCoreRuntime implements BrowserRuntime {
 
     const debugPort = await findFreePort();
     const config = personaConfig(request.identity);
-    const configPath = path.join(request.profileDataDir, "fury-config.json");
-    fs.writeFileSync(configPath, JSON.stringify(config));
 
     // P0 (proxy leak): a configured proxy is NEVER silently dropped. The
     // engine only understands --proxy-server without credentials, so an
@@ -84,7 +84,25 @@ export class FuryCoreRuntime implements BrowserRuntime {
     let relay: ProxyRelay | null = null;
     if (request.proxyUrl) {
       relay = await startProxyRelay(request.proxyUrl);
+
+      // Patch 0071: give the engine the launch's exit address so its WebRTC
+      // allocator can announce Chrome's candidate shape (mDNS host + srflx
+      // through that address) instead of "WebRTC disabled". Fresh check per
+      // launch — a stale address from a rotating proxy would contradict what
+      // sites see. Soft failure: no keys, engine gathers nothing (0.5.1
+      // behavior), never a guessed address.
+      const exitIp = await egressIpViaRelay(relay.port).catch(() => null);
+      if (exitIp) {
+        config.webrtc = {
+          ...(config.webrtc as Record<string, unknown>),
+          publicIp: exitIp,
+          hostName: `${crypto.randomUUID()}.local`,
+        };
+      }
     }
+
+    const configPath = path.join(request.profileDataDir, "fury-config.json");
+    fs.writeFileSync(configPath, JSON.stringify(config));
 
     const fitArea = claimedScreenArea(request.identity);
     const initialSize = initialWindowSize(request.identity);
