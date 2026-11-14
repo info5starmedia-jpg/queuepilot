@@ -331,14 +331,23 @@ touching the API. Trigger condition: console-depth track (tabs mass-select,
 Tab Thinger, Cookie Thinger) hits vanilla maintainability limits. Sub-steps
 then: scaffold → port panels → same e2e checks → delete vanilla.
 
-### 12. P5.6 Perf & startup
+### 12. P5.6 Perf & startup — ✅ DONE 2026-11-14
 Goal: cold start < 2.5 s on this machine; no profile-dir staleness after
 hard kills.
 Sub-steps:
-- a. Measure launch → first page on the official build, record in docs.
-- b. Hygiene audit: DevToolsActivePort, Singleton* locks after kill -9;
-    fix whatever leaks.
-Goal check: numbers committed.
+- a. ✅ `apps/api/verify/coldstart.ts` measures launch → first page fetch
+    through the REAL engine path (probe page as start URL). LIVE on
+    fury-core (Windows, this machine): **1417 ms** — under the 2500 ms
+    budget. Claim `cold-start` recorded.
+- b. ✅ Hygiene audit via hard SIGKILL: this engine build leaves ZERO
+    singleton residue (no DevToolsActivePort / Singleton* files — the
+    launcher-clean relaunch succeeded in 895 ms). Defense-in-depth shipped
+    anyway: `cleanProfileDirStaleness()` runs pre-spawn (only after the
+    per-profile guard proves no live engine), removing DevToolsActivePort /
+    SingletonLock / SingletonSocket / SingletonCookie / .org.chromium.*
+    while leaving profile data untouched. 2 unit tests + live claim
+    `hygiene-relaunch-after-hard-kill` PASS (2/2).
+Goal check: numbers committed — YES.
 
 ## Done since P7 was queued (2026-11-13/14, v0.12.6)
 

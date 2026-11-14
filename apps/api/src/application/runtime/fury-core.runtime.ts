@@ -23,6 +23,7 @@ import { startProxyRelay, type ProxyRelay } from "./proxy-relay.js";
 import { egressIpViaRelay } from "./egress-check.js";
 import { getOrCreateOscryptKey } from "./oscrypt-key.js";
 import { applyBookmarkSets, normalizeBookmarkSets } from "./bookmark-sets.js";
+import { cleanProfileDirStaleness } from "./profile-hygiene.js";
 import {
   claimedScreenArea,
   cdpWindowDriver,
@@ -88,6 +89,10 @@ export class FuryCoreRuntime implements BrowserRuntime {
     if (bookmarkSets.length > 0) {
       applyBookmarkSets(request.profileDataDir, bookmarkSets);
     }
+    // P5.6 hygiene: a previous HARD kill leaves singleton state behind. Safe
+    // to remove here because the lifecycle layer only calls launch after the
+    // per-profile guard proved no live engine occupies this profile.
+    cleanProfileDirStaleness(request.profileDataDir);
 
     const debugPort = await findFreePort();
     const config = personaConfig(request.identity);
