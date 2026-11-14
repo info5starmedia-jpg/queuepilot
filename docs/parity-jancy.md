@@ -27,11 +27,11 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 
 | Feature | Status |
 | --- | --- |
-| `Site:` columns with resolver syntax | ❌ |
-| Resolver registry (gmail, imap, smsgateway, textchest, …) | ❌ |
-| Email/SMS parser registry (`jancy://parsers`) | ❌ |
-| Token aliases (@alias → real key in settings) | ❌ |
-| User-defined parsers without a release (JYL) | ❌ |
+| `Site:` columns with resolver syntax | 🟡 | `profile.extra.sites`, wildcard `*`, most-specific wins; `resolveSiteField` + `POST /profiles/:id/resolve` |
+| Resolver registry (gmail, imap, smsgateway, textchest, …) | 🟡 | Core registry ✅ (static/env/webhook builtins, named `#...` errors, verbatim args). gmail/imap/provider resolvers ship as plugins |
+| Email/SMS parser registry (`jancy://parsers`) | 🟡 | `ParserRegistry` loads user `.mjs` from `<dataDir>/parsers` ✅; auto-fetch mailboxes ❌ |
+| Token aliases (@alias → real key in settings) | ✅ | `@name` → SecretStore (DPAPI), `PUT/DELETE /aliases/:alias` |
+| User-defined parsers without a release (JYL) | 🟡 | `.mjs` parser modules ✅; JYL macros/commands/web-endpoints ❌ |
 
 **This is the largest single gap.** Jancy's killer feature; QueuePilot has no
 2FA/code layer at all. Plugin-shaped by design (see §6).
@@ -79,7 +79,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | --- | --- | --- |
 | Client SDK + script runner | ✅ | P3 (`@queuepilot/client`, `queuepilot script`) — our scripting entry |
 | JYL (user commands/macros/parsers/web endpoints) | ❌ | Adopt the five capabilities as JS/TS modules |
-| Plugin system (~25 registries) | ❌ | Adopt registry architecture — cannot be bolted on later |
+| Plugin system (~25 registries) | 🟡 | `PluginRegistry` core ✅ (ESM folders in `<dataDir>/plugins`, lifecycle hooks, namespaced contributions, failure isolation). Remaining registries adopt as needed |
 | Userscripts (Greasemonkey subset) | ❌ | |
 | Web interface with extensible endpoints | 🟡 | REST API + console exist; user-extensible endpoints ❌ |
 | Site plugins (ticketmaster/queue-it/namath/…) | ➖ | Commercial ticket-bot ecosystem; parser/registry concepts adopted via §2/§6 |

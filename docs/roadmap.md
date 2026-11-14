@@ -217,6 +217,22 @@ Ordered by dependency, not size. Every item ships with its claim/verify proof
 - Skipped deliberately: Fury's commercial store/partner UI and their
   account-recovery server (not our family/friends mission).
 
+## P7 Jancy-gap items (from parity-jancy.md)
+
+1. ✅ **Plugin registry architecture** (2026-11-14, efa1e8d) — ESM plugin
+   folders in `<dataDir>/plugins`, lifecycle hooks, namespaced resolver/parser
+   contributions, persisted enable toggle, per-plugin failure isolation.
+   API routes `/plugins`, `/plugins/rescan`, `/plugins/:id/enable`.
+2. ✅ **Resolver + parser registries + token aliases** (2026-11-14, efa1e8d) —
+   `ResolverRegistry` (static/env/webhook builtins, named `#...` errors,
+   verbatim args), Site-column specs in `profile.extra.sites` (wildcard +
+   most-specific), `@alias` tokens via DPAPI SecretStore, user `.mjs` parser
+   modules from `<dataDir>/parsers`. 224/224 tests green.
+3. ⬜ **Provider resolvers as plugins** — gmail/imap/sms-gateway resolver
+   plugins on top of the registry (the registries exist; these are content).
+4. ⬜ **JYL capability adoption** — macros, commands, web endpoints as
+   JS/TS modules (parsers half-adopted already).
+
 ## P5.6 — Perf & startup (open)
 
 - Cold-start measurement (launch → first page) on the official build;
