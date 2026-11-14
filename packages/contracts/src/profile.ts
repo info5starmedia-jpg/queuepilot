@@ -61,6 +61,9 @@ export const CreateProfileInputSchema = z.object({
   notes: z.string().max(4000).optional(),
   tags: z.array(z.string().min(1).max(60)).max(24).optional(),
   platform: FingerprintPlatformSchema.optional(),
+  /** Persona coherence hints (IANA names); defaults UTC / en-US. */
+  timezone: z.string().max(64).optional(),
+  locale: z.string().max(32).optional(),
   generateFingerprint: z.boolean().default(true),
 });
 export type CreateProfileInput = z.input<typeof CreateProfileInputSchema>;

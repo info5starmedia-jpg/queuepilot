@@ -1,8 +1,31 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { CreateProfileInputSchema, UpdateProfileInputSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
+import type { ProxyService } from "../application/proxies/proxy.service.js";
+import { importProfilesCsv } from "../application/profiles/profile-import.js";
 
-export function registerProfileRoutes(app: FastifyInstance, service: ProfileService): void {
+const ImportBodySchema = z.object({
+  csv: z.string().min(1).max(2_000_000),
+  dryRun: z.boolean().default(false),
+  upsert: z.boolean().default(true),
+});
+
+export function registerProfileRoutes(
+  app: FastifyInstance,
+  service: ProfileService,
+  proxies: ProxyService,
+): void {
+  // P6.1: bulk CSV import. Dry-run first, then apply — a bad row never
+  // aborts the file.
+  app.post("/profiles/import", async (req) => {
+    const body = ImportBodySchema.parse(req.body);
+    return importProfilesCsv(service, proxies, body.csv, {
+      dryRun: body.dryRun,
+      upsert: body.upsert,
+    });
+  });
+
   app.get("/profiles", async (req) => {
     const q = req.query as { group?: string; query?: string };
     const filter: { group?: string; query?: string } = {};

@@ -57,7 +57,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get("/health", async () => ({ status: "ok", service: "queuepilot" }));
 
-  registerProfileRoutes(app, deps.profiles);
+  registerProfileRoutes(app, deps.profiles, deps.proxies);
   registerProxyRoutes(app, deps.proxies);
   registerRunRoutes(app, deps.lifecycle);
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);

@@ -25,7 +25,11 @@ export class ProfileService {
     const now = new Date().toISOString();
     let identityId: string | null = null;
     if (input.generateFingerprint) {
-      const identity = generateIdentity(input.platform ?? "windows");
+      const identity = generateIdentity(
+        input.platform ?? "windows",
+        input.timezone ?? "UTC",
+        input.locale ?? "en-US",
+      );
       this.identities.create(identity);
       identityId = identity.id;
     }
