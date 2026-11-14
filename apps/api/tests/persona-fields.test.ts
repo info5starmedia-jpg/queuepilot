@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   currentSms,
   looksLikeSpec,
+  maskCard,
+  maskCardNumber,
   mergePersonaFields,
   nextSmsIndex,
   personaFieldValue,
@@ -17,6 +19,7 @@ describe("personaFieldsOf", () => {
       smsNumbers: [],
       passcodes: [],
       free: {},
+      creditCards: [],
     });
     expect(personaFieldsOf({})).toEqual(personaFieldsOf(null));
   });
@@ -132,5 +135,59 @@ describe("looksLikeSpec", () => {
 
   it("ignores unknown resolver names", () => {
     expect(looksLikeSpec("textchest:abc", registered)).toBe(false);
+  });
+});
+
+describe("credit cards", () => {
+  const card = {
+    set: "personal",
+    number: "4242 4242 4242 4242",
+    cvv: "123",
+    expDate: "12/28",
+    name: "J Doe",
+    address: "1 Main St",
+    address2: null,
+    city: "Toronto",
+    state: "ON",
+    zip: "M5V",
+    note: null,
+  };
+
+  it("personaFieldsOf reads imported card sets", () => {
+    const fields = personaFieldsOf({ creditCards: [card] });
+    expect(fields.creditCards).toHaveLength(1);
+    expect(fields.creditCards[0]).toMatchObject({ set: "personal", number: "4242 4242 4242 4242" });
+  });
+
+  it("malformed card sets degrade to defaults, never a crash", () => {
+    expect(personaFieldsOf({ creditCards: "not-an-array" }).creditCards).toEqual([]);
+    expect(personaFieldsOf({ creditCards: [{ set: "" }] }).creditCards).toEqual([]);
+  });
+
+  it("mergePersonaFields accepts card sets and preserves the rest of the bag", () => {
+    const merged = mergePersonaFields({ phone: "1" }, { creditCards: [card] });
+    expect(merged.phone).toBe("1");
+    expect((merged.creditCards as unknown[]).length).toBe(1);
+  });
+
+  it("maskCardNumber keeps last4 and strips separators", () => {
+    expect(maskCardNumber("4242 4242 4242 4242")).toBe("•••• •••• •••• 4242");
+    expect(maskCardNumber("4242-4242-4242-9999")).toBe("•••• •••• •••• 9999");
+    expect(maskCardNumber("")).toBe("••••");
+  });
+
+  it("maskCard never leaks PAN or CVV, flags CVV presence", () => {
+    const masked = maskCard(personaFieldsOf({ creditCards: [card] }).creditCards[0]!);
+    expect(masked).not.toHaveProperty("number");
+    expect(masked).not.toHaveProperty("cvv");
+    expect(masked.last4).toBe("•••• •••• •••• 4242");
+    expect(masked.hasCvv).toBe(true);
+    expect(masked.set).toBe("personal");
+    expect(masked.expDate).toBe("12/28");
+  });
+
+  it("maskCard hasCvv false when cvv empty", () => {
+    const masked = maskCard({ ...card, cvv: "" } as never);
+    expect(masked.hasCvv).toBe(false);
   });
 });

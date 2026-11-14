@@ -415,6 +415,12 @@ its sub-steps and goal in one place.
      (`pass:word` stays literal — only REGISTERED resolver prefixes resolve),
      specs resolve with profile email/site/field context.
    - 322/322 tests green; parity-jancy §1/§2 and parity.md §3 updated.
+6. ✅ **Credit-card typed layer** (2026-11-14, v0.14) — shared
+   `PersonaCreditCardSchema` in contracts (the import contract reuses it, one
+   source of truth), `creditCards` joins the persona merge, and
+   `GET /profiles/:id/cards` is masked-only: last4 + hasCvv + metadata — PAN
+   and CVV are write-only and never echoed by any read route. Autofill
+   wiring into CDP fill actions remains. 331/331 tests green.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

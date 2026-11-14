@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PersonaCreditCardSchema } from "./profile.js";
 
 /**
  * Profile-provider contracts.
@@ -94,21 +95,7 @@ export const ImportedProfileSchema = z.object({
   timeZone: z.string().nullable(),
   favorite: z.boolean(),
   /** Named credit-card sets: `CC Number:<set>` + `CC CVV:<set>` (+optional fields). */
-  creditCards: z.array(
-    z.object({
-      set: z.string(),
-      number: z.string(),
-      cvv: z.string(),
-      expDate: z.string().nullable(),
-      name: z.string().nullable(),
-      address: z.string().nullable(),
-      address2: z.string().nullable(),
-      city: z.string().nullable(),
-      state: z.string().nullable(),
-      zip: z.string().nullable(),
-      note: z.string().nullable(),
-    }),
-  ),
+  creditCards: z.array(PersonaCreditCardSchema),
 });
 export type ImportedProfile = z.infer<typeof ImportedProfileSchema>;
 

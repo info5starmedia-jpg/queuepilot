@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { CreateProfileInputSchema, UpdateProfileInputSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
+import { maskCard, personaFieldsOf } from "../application/profiles/persona-fields.js";
 import type { TotpService } from "../application/profiles/totp.service.js";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 import { importProfilesCsv } from "../application/profiles/profile-import.js";
@@ -72,6 +73,16 @@ export function registerProfileRoutes(
   app.post("/profiles/:id/sms/rotate", async (req) => {
     const { id } = req.params as { id: string };
     return service.rotateSms(id);
+  });
+
+  // Credit-card sets — MASKED reads only (last4 + hasCvv + metadata). Full
+  // PANs are write-only via PATCH /profiles/:id/persona; the raw extra bag
+  // stays the storage of record.
+  app.get("/profiles/:id/cards", async (req) => {
+    const { id } = req.params as { id: string };
+    const profile = service.get(id);
+    const fields = personaFieldsOf(profile.extra);
+    return { cards: fields.creditCards.map(maskCard) };
   });
 
   app.delete("/profiles/:id", async (req, reply) => {

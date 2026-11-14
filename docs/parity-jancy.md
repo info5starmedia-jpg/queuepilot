@@ -18,7 +18,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Required columns `Profile/Name/Email` | ❌ | Import supports `name` only; no email column |
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ❌ |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
-| Optional: credit-card sets | ❌ | Import stores them in the bag; no typed layer or autofill wiring yet |
+| Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed). Autofill wiring pending |
 | Per-profile proxy list + "system connection" magic value | 🟡 | One proxyId per profile; multi-proxy cycling ❌ |
 | Tab color per profile | ❌ | |
 | Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | ❌ | Console is grid + actions only |

@@ -31,6 +31,7 @@ export function personaFieldsOf(
     smsNumbers: bag.smsNumbers,
     passcodes: bag.passcodes,
     free: bag.free,
+    creditCards: bag.creditCards,
   });
   if (parsed.success) return parsed.data;
   // Malformed bag: ship defaults rather than crash. The raw bag is preserved
@@ -91,4 +92,23 @@ export function personaFieldValue(
 export function looksLikeSpec(value: string, registeredNames: Set<string>): boolean {
   const m = /^([A-Za-z0-9_-]{2,40}):/.exec(value);
   return m !== null && registeredNames.has(m[1]!);
+}
+
+/**
+ * Mask a card number for panel reads: last 4 digits only, everything before
+ * replaced by `•`. Non-digit junk (spaces, dashes) is stripped first so the
+ * mask never leaks length hints beyond the last4 itself.
+ */
+export function maskCardNumber(number: string): string {
+  const digits = number.replace(/\D/g, "");
+  const last4 = digits.slice(-4);
+  return last4.length === 0 ? "••••" : `•••• •••• •••• ${last4}`;
+}
+
+/** Masked, panel-safe view of a card — everything but last4 + metadata. */
+export function maskCard(
+  card: PersonaFields["creditCards"][number],
+): Omit<typeof card, "number" | "cvv"> & { last4: string; hasCvv: boolean } {
+  const { number, cvv, ...rest } = card;
+  return { ...rest, last4: maskCardNumber(number), hasCvv: cvv.length > 0 };
 }

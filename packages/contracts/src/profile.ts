@@ -81,6 +81,26 @@ export const PersonaSmsNumberSchema = z.object({
 });
 export type PersonaSmsNumber = z.infer<typeof PersonaSmsNumberSchema>;
 
+/**
+ * One named credit-card set (Jancy's `CC Number:<set>` / `CC CVV:<set>`
+ * columns). Full PANs ride in `extra.creditCards` — same shape provider
+ * import writes — but panel reads go through `maskCardNumber` (last4 only).
+ */
+export const PersonaCreditCardSchema = z.object({
+  set: z.string().min(1).max(60),
+  number: z.string().min(1).max(40),
+  cvv: z.string().max(8).default(""),
+  expDate: z.string().max(10).nullable().default(null),
+  name: z.string().max(120).nullable().default(null),
+  address: z.string().max(200).nullable().default(null),
+  address2: z.string().max(200).nullable().default(null),
+  city: z.string().max(80).nullable().default(null),
+  state: z.string().max(80).nullable().default(null),
+  zip: z.string().max(20).nullable().default(null),
+  note: z.string().max(500).nullable().default(null),
+});
+export type PersonaCreditCard = z.infer<typeof PersonaCreditCardSchema>;
+
 export const PersonaFieldsSchema = z.object({
   address: PersonaAddressSchema.nullable().default(null),
   dob: z.string().max(40).nullable().default(null),
@@ -89,6 +109,8 @@ export const PersonaFieldsSchema = z.object({
   passcodes: z.array(z.string().max(200)).max(50).default([]),
   /** Jancy "Free 1 … Free 10" arbitrary columns. */
   free: z.record(z.string(), z.string().max(4000)).default({}),
+  /** Named credit-card sets — full PANs; read masked outside this layer. */
+  creditCards: z.array(PersonaCreditCardSchema).max(20).default([]),
 });
 export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
 
@@ -101,6 +123,8 @@ export const UpdatePersonaInputSchema = z
     smsNumbers: z.array(PersonaSmsNumberSchema).max(50).optional(),
     passcodes: z.array(z.string().max(200)).max(50).optional(),
     free: z.record(z.string(), z.string().max(4000)).optional(),
+    /** Named credit-card sets (full PANs — writes only; reads are masked). */
+    creditCards: z.array(PersonaCreditCardSchema).max(20).optional(),
     /**
      * Well-known 2FA fields (see PERSONA_WELL_KNOWN_FIELDS), stored in
      * `extra.fields`. Values may be literals OR resolver specs (`webhook:…`,

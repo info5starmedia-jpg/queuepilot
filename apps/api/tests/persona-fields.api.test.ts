@@ -222,3 +222,57 @@ describe("POST /profiles/:id/resolve — well-known persona fields", () => {
     expect(res.json()).toMatchObject({ found: true, value: "999" });
   });
 });
+
+describe("GET /profiles/:id/cards — masked card reads", () => {
+  it("writes full cards via persona patch, reads only masked views", async () => {
+    const p = createProfile();
+    await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/persona`,
+      payload: {
+        creditCards: [
+          {
+            set: "personal",
+            number: "4242 4242 4242 4242",
+            cvv: "123",
+            expDate: "12/28",
+            name: "J Doe",
+            address: "1 Main St",
+            address2: null,
+            city: "Toronto",
+            state: "ON",
+            zip: "M5V",
+            note: null,
+          },
+        ],
+      },
+    });
+    const res = await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}/cards` });
+    expect(res.statusCode).toBe(200);
+    const { cards } = res.json();
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      set: "personal",
+      last4: "•••• •••• •••• 4242",
+      hasCvv: true,
+      expDate: "12/28",
+    });
+    expect(JSON.stringify(cards[0])).not.toContain("4242 4242 4242 4242");
+    expect(cards[0]).not.toHaveProperty("number");
+    expect(cards[0]).not.toHaveProperty("cvv");
+  });
+
+  it("returns an empty list when no cards are set", async () => {
+    const p = createProfile();
+    const res = await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}/cards` });
+    expect(res.json()).toEqual({ cards: [] });
+  });
+
+  it("404s for an unknown profile", async () => {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/profiles/00000000-0000-4000-8000-000000000000/cards",
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
