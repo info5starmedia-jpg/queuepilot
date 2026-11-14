@@ -20,6 +20,7 @@ describe("personaFieldsOf", () => {
       passcodes: [],
       free: {},
       creditCards: [],
+      proxies: [],
     });
     expect(personaFieldsOf({})).toEqual(personaFieldsOf(null));
   });

@@ -3,6 +3,11 @@ import { z } from "zod";
 import { CreateProfileInputSchema, UpdateProfileInputSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import { maskCard, personaFieldsOf } from "../application/profiles/persona-fields.js";
+import {
+  currentProxyIndex,
+  maskProxyEntry,
+  profileProxyEntries,
+} from "../application/profiles/profile-proxies.js";
 import type { TotpService } from "../application/profiles/totp.service.js";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 import { importProfilesCsv } from "../application/profiles/profile-import.js";
@@ -83,6 +88,26 @@ export function registerProfileRoutes(
     const profile = service.get(id);
     const fields = personaFieldsOf(profile.extra);
     return { cards: fields.creditCards.map(maskCard) };
+  });
+
+  // Per-profile proxy list (Jancy's proxies column) — masked reads + cycling.
+  // The current entry feeds launches when the profile has no attached proxy
+  // (see BrowserLifecycleService.start). Passwords are never echoed.
+  app.get("/profiles/:id/proxies", async (req) => {
+    const { id } = req.params as { id: string };
+    const profile = service.get(id);
+    const entries = profileProxyEntries(profile.extra);
+    const raw = currentProxyIndex(profile.extra, entries.length);
+    return {
+      index: raw,
+      total: entries.length,
+      entries: entries.map(maskProxyEntry),
+    };
+  });
+
+  app.post("/profiles/:id/proxies/rotate", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.rotateProxy(id);
   });
 
   app.delete("/profiles/:id", async (req, reply) => {

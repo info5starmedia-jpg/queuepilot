@@ -421,6 +421,22 @@ its sub-steps and goal in one place.
    `GET /profiles/:id/cards` is masked-only: last4 + hasCvv + metadata — PAN
    and CVV are write-only and never echoed by any read route. Autofill
    wiring into CDP fill actions remains. 331/331 tests green.
+7. ✅ **Per-profile proxy lists** (2026-11-14, v0.14) — Jancy's proxies
+   column end to end:
+   - `profile-proxies.ts` parse layer: `host:port[:user[:pass]]` (password
+     keeps ':' verbatim), optional `http://`/`socks5://` prefix, unknown
+     schemes refused not guessed, `system connection` magic value
+     case-insensitive; unparseable entries dropped, order preserved.
+   - `proxies` joins the persona merge; `extra.proxyIndex` (persisted) selects
+     the current entry modulo length — same discipline as SMS cycling.
+   - `GET /profiles/:id/proxies` masked (password never echoed, not even in
+     the raw string — the first cut leaked it via `raw` and the test caught
+     it); `POST …/proxies/rotate` advances with wraparound, 409 on empty.
+   - Launches: no temp proxy + no attached proxy → current list entry feeds
+     the engine (system → direct), snapshot `proxySource: "profile-list"`,
+     drift explains it. Precedence: temp > attached > list > none.
+   - 354/354 tests green. Remaining: per-launch auto-rotation (index advances
+     on every start) — operator decision, current model is explicit rotate.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

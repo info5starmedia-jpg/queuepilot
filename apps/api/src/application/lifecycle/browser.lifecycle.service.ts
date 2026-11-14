@@ -17,6 +17,7 @@ import {
 } from "@queuepilot/contracts";
 import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
+import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import type {
   ProfileRepository,
   FingerprintIdentityRepository,
@@ -126,6 +127,14 @@ export class BrowserLifecycleService {
         : profile.proxyId
           ? this.proxyService.getStored(profile.proxyId)
           : null;
+      // Jancy per-profile proxy list: when neither a temp proxy nor an
+      // attached proxy decides the launch, the list's current entry does.
+      // "system connection" entries mean a direct connection. Nothing is
+      // persisted at launch — the index only moves via proxies/rotate.
+      const listCurrent =
+        !tempProxy && !attached ? currentProfileProxy(profile.extra) : null;
+      const listDirect =
+        listCurrent?.entry.kind === "direct" ? listCurrent.entry : null;
       const launchProxyUrl = tempProxy
         ? proxyUrl({
             type: tempProxy.type,
@@ -136,12 +145,22 @@ export class BrowserLifecycleService {
           })
         : attached
           ? proxyUrl(attached)
-          : null;
+          : listDirect
+            ? proxyUrl({
+                type: listDirect.scheme,
+                host: listDirect.host,
+                port: listDirect.port,
+                username: listDirect.username,
+                password: listDirect.password,
+              })
+            : null;
       const proxySource = tempProxy
         ? ("temporary" as const)
         : attached
           ? ("profile" as const)
-          : ("none" as const);
+          : listCurrent
+            ? ("profile-list" as const)
+            : ("none" as const);
 
       const run: BrowserRun = {
         id: randomUUID(),
@@ -452,7 +471,7 @@ export class BrowserLifecycleService {
     running: boolean;
     engineKind: string;
     proxyUrl: string | null;
-    proxySource: "profile" | "temporary" | "none";
+    proxySource: "profile" | "temporary" | "profile-list" | "none";
     egress: LaunchIdentitySnapshot["egress"] | null;
   } | null {
     const run = this.runs.occupyingForProfile(profileId);

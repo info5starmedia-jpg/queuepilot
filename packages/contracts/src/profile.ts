@@ -111,6 +111,12 @@ export const PersonaFieldsSchema = z.object({
   free: z.record(z.string(), z.string().max(4000)).default({}),
   /** Named credit-card sets — full PANs; read masked outside this layer. */
   creditCards: z.array(PersonaCreditCardSchema).max(20).default([]),
+  /**
+   * Per-profile proxy list (Jancy's proxies column): "host:port:user:pass",
+   * "host:port", optional "scheme://" prefix, or the magic value
+   * "system connection". `extra.proxyIndex` selects the current entry.
+   */
+  proxies: z.array(z.string().min(1).max(500)).max(50).default([]),
 });
 export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
 
@@ -125,6 +131,8 @@ export const UpdatePersonaInputSchema = z
     free: z.record(z.string(), z.string().max(4000)).optional(),
     /** Named credit-card sets (full PANs — writes only; reads are masked). */
     creditCards: z.array(PersonaCreditCardSchema).max(20).optional(),
+    /** Per-profile proxy list entries (see PersonaFieldsSchema.proxies). */
+    proxies: z.array(z.string().min(1).max(500)).max(50).optional(),
     /**
      * Well-known 2FA fields (see PERSONA_WELL_KNOWN_FIELDS), stored in
      * `extra.fields`. Values may be literals OR resolver specs (`webhook:…`,

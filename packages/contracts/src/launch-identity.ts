@@ -28,7 +28,7 @@ export const LaunchIdentitySnapshotSchema = z.object({
    * applies again at next start. Defaults to "profile" so snapshots written
    * before this field existed keep their original meaning.
    */
-  proxySource: z.enum(["profile", "temporary", "none"]).default("profile"),
+  proxySource: z.enum(["profile", "temporary", "profile-list", "none"]).default("profile"),
   /**
    * Egress facts measured at launch (P7 diagnostics): the loopback relay
    * port the engine proxies through, the exit address from the per-launch
@@ -85,6 +85,13 @@ export function computeIdentityDrift(
     fields.push("proxy");
     messages.push(
       "running on a temporary proxy — the profile's proxy applies at next start",
+    );
+  } else if (snapshot.proxySource === "profile-list") {
+    // The list entry used is a launch-time decision; rotation while running
+    // changes what the NEXT start picks.
+    fields.push("proxy");
+    messages.push(
+      "running via the profile's proxy list — the current list entry applies at next start",
     );
   } else if (snapshot.proxyId !== current.proxyId) {
     fields.push("proxy");

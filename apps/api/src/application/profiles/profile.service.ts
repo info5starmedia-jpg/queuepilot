@@ -18,6 +18,12 @@ import {
 } from "./persona-fields.js";
 import type { UpdatePersonaInput } from "@queuepilot/contracts";
 import type { ProxyRepository } from "../proxies/proxy.repository.js";
+import {
+  maskProxyEntry,
+  profileProxyEntries,
+  nextProxyIndex,
+  type MaskedProxyEntry,
+} from "./profile-proxies.js";
 
 export class ProfileService {
   constructor(
@@ -165,5 +171,33 @@ export class ProfileService {
       label: current.number.label,
       countryCode: current.number.countryCode,
     };
+  }
+
+  /**
+   * Jancy proxy-list cycling: advance `extra.proxyIndex` by one (wrapping is
+   * handled at read time) and return the newly current entry, MASKED. Refuses
+   * loudly when the list is empty — cycling nothing is a caller bug.
+   */
+  rotateProxy(id: string): {
+    index: number;
+    total: number;
+    current: MaskedProxyEntry;
+  } {
+    const p = this.get(id);
+    const entries = profileProxyEntries(p.extra);
+    if (entries.length === 0) {
+      throw new DomainError(
+        ErrorCodes.CONFLICT,
+        "profile has no proxy list to cycle",
+      );
+    }
+    const index = (nextProxyIndex(p.extra) % entries.length + entries.length) % entries.length;
+    const next: Profile = {
+      ...p,
+      extra: { ...(p.extra ?? {}), proxyIndex: nextProxyIndex(p.extra) },
+      updatedAt: new Date().toISOString(),
+    };
+    this.profiles.update(next);
+    return { index, total: entries.length, current: maskProxyEntry(entries[index]!) };
   }
 }
