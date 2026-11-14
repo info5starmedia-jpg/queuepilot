@@ -27,4 +27,25 @@ export function registerJylRoutes(app: FastifyInstance, deps: JylDeps): void {
       ? jyl.runCommand(body.name, body.args, ctx)
       : jyl.runMacro(body.name, body.args, ctx);
   });
+
+  // Module-provided web endpoints. The wildcard is one route; the registry
+  // resolves "<module>.mjs/<path>" per request, so rescans never need to
+  // re-register Fastify routes.
+  app.route({
+    method: ["GET", "POST", "PUT", "DELETE"],
+    url: "/jyl/endpoint/*",
+    handler: async (req, reply) => {
+      const rest = (req.params as { "*": string })["*"] ?? "";
+      const query = req.query as Record<string, string>;
+      const body =
+        req.method === "GET" || req.method === "DELETE" ? null : (req.body ?? null);
+      const out = await jyl.dispatch(req.method, rest, { query, body });
+      if (!out.found) {
+        return reply.code(404).send({
+          error: { code: "NOT_FOUND", message: `no JYL endpoint for ${req.method} /${rest}` },
+        });
+      }
+      return out.result;
+    },
+  });
 }

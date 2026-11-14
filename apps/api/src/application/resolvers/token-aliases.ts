@@ -32,20 +32,37 @@ export function secretAliasStore(secrets: {
   delete(key: string): void;
 }): AliasStore {
   const key = (alias: string) => `alias.${alias}`;
+  // Name index — alias NAMES (never values) kept as plain JSON so the
+  // settings-bundle export can enumerate them. Names are not secret; the
+  // values stay behind the store port.
+  const indexKey = "alias.__names__";
+  const readIndex = (): string[] => {
+    try {
+      const raw = secrets.get(indexKey);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];
+    } catch {
+      return [];
+    }
+  };
+  const writeIndex = (names: string[]): void => {
+    secrets.set(indexKey, JSON.stringify([...new Set(names)].sort()));
+  };
   return {
     set(alias, secret) {
       secrets.set(key(alias), secret);
+      const names = readIndex();
+      if (!names.includes(alias)) writeIndex([...names, alias]);
     },
     get(alias) {
       return secrets.get(key(alias));
     },
     remove(alias) {
       secrets.delete(key(alias));
+      writeIndex(readIndex().filter((n) => n !== alias));
     },
     list() {
-      // The SecretStore port is get-by-key; aliases are enumerable through
-      // the dedicated route handlers, not here.
-      return [];
+      return readIndex().map((alias) => ({ alias }));
     },
   };
 }

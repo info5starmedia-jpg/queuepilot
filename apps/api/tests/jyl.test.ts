@@ -118,4 +118,94 @@ describe("JylRegistry", () => {
     expect(() => JSON.stringify(circular.result)).not.toThrow();
     expect(await reg.runCommand("thrower", "", {})).toEqual({ ok: false, error: "bad input" });
   });
+
+  it("endpoints dispatch by module + path + method with query/body/store", async () => {
+    writeModule("panel.mjs", `
+      export const queuepilotJyl = {
+        endpoints: [
+          {
+            name: "status",
+            path: "status",
+            method: "GET",
+            handler(ctx) {
+              const hits = ctx.store.get("hits", 0);
+              ctx.store.set("hits", hits + 1);
+              ctx.log("status ping", ctx.query.q ?? "-");
+              return { ok: true, q: ctx.query.q ?? null, hits: hits + 1 };
+            },
+          },
+          {
+            name: "echo",
+            path: "echo",
+            method: "POST",
+            handler: (ctx) => ({ got: ctx.body }),
+          },
+        ],
+      };
+    `);
+    const reg = new JylRegistry(dir);
+    const scan = await reg.rescan();
+    expect(scan.errors).toEqual([]);
+    expect(reg.list().endpoints).toEqual([
+      { name: "status", path: "status", method: "GET", source: "panel.mjs" },
+      { name: "echo", path: "echo", method: "POST", source: "panel.mjs" },
+    ]);
+
+    const r1 = await reg.dispatch("GET", "panel.mjs/status", { query: { q: "hi" }, body: null });
+    expect(r1).toEqual({ found: true, result: { ok: true, q: "hi", hits: 1 } });
+    const r2 = await reg.dispatch("GET", "panel.mjs/status", { query: {}, body: null });
+    expect(r2).toEqual({ found: true, result: { ok: true, q: null, hits: 2 } });
+
+    const echo = await reg.dispatch("POST", "panel.mjs/echo", { query: {}, body: { a: 1 } });
+    expect(echo).toEqual({ found: true, result: { got: { a: 1 } } });
+
+    // Wrong method and unknown module are 404s, not errors.
+    expect(await reg.dispatch("POST", "panel.mjs/status", { query: {}, body: null })).toEqual({ found: false });
+    expect(await reg.dispatch("GET", "ghost.mjs/status", { query: {}, body: null })).toEqual({ found: false });
+  });
+
+  it("endpoint validation rejects bad paths, methods, and duplicates loudly", async () => {
+    writeModule("bad.mjs", `
+      export const queuepilotJyl = {
+        endpoints: [
+          { path: "../escape", handler: () => 1 },
+        ],
+      };
+    `);
+    writeModule("badmethod.mjs", `
+      export const queuepilotJyl = {
+        endpoints: [
+          { path: "x", method: "TELEPORT", handler: () => 1 },
+        ],
+      };
+    `);
+    writeModule("dup.mjs", `
+      export const queuepilotJyl = {
+        endpoints: [
+          { path: "same", method: "GET", handler: () => 1 },
+          { path: "same", method: "get", handler: () => 2 },
+        ],
+      };
+    `);
+    const reg = new JylRegistry(dir);
+    const scan = await reg.rescan();
+    expect(scan.loaded).toBe(0);
+    expect(scan.errors).toHaveLength(3);
+    expect(scan.errors[0]!.error).toContain("not a clean relative path");
+    expect(scan.errors[1]!.error).toContain("TELEPORT");
+    expect(scan.errors[2]!.error).toContain("defined twice");
+  });
+
+  it("a throwing endpoint surfaces as a 500-flavored error from dispatch", async () => {
+    writeModule("boom.mjs", `
+      export const queuepilotJyl = {
+        endpoints: [{ path: "go", handler: () => { throw new Error("kaput"); } }],
+      };
+    `);
+    const reg = new JylRegistry(dir);
+    await reg.rescan();
+    await expect(
+      reg.dispatch("GET", "boom.mjs/go", { query: {}, body: null }),
+    ).rejects.toMatchObject({ statusCode: 500, message: expect.stringContaining("kaput") });
+  });
 });

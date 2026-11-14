@@ -31,7 +31,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Resolver registry (gmail, imap, smsgateway, textchest, …) | 🟡 | ✅ static/env/webhook/imap/gmail (OAuth, multi-account, DPAPI tokens). Provider-specific APIs (textchest…) = plugin content |
 | Email/SMS parser registry (`jancy://parsers`) | 🟡 | `ParserRegistry` loads user `.mjs` from `<dataDir>/parsers` ✅; auto-fetch mailboxes ❌ |
 | Token aliases (@alias → real key in settings) | ✅ | `@name` → SecretStore (DPAPI), `PUT/DELETE /aliases/:alias` |
-| User-defined parsers without a release (JYL) | 🟡 | `.mjs` parser modules ✅; JYL macros/commands/web-endpoints ❌ |
+| User-defined parsers without a release (JYL) | ✅ | `.mjs` parser modules; commands/macros/web-endpoints all in `<dataDir>/jyl` |
 
 **This is the largest single gap.** Jancy's killer feature; QueuePilot has no
 2FA/code layer at all. Plugin-shaped by design (see §6).
@@ -78,10 +78,10 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Client SDK + script runner | ✅ | P3 (`@queuepilot/client`, `queuepilot script`) — our scripting entry |
-| JYL (user commands/macros/parsers/web endpoints) | 🟡 | Commands + macros as `.mjs` in `<dataDir>/jyl` ✅ (74d46e6); user parsers ✅; web endpoints + settings bundles ❌ |
+| JYL (user commands/macros/parsers/web endpoints) | ✅ | All four as `.mjs` in `<dataDir>/jyl` (74d46e6 + P7.10 web endpoints) |
 | Plugin system (~25 registries) | 🟡 | `PluginRegistry` core ✅ + JYL command/macro registry ✅. Remaining registries adopt as needed |
 | Userscripts (Greasemonkey subset) | ❌ | |
-| Web interface with extensible endpoints | 🟡 | REST API + console exist; user-extensible endpoints ❌ |
+| Web interface with extensible endpoints | ✅ | REST API + console + JYL module endpoints (`/jyl/endpoint/<module>/<path>`) |
 | Site plugins (ticketmaster/queue-it/namath/…) | ➖ | Commercial ticket-bot ecosystem; parser/registry concepts adopted via §2/§6 |
 
 ## 7. Power-user surface
@@ -93,7 +93,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Menu editor | ❌ |
 | Format strings (tab title/window title templates) | ❌ |
 | Theme editor | ❌ |
-| Settings bundles (.jnc export/import) | ❌ |
+| Settings bundles (.jnc export/import) | ✅ | `GET /settings/export` + `POST /settings/import` — secrets-free JSON (P7.10) |
 | Preference sets | ❌ |
 | Network logger (net-export) | ❌ |
 | Autofill + simulated typing (WPM) | ❌ |

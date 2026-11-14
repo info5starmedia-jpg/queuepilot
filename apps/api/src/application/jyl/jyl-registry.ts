@@ -68,6 +68,34 @@ export interface JylContext {
   fetch: typeof fetch;
 }
 
+/** A web endpoint a module exports — served under /jyl/endpoint/<module>/<path>. */
+export interface JylEndpoint {
+  name: string;
+  /** Module-relative path, no leading slash (e.g. "status"). */
+  path: string;
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  /** Which module file defined it (the URL namespace). */
+  source: string;
+  handler: (ctx: JylEndpointContext) => Promise<unknown> | unknown;
+}
+
+/** What an endpoint handler sees from the HTTP request. */
+export interface JylEndpointContext {
+  method: string;
+  /** The module-relative path the endpoint was registered under. */
+  path: string;
+  /** Parsed query string. */
+  query: Record<string, string>;
+  /** Parsed JSON body (null for GET/empty). */
+  body: unknown;
+  log: (...parts: unknown[]) => void;
+  store: {
+    get<T = unknown>(key: string, fallback: T): T;
+    set(key: string, value: unknown): void;
+  };
+  fetch: typeof fetch;
+}
+
 interface JylModuleShape {
   commands?: Array<{
     name?: unknown;
@@ -78,6 +106,12 @@ interface JylModuleShape {
     name?: unknown;
     description?: unknown;
     steps?: unknown;
+  }>;
+  endpoints?: Array<{
+    name?: unknown;
+    path?: unknown;
+    method?: unknown;
+    handler?: unknown;
   }>;
 }
 
@@ -100,6 +134,8 @@ const MACRO_TIMEOUT_MS = 5 * 60_000;
 export class JylRegistry {
   private readonly commands = new Map<string, JylCommand>();
   private readonly macros = new Map<string, JylMacro>();
+  /** key: `${method} ${source} ${path}` — method+path unique per module. */
+  private readonly endpoints = new Map<string, JylEndpoint>();
   private readonly logs: { time: string; module: string; parts: string }[] = [];
   /** module source file -> JSON store backing. */
   private readonly stores = new Map<string, Record<string, unknown>>();
@@ -109,6 +145,7 @@ export class JylRegistry {
   async rescan(): Promise<JylScanResult> {
     this.commands.clear();
     this.macros.clear();
+    this.endpoints.clear();
     const result: JylScanResult = { loaded: 0, errors: [] };
     if (!fs.existsSync(this.jylDir)) return result;
     for (const file of fs.readdirSync(this.jylDir).filter((f) => f.endsWith(".mjs")).sort()) {
@@ -157,6 +194,33 @@ export class JylRegistry {
             source: file,
           });
         }
+        for (const e of def.endpoints ?? []) {
+          if (typeof e.path !== "string" || typeof e.handler !== "function") {
+            throw new Error(`endpoint entries need string path + function handler (got ${JSON.stringify(e.path ?? "?")})`);
+          }
+          const epPath = e.path.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+          if (
+            epPath.length === 0 || epPath.length > 100 ||
+            epPath.split("/").some((seg) => seg === "" || seg === "." || seg === "..")
+          ) {
+            throw new Error(`endpoint path "${e.path}" is not a clean relative path (1-100 chars, no empty/dot segments)`);
+          }
+          const rawMethod = typeof e.method === "string" ? e.method.toUpperCase() : "GET";
+          if (!["GET", "POST", "PUT", "DELETE"].includes(rawMethod)) {
+            throw new Error(`endpoint "${epPath}" method "${rawMethod}" is not supported (GET/POST/PUT/DELETE)`);
+          }
+          const key = `${rawMethod} ${file} ${epPath}`;
+          if (this.endpoints.has(key)) {
+            throw new Error(`endpoint ${rawMethod} /${file}/${epPath} is defined twice in one module`);
+          }
+          this.endpoints.set(key, {
+            name: typeof e.name === "string" ? e.name : epPath,
+            path: epPath,
+            method: rawMethod as JylEndpoint["method"],
+            source: file,
+            handler: e.handler as JylEndpoint["handler"],
+          });
+        }
         result.loaded++;
       } catch (err) {
         result.errors.push({ file, error: err instanceof Error ? err.message : String(err) });
@@ -165,7 +229,11 @@ export class JylRegistry {
     return result;
   }
 
-  list(): { commands: { name: string; description: string; source: string }[]; macros: { name: string; description: string; steps: number; source: string }[] } {
+  list(): {
+    commands: { name: string; description: string; source: string }[];
+    macros: { name: string; description: string; steps: number; source: string }[];
+    endpoints: { name: string; path: string; method: string; source: string }[];
+  } {
     return {
       commands: [...this.commands.values()].map((c) => ({
         name: c.name,
@@ -178,7 +246,47 @@ export class JylRegistry {
         steps: m.steps.length,
         source: m.source,
       })),
+      endpoints: [...this.endpoints.values()].map((e) => ({
+        name: e.name,
+        path: e.path,
+        method: e.method,
+        source: e.source,
+      })),
     };
+  }
+
+  /**
+   * Dispatch an HTTP request to a module endpoint. `route` is everything
+   * after "/jyl/endpoint/", i.e. "<module>.mjs/<path>". Not found is a plain
+   * {found:false} so the route layer answers 404.
+   */
+  async dispatch(
+    method: string,
+    route: string,
+    input: { query: Record<string, string>; body: unknown },
+  ): Promise<{ found: true; result: unknown } | { found: false }> {
+    const norm = route.replace(/^\/+/, "");
+    const slash = norm.indexOf("/");
+    const file = slash === -1 ? norm : norm.slice(0, slash);
+    const epPath = slash === -1 ? "" : norm.slice(slash + 1);
+    const ep = this.endpoints.get(`${method.toUpperCase()} ${file} ${epPath}`);
+    if (!ep) return { found: false };
+    const { log, store } = this.makeEndpointSupport(ep.source);
+    try {
+      const result = await withTimeout(
+        Promise.resolve(
+          ep.handler({ method: ep.method, path: ep.path, query: input.query, body: input.body, log, store, fetch }),
+        ),
+        COMMAND_TIMEOUT_MS,
+        `endpoint "${ep.name}" timed out after ${COMMAND_TIMEOUT_MS / 1000}s`,
+      );
+      return { found: true, result: jsonable(result) };
+    } catch (err) {
+      throw Object.assign(
+        new Error(`endpoint "${ep.name}" failed: ${err instanceof Error ? err.message : String(err)}`),
+        { statusCode: 500 },
+      );
+    }
   }
 
   recentLogs(limit = 50): typeof this.logs {
@@ -228,6 +336,29 @@ export class JylRegistry {
       }
     }
     return { ok: true, result: { steps: steps.length }, steps };
+  }
+
+  /** Endpoint ctx shares the module's store + log sink with commands. */
+  private makeEndpointSupport(source: string): Pick<JylEndpointContext, "log" | "store"> {
+    let backing = this.stores.get(source);
+    if (!backing) {
+      backing = {};
+      this.stores.set(source, backing);
+    }
+    const logs = this.logs;
+    return {
+      log: (...parts: unknown[]) => {
+        logs.push({ time: new Date().toISOString(), module: source, parts: parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p))).join(" ") });
+        if (logs.length > 200) logs.splice(0, logs.length - 200);
+      },
+      store: {
+        get: <T,>(key: string, fallback: T): T =>
+          key in backing! ? (backing![key] as T) : fallback,
+        set: (key: string, value: unknown) => {
+          backing![key] = value;
+        },
+      },
+    };
   }
 
   private makeContext(source: string, args: string, profileId: string | undefined): JylContext {

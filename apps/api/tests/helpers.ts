@@ -29,6 +29,11 @@ import type { SecretStore } from "../src/application/secrets/secret-store.js";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config/config.js";
+import { PluginRegistry } from "../src/application/plugins/plugin-registry.js";
+import { ResolverRegistry } from "../src/application/resolvers/resolver-registry.js";
+import { ParserRegistry } from "../src/application/parsers/parser-registry.js";
+import { secretAliasStore } from "../src/application/resolvers/token-aliases.js";
+import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
 
 /** In-memory SheetReader: tests seed rows per sheetId, no network involved. */
 export class FakeSheets implements SheetReader {
@@ -58,6 +63,9 @@ export interface TestContext {
   google: GoogleAuthService;
   sheets: FakeSheets;
   secrets: MapSecretStore;
+  aliases: ReturnType<typeof secretAliasStore>;
+  plugins: PluginRegistry;
+  jyl: JylRegistry;
   dataDir: string;
 }
 
@@ -104,6 +112,11 @@ export function makeTestContext(
     proxyRepo,
     sheets,
   );
+  const aliases = secretAliasStore(secrets);
+  const resolvers = new ResolverRegistry();
+  const parsers = new ParserRegistry(path.join(dataDir, "parsers"));
+  const plugins = new PluginRegistry(path.join(dataDir, "plugins"), resolvers, parsers);
+  const jyl = new JylRegistry(path.join(dataDir, "jyl"));
   const config: AppConfig = {
     port: 0,
     host: "127.0.0.1",
@@ -120,6 +133,11 @@ export function makeTestContext(
     proxyProviders,
     engineHealth: new EngineHealthService(runtime, dataDir),
     google,
+    plugins,
+    resolvers,
+    parsers,
+    aliases,
+    jyl,
   });
   return {
     app,
@@ -133,6 +151,9 @@ export function makeTestContext(
     google,
     sheets,
     secrets,
+    aliases,
+    plugins,
+    jyl,
     dataDir,
   };
 }

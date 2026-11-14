@@ -284,15 +284,28 @@ Goal check: D-002 test green; D-003 ADR merged.
 - Skipped deliberately: commercial store/partner UI, account-recovery
   server (not our mission).
 
-### 10. JYL remainder
+### 10. JYL remainder — ✅ DONE 2026-11-14
 Goal: Jancy's five capabilities all adopted.
 Sub-steps:
-- a. JYL web endpoints: user `.mjs` modules can register HTTP routes
-    (`POST /jyl/endpoint/...` → module handler), auth-gated by the API token.
-- b. Settings bundles: export/import of `.json` settings (aliases, plugin
-    toggles, provider configs) — portable, no secrets.
-- c. Both with tests + parity-jancy rows flipped.
-Goal check: §6 JYL row fully green.
+- a. ✅ JYL web endpoints: `.mjs` modules export
+    `endpoints: [{name?, path, method?, handler}]`, served at
+    `/jyl/endpoint/<module>.mjs/<path>` behind the API token via one
+    wildcard route the registry dispatches (rescans never re-register
+    Fastify routes). Validation at scan: clean relative paths (no
+    dot-segments), GET/POST/PUT/DELETE only, per-module method+path
+    duplicates rejected. Handlers see {method, path, query, body, log,
+    store, fetch}, 30s timeout, errors → 500 with the message.
+- b. ✅ Settings bundles: `GET /settings/export` / `POST /settings/import`
+    — secrets-free JSON (version 1). Alias NAMES only (values stay in the
+    SecretStore; names now enumerable via a non-secret `alias.__names__`
+    index key), plugin enable toggles, provider configs (sources/sheets/
+    delimiter/distribution). Import is upsert-by-name, never destructive;
+    unreadable sources are reported per-item, not fatal; malformed bundles
+    → 400.
+- c. ✅ 13 new tests (4 unit dispatch/validation, 3 HTTP endpoint, 3 HTTP
+    settings round-trip incl. secret-absence assertion, re-import no-op,
+    failed-provider reporting, 400). 272/272 tests, typecheck + build clean.
+Goal check: §6 JYL row fully green — YES.
 
 ### 11. React console (ADR-0005) — optional, only if console outgrows vanilla
 Goal: migrate `src/dashboard/` to React 19 + Vite (`apps/web/`) without
