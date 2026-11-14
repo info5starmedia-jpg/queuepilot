@@ -15,6 +15,7 @@ export function registerProfileRoutes(
   app: FastifyInstance,
   service: ProfileService,
   proxies: ProxyService,
+  lifecycle?: { ensureIdle(profileId: string): Promise<void> },
 ): void {
   // P6.1: bulk CSV import. Dry-run first, then apply — a bad row never
   // aborts the file.
@@ -59,6 +60,8 @@ export function registerProfileRoutes(
 
   app.delete("/profiles/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    // Wait out any in-flight start/stop before the row goes (EBUSY guard).
+    if (lifecycle) await lifecycle.ensureIdle(id);
     service.delete(id);
     return reply.code(204).send();
   });

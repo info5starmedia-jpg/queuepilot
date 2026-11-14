@@ -116,13 +116,30 @@ export class FuryCoreRuntime implements BrowserRuntime {
       "about:blank",
     ];
 
-    const child = spawnFuryWithConfig(binary, configPath, engineArgs);
+    // Named launch refusals (AliasMode discipline): every failure says WHICH
+    // stage refused — process_spawn, config_handoff, engine_start — never a
+    // bare "launch failed" the operator has to guess at.
+    let child: ChildProcess;
+    try {
+      child = spawnFuryWithConfig(binary, configPath, engineArgs);
+    } catch (err) {
+      if (relay) await relay.close().catch(() => {});
+      throw new DomainError(
+        ErrorCodes.ENGINE_LAUNCH_FAILED,
+        `process_spawn: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     let enginePid: number;
     try {
       enginePid = await readEnginePid(child);
     } catch (err) {
       if (relay) await relay.close().catch(() => {});
-      throw err;
+      throw err instanceof DomainError
+        ? err
+        : new DomainError(
+            ErrorCodes.ENGINE_LAUNCH_FAILED,
+            `engine_start: ${err instanceof Error ? err.message : String(err)}`,
+          );
     }
     return new FurySession(child, enginePid, debugPort, relay, fitArea);
   }

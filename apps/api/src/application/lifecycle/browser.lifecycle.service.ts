@@ -245,6 +245,25 @@ export class BrowserLifecycleService {
   }
 
   /**
+   * AliasMode delete discipline: a profile delete must wait out any in-flight
+   * start/stop for the profile and then confirm nothing occupies it — on
+   * Windows, deleting a profile directory the engine still holds files in
+   * fails with EBUSY, and the profile row must never say "deleted" while the
+   * engine is still tearing down. Serializes on the same per-profile mutex as
+   * start/stop, so a delete queued behind a stop sees the finished state.
+   */
+  async ensureIdle(profileId: string): Promise<void> {
+    return this.mutex.runExclusive(profileId, async () => {
+      if (this.runs.occupyingForProfile(profileId)) {
+        throw new DomainError(
+          ErrorCodes.CONFLICT,
+          "stop the browser before deleting the profile",
+        );
+      }
+    });
+  }
+
+  /**
    * The live engine session for a profile with an occupying run, or null.
    * Session-level features (bundle export/import) use this; null can mean
    * "not running" or "adopted after an API restart" — callers that care

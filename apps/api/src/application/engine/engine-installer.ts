@@ -13,13 +13,76 @@ import {
 
 type Fetcher = (url: string) => Promise<Uint8Array>;
 
+/**
+ * Slow-network-resilient download (AliasMode's updater discipline): no total
+ * time limit — an attempt fails only after a stall with no bytes, then resumes
+ * with a Range request (or starts over when the server ignores ranges).
+ * Attempts that keep receiving bytes never consume a retry.
+ */
+const STALL_TIMEOUT_MS = 60_000;
+const MAX_ATTEMPTS = 4;
+
+async function fetchWithResume(url: string): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const headers: Record<string, string> = {};
+    if (received > 0) headers.Range = `bytes=${received}-`;
+    try {
+      const res = await fetch(url, { headers, redirect: "follow" });
+      if (res.status === 416 && received > 0) break; // server: already complete
+      if (!res.ok && res.status !== 206) {
+        throw new Error(`download failed: HTTP ${res.status}`);
+      }
+      if (res.status === 200 && received > 0) {
+        // Server ignores Range: start over rather than corrupt the payload.
+        chunks.length = 0;
+        received = 0;
+      }
+      if (!res.body) throw new Error("download failed: empty response body");
+
+      const reader = res.body.getReader();
+      for (;;) {
+        let stallTimer: ReturnType<typeof setTimeout> | null = null;
+        const stall = new Promise<never>((_, reject) => {
+          stallTimer = setTimeout(
+            () => reject(new Error(`stalled: no bytes for ${STALL_TIMEOUT_MS / 1000}s`)),
+            STALL_TIMEOUT_MS,
+          );
+        });
+        try {
+          const { done, value } = await Promise.race([reader.read(), stall]);
+          if (done) break;
+          chunks.push(value);
+          received += value.byteLength;
+        } finally {
+          if (stallTimer) clearTimeout(stallTimer);
+        }
+      }
+      const out = new Uint8Array(received);
+      let off = 0;
+      for (const c of chunks) {
+        out.set(c, off);
+        off += c.byteLength;
+      }
+      return out;
+    } catch (err) {
+      lastError = err;
+      // Loop: resume from `received` bytes on the next attempt.
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`download failed after ${MAX_ATTEMPTS} attempts`);
+}
+
 const defaultFetcher: Fetcher = async (url) => {
   if (url.startsWith("file://")) {
     return new Uint8Array(fs.readFileSync(new URL(url)));
   }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  return fetchWithResume(url);
 };
 
 /**
