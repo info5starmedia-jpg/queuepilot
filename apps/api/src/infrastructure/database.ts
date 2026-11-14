@@ -165,6 +165,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE proxy_providers_new RENAME TO proxy_providers;
     `,
   },
+  {
+    id: "004-run-process-token",
+    up: `
+      -- D-002: anti-PID-reuse token (OS process start time) per run row.
+      ALTER TABLE browser_runs ADD COLUMN process_token TEXT;
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

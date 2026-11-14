@@ -15,7 +15,7 @@ import {
   type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
-import { isProcessAlive } from "../../infrastructure/process-inventory.js";
+import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import type {
   ProfileRepository,
@@ -148,6 +148,7 @@ export class BrowserLifecycleService {
         profileId,
         status: "launching",
         pid: null,
+        processToken: null, // captured from the live engine right after spawn
         debugPort: null,
         wsEndpoint: null,
         startedAt: new Date().toISOString(),
@@ -192,6 +193,10 @@ export class BrowserLifecycleService {
         ...run,
         status: "running",
         pid: session.pid,
+        // D-002: the anti-PID-reuse token rides the run row from here on.
+        // Null (capture failed) is fine — reconciliation then falls back to
+        // plain liveness, never to a guessed death.
+        processToken: captureProcessStartToken(session.pid),
         debugPort: session.debugPort,
         wsEndpoint: session.wsEndpoint,
       };
@@ -501,15 +506,17 @@ export class BrowserLifecycleService {
 
   /**
    * Boot-time reconciliation. Runs still marked occupying when the API starts
-   * are checked against the real OS process table: alive PID → adopt as
-   * running (the browser outlived us); dead PID → mark crashed. This is what
-   * makes restart after a crash safe instead of corrupting profile state.
+   * are checked against the real OS process table: alive PID with a matching
+   * start token → adopt as running (the browser outlived us); dead PID OR
+   * alive-but-different token (PID reused by a stranger) → mark crashed. This
+   * is what makes restart after a crash safe instead of corrupting profile
+   * state.
    */
   reconcileOnBoot(): { adopted: number; crashed: number } {
     let adopted = 0;
     let crashed = 0;
     for (const run of this.runs.listOccupying()) {
-      if (run.pid && isProcessAlive(run.pid)) {
+      if (run.pid && isProcessAlive(run.pid, run.processToken)) {
         if (run.status !== "running") {
           this.runs.update({ ...run, status: "running" });
         }
@@ -519,7 +526,7 @@ export class BrowserLifecycleService {
           ...run,
           status: "crashed",
           stoppedAt: now(),
-          lastError: "engine process not found at API startup",
+          lastError: "engine process not found (or its PID reused) at API startup",
         });
         const profile = this.profiles.get(run.profileId);
         if (profile) this.markProfile(profile, "idle");

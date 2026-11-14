@@ -19,6 +19,12 @@ export const BrowserRunSchema = z.object({
   profileId: z.string().uuid(),
   status: BrowserRunStatusSchema,
   pid: z.number().int().positive().nullable(),
+  /**
+   * D-002 anti-PID-reuse token: the OS process start time captured at launch.
+   * Boot reconciliation treats "alive PID + different start token" as a reused
+   * PID — i.e. dead — rather than adopting a stranger's process.
+   */
+  processToken: z.string().nullable(),
   debugPort: z.number().int().min(1).max(65535).nullable(),
   wsEndpoint: z.string().nullable(),
   startedAt: z.string().datetime(),

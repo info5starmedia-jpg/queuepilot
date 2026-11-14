@@ -6,6 +6,7 @@ interface RunRow {
   profile_id: string;
   status: BrowserRunStatus;
   pid: number | null;
+  process_token: string | null;
   debug_port: number | null;
   ws_endpoint: string | null;
   started_at: string;
@@ -19,6 +20,7 @@ function toRun(r: RunRow): BrowserRun {
     profileId: r.profile_id,
     status: r.status,
     pid: r.pid,
+    processToken: r.process_token,
     debugPort: r.debug_port,
     wsEndpoint: r.ws_endpoint,
     startedAt: r.started_at,
@@ -39,18 +41,18 @@ export class BrowserRunRepository {
   create(run: BrowserRun): void {
     this.db
       .prepare(
-        `INSERT INTO browser_runs (id, profile_id, status, pid, debug_port, ws_endpoint, started_at, stopped_at, last_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO browser_runs (id, profile_id, status, pid, process_token, debug_port, ws_endpoint, started_at, stopped_at, last_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(run.id, run.profileId, run.status, run.pid, run.debugPort, run.wsEndpoint, run.startedAt, run.stoppedAt, run.lastError);
+      .run(run.id, run.profileId, run.status, run.pid, run.processToken, run.debugPort, run.wsEndpoint, run.startedAt, run.stoppedAt, run.lastError);
   }
 
   update(run: BrowserRun): void {
     this.db
       .prepare(
-        `UPDATE browser_runs SET status=?, pid=?, debug_port=?, ws_endpoint=?, stopped_at=?, last_error=? WHERE id=?`,
+        `UPDATE browser_runs SET status=?, pid=?, process_token=?, debug_port=?, ws_endpoint=?, stopped_at=?, last_error=? WHERE id=?`,
       )
-      .run(run.status, run.pid, run.debugPort, run.wsEndpoint, run.stoppedAt, run.lastError, run.id);
+      .run(run.status, run.pid, run.processToken, run.debugPort, run.wsEndpoint, run.stoppedAt, run.lastError, run.id);
   }
 
   get(id: string): BrowserRun | null {

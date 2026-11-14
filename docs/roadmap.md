@@ -264,15 +264,23 @@ Sub-steps:
 Goal check: profile created on machine A appears on machine B, secrets
 intact, lease prevents double-start.
 
-### 8. D-002 / D-003 hardening
+### 8. D-002 / D-003 hardening — ✅ DONE 2026-11-14
 Goal: recovery proves process identity, not just liveness; rotation links
 designed.
 Sub-steps:
-- a. D-002: capture process start tokens at launch (Windows creation time),
-    store in run record, verify on recovery; test with PID-reuse simulation.
-- b. D-003: design doc for proxy rotation links (per-launch endpoint
-    refresh); ADR if it changes the proxy model.
-Goal check: D-002 test green; D-003 ADR merged.
+- a. ✅ D-002: `browser_runs.process_token` (migration 004) + contract
+    field; captured at launch via `captureProcessStartToken()` (Windows
+    creation time via Get-Process, POSIX /proc starttime+btime; whole-second
+    normalized); `isProcessAlive(pid, token)` treats same-PID+different-token
+    as dead; boot reconciliation passes the stored token. Soft-failure rule:
+    unreadable start time → fall back to plain liveness, never a guessed
+    death. 7 tests incl. real-process PID-reuse simulation (live sleeper PID
+    vs wrong token → dead).
+- b. ✅ D-003: ADR-0007 merged — rotation links resolve into the existing
+    tempProxy launch path (per-launch fetch, never persisted, fail closed,
+    no mid-run rotation, fresh egress measurement per launch); schema change
+    (rotation_url column) deferred to implementation.
+Goal check: D-002 test green (7/7); D-003 ADR merged — YES.
 
 ### 9. Fury 0.5.5 additions scan (from their 2026-11-14 update) — ✅ DONE 2026-11-14
 - **Bookmark sets** — ✅ implemented at the runtime layer (our engine's

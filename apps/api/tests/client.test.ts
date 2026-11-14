@@ -56,6 +56,7 @@ describe("QueuePilotClient", () => {
       profileId: "p1",
       status: "running",
       pid: 1234,
+      processToken: null,
       debugPort: 9222,
       wsEndpoint: "ws://127.0.0.1:9222/devtools/browser/x",
       startedAt: new Date().toISOString(),
