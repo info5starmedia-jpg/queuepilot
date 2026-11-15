@@ -139,3 +139,53 @@ describe("parseAddressFillResult", () => {
     });
   });
 });
+
+describe("buildTypingExpression", () => {
+  it("inlines text and wpm exactly once as JSON", async () => {
+    const { buildTypingExpression } = await import(
+      "../src/application/autofill/typing.js"
+    );
+    const expr = buildTypingExpression("hello world", 60);
+    expect(expr).toContain(JSON.stringify("hello world"));
+    expect(expr).toContain(JSON.stringify(60));
+    expect(expr.trim().startsWith("(async () =>")).toBe(true);
+  });
+
+  it("is an async IIFE awaited by the caller (awaitPromise pattern)", async () => {
+    const { buildTypingExpression } = await import(
+      "../src/application/autofill/typing.js"
+    );
+    const expr = buildTypingExpression("x", 100);
+    expect(expr).toContain("setTimeout");
+    expect(expr).toContain("isContentEditable");
+    expect(expr).toContain("no-focused-field");
+    expect(expr).toContain("HTMLInputElement.prototype");
+  });
+
+  it("JSON-inlining is injection-safe", async () => {
+    const { buildTypingExpression } = await import(
+      "../src/application/autofill/typing.js"
+    );
+    const nasty = '"}); alert(1); ({"';
+    const expr = buildTypingExpression(nasty, 60);
+    expect(expr).toContain(JSON.stringify(nasty));
+  });
+
+  it("parseTypingResult accepts well-formed results and rejects garbage", async () => {
+    const { parseTypingResult } = await import(
+      "../src/application/autofill/typing.js"
+    );
+    expect(parseTypingResult({ typed: 5, ms: 900, error: null })).toEqual({
+      typed: 5,
+      ms: 900,
+      error: null,
+    });
+    expect(parseTypingResult({ typed: 0, ms: 0, error: "no-focused-field" })).toEqual({
+      typed: 0,
+      ms: 0,
+      error: "no-focused-field",
+    });
+    expect(parseTypingResult(null)).toBeNull();
+    expect(parseTypingResult({ typed: "5", ms: 900 })).toBeNull();
+  });
+});

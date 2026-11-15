@@ -319,3 +319,101 @@ describe("POST /profiles/:id/autofill/address", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+/**
+ * v0.14.6 WPM typing simulation: POST /profiles/:id/autofill/type types
+ * into the page's focused editable element keystroke by keystroke. The
+ * response reports typed/ms only — the text itself went INTO the page and
+ * never appears in the response.
+ */
+
+describe("POST /profiles/:id/autofill/type", () => {
+  it("types into the focused field and reports typed count only", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = { typed: 12, ms: 2400, error: null };
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "hello world", wpm: 60 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      profileId: p.id,
+      targetId: "page-1",
+      typed: 12,
+      ms: 2400,
+      error: null,
+    });
+
+    // The page received the text; the response did not echo it back.
+    expect(mock.evaluations).toHaveLength(1);
+    expect(mock.evaluations[0]).toContain("hello world");
+    expect(JSON.stringify(res.json())).not.toContain("hello world");
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("surfaces the page's no-focused-field result without erroring", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = { typed: 0, ms: 0, error: "no-focused-field" };
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "hi", wpm: 100 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().error).toBe("no-focused-field");
+    expect(res.json().typed).toBe(0);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("honours an explicit targetId and default wpm", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = { typed: 2, ms: 300, error: null };
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "hi", targetId: "tab-3" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().targetId).toBe("tab-3");
+    // Default 60 wpm is inlined into the page script.
+    expect(mock.evaluations[0]).toContain(JSON.stringify(60));
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("409s when the profile is not running", async () => {
+    const p = await bootWithPersona();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "hi" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("PROFILE_NOT_RUNNING");
+  });
+
+  it("400s on out-of-range wpm or empty text", async () => {
+    const p = await bootWithPersona();
+    const bad1 = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "hi", wpm: 10 },
+    });
+    expect(bad1.statusCode).toBe(400);
+    const bad2 = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/type`,
+      payload: { text: "" },
+    });
+    expect(bad2.statusCode).toBe(400);
+  });
+});

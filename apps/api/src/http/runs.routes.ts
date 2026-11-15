@@ -56,6 +56,25 @@ export function registerRunRoutes(
       .parse(req.body ?? {});
     return autofill.fillAddress(id, body.targetId);
   });
+
+  /**
+   * WPM typing simulation: types `text` into the page's FOCUSED editable
+   * element keystroke by keystroke (per-key delay from `wpm`, human jitter).
+   * One long-running CDP evaluate; the response reports typed count and
+   * elapsed ms, never the text itself. `error: "no-focused-field"` in the
+   * result when nothing editable has focus — nothing was typed.
+   */
+  app.post("/profiles/:id/autofill/type", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        text: z.string().min(1).max(4000),
+        wpm: z.number().int().min(20).max(400).default(60),
+        targetId: z.string().min(1).max(200).optional(),
+      })
+      .parse(req.body ?? {});
+    return autofill.typeText(id, body.text, body.wpm, body.targetId);
+  });
   app.post("/profiles/:id/start", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = StartRunBodySchema.parse(req.body ?? {});

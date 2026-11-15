@@ -483,7 +483,21 @@ its sub-steps and goal in one place.
       detach) is shared with card autofill via one `evaluateOnPage` helper.
     - Tests: 6 unit (expression/parse) + 7 API (fill, targetId, name split,
       not-running 409, nothing-to-fill 409, no-page 409, 404).
-      386/386 green. Remaining on §7: WPM typing simulation.
+      386/386 green. Remaining on §7: WPM typing simulation (item 11).
+11. ✅ **WPM typing simulation** (2026-11-15, v0.14.6) — `POST
+    /profiles/:id/autofill/type` types into the page's FOCUSED editable
+    element (input/textarea/contenteditable):
+    - One async `Runtime.evaluate` (awaitPromise): per-key delay =
+      60000/(wpm·5) with ±35% jitter, 2.2x pause after space/comma/period,
+      random 120–400 ms micro-pauses; native-setter + input event per key,
+      change event at the end — React/Vue controlled components see a real
+      typing sequence. `no-focused-field` result (typed: 0) when nothing
+      editable has focus — never a throw.
+    - Evaluate timeout scales with text length × worst-case per-key time,
+      bounded at 300 s; `wpm` validated 20–400 (default 60).
+    - The §7 Jancy-parity autofill row is now fully ✅ (card + address +
+      typing).
+    - Tests: 4 unit + 5 API; 395/395 green.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

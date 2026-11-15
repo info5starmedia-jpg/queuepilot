@@ -18,6 +18,7 @@ import {
   type AddressFillInput,
   type AddressFillResult,
 } from "./address-autofill.js";
+import { buildTypingExpression, parseTypingResult, type TypingResult } from "./typing.js";
 
 /**
  * AutofillService — pushes persona data into the live page over CDP.
@@ -82,6 +83,40 @@ export class AutofillService {
   }
 
   /**
+   * WPM typing simulation: types `text` into the page's FOCUSED editable
+   * element keystroke by keystroke (see typing.ts for the delay model).
+   * The evaluate may run long — the timeout scales with the expected
+   * typing duration, bounded. The result reports typed/ms only, never the
+   * text (it went INTO the page).
+   */
+  async typeText(
+    profileId: string,
+    text: string,
+    wpm: number,
+    targetId?: string,
+  ): Promise<{ profileId: string; targetId: string } & TypingResult> {
+    this.profiles.get(profileId);
+    this.requireRunning(profileId);
+
+    // Worst-case duration: slowest allowed jitter + punctuation pauses and
+    // micro-pauses on every key, plus generous headroom.
+    const worstMsPerKey = (60000 / (wpm * 5)) * 1.35 * 2.2 + 400;
+    const timeoutMs = Math.min(Math.ceil(text.length * worstMsPerKey) + 10_000, 300_000);
+
+    const { target, value } = await this.evaluateOnPage(
+      profileId,
+      buildTypingExpression(text, wpm),
+      targetId,
+      timeoutMs,
+    );
+    const parsed = parseTypingResult(value);
+    if (!parsed) {
+      throw new Error("typing returned an unparseable result from the page");
+    }
+    return { profileId, targetId: target, ...parsed };
+  }
+
+  /**
    * Identity + address data for the page. Name is always available (split
    * at the first space); email comes from the profile, phone/DOB/address
    * from the persona bag. Returns null when there is nothing worth filling
@@ -133,6 +168,7 @@ export class AutofillService {
     profileId: string,
     expression: string,
     targetId?: string,
+    timeoutMs = 15_000,
   ): Promise<{ target: string; value: unknown }> {
     const run = this.lifecycle.activeRun(profileId);
     const conn = await CdpConnection.connect(run!.wsEndpoint!);
@@ -152,9 +188,9 @@ export class AutofillService {
             expression,
             returnByValue: true,
             awaitPromise: true,
-            timeout: 10_000,
+            timeout: timeoutMs,
           },
-          15_000,
+          timeoutMs + 5_000,
           attached.sessionId,
         );
         if (r.exceptionDetails) {
