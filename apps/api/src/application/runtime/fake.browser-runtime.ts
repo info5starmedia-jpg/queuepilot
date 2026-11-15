@@ -19,6 +19,8 @@ export class FakeBrowserRuntime implements BrowserRuntime {
   readonly kind = "fake";
   failNextLaunch: string | null = null;
   launchDelayMs = 0;
+  /** Test hook: override the wsEndpoint of every future session (CDP mocks). */
+  nextWsEndpoint: string | null = null;
   readonly sessions: FakeSession[] = [];
   private nextPid = 10_000;
   private nextPort = 92_200;
@@ -37,6 +39,7 @@ export class FakeBrowserRuntime implements BrowserRuntime {
       ++this.nextPort,
       request.profile.id,
       request.identity,
+      this.nextWsEndpoint ?? undefined,
     );
     this.sessions.push(session);
     return session;
@@ -62,9 +65,10 @@ export class FakeSession extends EventEmitter implements BrowserSession {
     readonly debugPort: number,
     readonly profileId: string,
     private readonly identity: FingerprintIdentity | null = null,
+    wsEndpoint?: string,
   ) {
     super();
-    this.wsEndpoint = `ws://127.0.0.1:${debugPort}/devtools/browser/fake-${pid}`;
+    this.wsEndpoint = wsEndpoint ?? `ws://127.0.0.1:${debugPort}/devtools/browser/fake-${pid}`;
     this.exited = new Promise((resolve) => {
       this.resolveExit = resolve;
     });

@@ -18,7 +18,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Required columns `Profile/Name/Email` | ❌ | Import supports `name` only; no email column |
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ❌ |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
-| Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed). Autofill wiring pending |
+| Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
 | Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ — index only moves via rotate |
 | Tab color per profile | ❌ | |
 | Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | ❌ | Console is grid + actions only |
@@ -99,7 +99,7 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | Settings bundles (.jnc export/import) | ✅ | `GET /settings/export` + `POST /settings/import` — secrets-free JSON (P7.10) |
 | Preference sets | ❌ |
 | Network logger (net-export) | ❌ |
-| Autofill + simulated typing (WPM) | ❌ |
+| Autofill + simulated typing (WPM) | 🟡 | Card autofill ✅ v0.14: `POST /profiles/:id/autofill/card` — hint-based field detection, native-setter + input/change events (React-safe), expiry format adaptation, values never leave the machine. Address/identity autofill + WPM typing simulation ❌ |
 | Purchase coordination (Namath) | ➖ |
 
 ## Where QueuePilot exceeds Jancy (keep)

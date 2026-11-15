@@ -20,11 +20,20 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
  */
 export class MockCdpServer {
   readonly calls: CdpCall[] = [];
+  /** Every Runtime.evaluate expression received, in order. */
+  readonly evaluations: string[] = [];
+  /** Test hook: what the next Runtime.evaluate returns (returnByValue). */
+  evaluateResult: unknown = { filled: [], missing: [] };
+  /** Test hook: page targets Target.getTargets reports. */
+  pageTargets: { targetId: string; type: string }[] = [
+    { targetId: "page-1", type: "page" },
+  ];
   supportsContexts = true;
   private server: http.Server;
   private readonly sockets = new Set<net.Socket>();
   private nextContext = 0;
   private nextTarget = 0;
+  private nextSession = 0;
   private port = 0;
 
   constructor() {
@@ -145,6 +154,18 @@ export class MockCdpServer {
         return {
           id,
           result: { targetId: `target-${++this.nextTarget}` },
+        };
+      case "Target.getTargets":
+        return { id, result: { targetInfos: this.pageTargets } };
+      case "Target.attachToTarget":
+        return { id, result: { sessionId: `session-${++this.nextSession}` } };
+      case "Target.detachFromTarget":
+        return { id, result: {} };
+      case "Runtime.evaluate":
+        this.evaluations.push(String(params.expression ?? ""));
+        return {
+          id,
+          result: { result: { type: "object", value: this.evaluateResult } },
         };
       case "Target.closeTarget":
         return { id, result: { success: true } };

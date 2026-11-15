@@ -29,7 +29,8 @@ export function toHttpError(err: unknown): {
         ? 404
         : err.code === ErrorCodes.PROFILE_ALREADY_RUNNING ||
             err.code === ErrorCodes.PROFILE_NOT_RUNNING ||
-            err.code === ErrorCodes.CONFLICT
+            err.code === ErrorCodes.CONFLICT ||
+            err.code === ErrorCodes.NO_FILL_TARGET
           ? 409
           : err.code === ErrorCodes.ENGINE_UNAVAILABLE
             ? 503

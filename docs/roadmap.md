@@ -437,6 +437,18 @@ its sub-steps and goal in one place.
      drift explains it. Precedence: temp > attached > list > none.
    - 354/354 tests green. Remaining: per-launch auto-rotation (index advances
      on every start) — operator decision, current model is explicit rotate.
+8. ✅ **Credit-card autofill** (2026-11-14, v0.14) — `POST
+   /profiles/:id/autofill/card` pushes a named card set into the checkout
+   page over CDP:
+   - One `Runtime.evaluate` per fill: hint-based field detection
+     (name/id/placeholder/aria-label/autocomplete), native input value
+     setter + bubbling input/change events (React/Vue controlled inputs
+     wake up), expiry MM/YY ↔ MM/YYYY adapted to the field's maxLength.
+   - Values travel INTO the page only — the response names filled fields,
+     never values; `NO_FILL_TARGET` added (409) when no page is open.
+   - Tests: MockCdpServer grew attach/detach/getTargets/Runtime.evaluate
+     hooks; FakeBrowserRuntime got a `nextWsEndpoint` override. 366/366
+     green. Remaining: address/identity autofill, WPM typing simulation.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

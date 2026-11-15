@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { TempProxyInputSchema } from "@queuepilot/contracts";
 import type { BrowserLifecycleService } from "../application/lifecycle/browser.lifecycle.service.js";
+import type { ProfileService } from "../application/profiles/profile.service.js";
+import { AutofillService } from "../application/autofill/autofill.service.js";
 
 const StartRunBodySchema = z
   .object({
@@ -18,7 +20,25 @@ const StartRunBodySchema = z
 export function registerRunRoutes(
   app: FastifyInstance,
   lifecycle: BrowserLifecycleService,
+  profiles: ProfileService,
 ): void {
+  const autofill = new AutofillService(profiles, lifecycle);
+
+  /**
+   * Credit-card autofill: pushes the named card set from the profile's extra
+   * bag into the checkout page's inputs over CDP. The response names which
+   * fields were filled — values never leave the machine in either direction.
+   */
+  app.post("/profiles/:id/autofill/card", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        set: z.string().min(1).max(60),
+        targetId: z.string().min(1).max(200).optional(),
+      })
+      .parse(req.body ?? {});
+    return autofill.fillCard(id, body.set, body.targetId);
+  });
   app.post("/profiles/:id/start", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = StartRunBodySchema.parse(req.body ?? {});

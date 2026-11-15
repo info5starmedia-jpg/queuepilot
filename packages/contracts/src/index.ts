@@ -35,6 +35,7 @@ export const ErrorCodes = {
   VALIDATION_FAILED: "VALIDATION_FAILED",
   BUNDLE_INVALID: "BUNDLE_INVALID",
   CONFLICT: "CONFLICT",
+  NO_FILL_TARGET: "NO_FILL_TARGET",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 

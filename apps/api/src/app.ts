@@ -78,7 +78,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp);
   registerProxyRoutes(app, deps.proxies);
-  registerRunRoutes(app, deps.lifecycle);
+  registerRunRoutes(app, deps.lifecycle, deps.profiles);
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
