@@ -172,6 +172,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE browser_runs ADD COLUMN process_token TEXT;
     `,
   },
+  {
+    id: "005-proxy-provider-star",
+    up: `
+      -- v0.14.10: Jancy star/default marker on proxy providers.
+      ALTER TABLE proxy_providers ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

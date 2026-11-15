@@ -536,6 +536,26 @@ its sub-steps and goal in one place.
     - MockCdpServer grew Network.* hooks (getAllCookies/getCookies/
       setCookie/deleteCookies).
     - Tests: 8 API; §5 rows flipped ✅ (mass clearing + Cookie Thinger).
+15. ✅ **Console polish** (2026-11-15, v0.14.10) — four Jancy daily-driver
+    gaps closed in one batch:
+    - **Proxy-provider star/default** — `starred` column on
+      `proxy_providers` (migration 005); `POST /proxy-providers/:id/star`
+      {starred:bool} makes one provider the default (starring clears all
+      others). Console gained a Proxy providers section (star + refresh).
+    - **CLI `--proxy-provider`** — `queuepilot profile start NAME
+      --proxy-provider POOL` resolves the provider by name/id, takes its
+      next proxy via `POST …/next`, attaches it with `PATCH /profiles/:id`,
+      then starts. The proxy password never leaves the server.
+    - **Favorite (star) on profiles** — `favorite` boolean rides the persona
+      bag (PATCH /profiles/:id/persona); CSV `favorite` column ("1"/"true"/
+      "yes" star; absent column/empty cell leaves the value);
+      `GET /profiles?favorite=true` filter; console ★ toggle.
+    - **Tab color** — `tabColor` (#rgb/#rrggbb, validated) rides the persona
+      bag; CSV `color` column; bad color fails only that row (dry-run too);
+      console color dot per profile. Engine-side tab tinting deliberately
+      out of scope for the TS layer.
+    - Tests: provider star (unit + API), CLI flag (live-server e2e),
+      favorite/color import; 427/427 green.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

@@ -21,6 +21,8 @@ describe("personaFieldsOf", () => {
       free: {},
       creditCards: [],
       proxies: [],
+      favorite: false,
+      tabColor: null,
     });
     expect(personaFieldsOf({})).toEqual(personaFieldsOf(null));
   });

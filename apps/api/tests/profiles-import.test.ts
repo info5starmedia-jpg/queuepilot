@@ -157,3 +157,51 @@ describe("importProfilesCsv — email column (v0.14.7)", () => {
     expect(profiles.list()[0]!.email).toBe("new@example.com");
   });
 });
+
+describe("importProfilesCsv — favorite + tab color (v0.14.10)", () => {
+  function services() {
+    const { profiles, proxies } = makeTestContext();
+    return { profiles, proxies };
+  }
+
+  const FC_HEADER = "name,favorite,color";
+
+  it("imports favorite and color into the persona bag", () => {
+    const { profiles, proxies } = services();
+    const report = importProfilesCsv(
+      profiles,
+      proxies,
+      `${FC_HEADER}\nalice,1,#3af\nbob,yes,#a1B2c3`,
+    );
+    expect(report.succeeded).toBe(2);
+    // list() orders by created_at DESC, so look rows up by name.
+    const byName = new Map(profiles.list().map((p) => [p.name, p]));
+    expect(byName.get("alice")!.extra.favorite).toBe(true);
+    expect(byName.get("alice")!.extra.tabColor).toBe("#3af");
+    expect(byName.get("bob")!.extra.favorite).toBe(true);
+    expect(byName.get("bob")!.extra.tabColor).toBe("#a1B2c3");
+  });
+
+  it("an absent favorite column never unstars on re-import", () => {
+    const { profiles, proxies } = services();
+    importProfilesCsv(profiles, proxies, `${FC_HEADER}\nalice,1,#3af`);
+    // Re-import without the favorite/color columns at all.
+    importProfilesCsv(profiles, proxies, `name\nalice`);
+    expect(profiles.list()[0]!.extra.favorite).toBe(true);
+    expect(profiles.list()[0]!.extra.tabColor).toBe("#3af");
+  });
+
+  it("a bad color fails only that row, in dry-run too", () => {
+    const { profiles, proxies } = services();
+    const dry = importProfilesCsv(
+      profiles,
+      proxies,
+      `${FC_HEADER}\ngood,1,#fff\nbad,1,notacolor`,
+      { dryRun: true },
+    );
+    expect(dry.succeeded).toBe(1);
+    expect(dry.errors[0]!.name).toBe("bad");
+    expect(dry.errors[0]!.message).toMatch(/#rgb or #rrggbb/);
+    expect(profiles.list()).toHaveLength(0);
+  });
+});

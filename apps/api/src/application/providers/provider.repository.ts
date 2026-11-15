@@ -101,6 +101,7 @@ interface ProxyProviderRow {
   has_header: number;
   distribution: string;
   cursor: number;
+  starred: number;
   last_refreshed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -118,6 +119,7 @@ function toProxyProvider(r: ProxyProviderRow): ProxyProvider {
     hasHeader: r.has_header === 1,
     distribution: r.distribution as ProxyDistribution,
     cursor: r.cursor,
+    starred: r.starred === 1,
     lastRefreshedAt: r.last_refreshed_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -130,8 +132,8 @@ export class ProxyProviderRepository {
   create(p: ProxyProvider): void {
     this.db
       .prepare(
-        `INSERT INTO proxy_providers (id, name, type, source_path, sheet_id, sheet_range, delimiter, has_header, distribution, cursor, last_refreshed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO proxy_providers (id, name, type, source_path, sheet_id, sheet_range, delimiter, has_header, distribution, cursor, starred, last_refreshed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         p.id,
@@ -144,6 +146,7 @@ export class ProxyProviderRepository {
         p.hasHeader ? 1 : 0,
         p.distribution,
         p.cursor,
+        p.starred ? 1 : 0,
         p.lastRefreshedAt,
         p.createdAt,
         p.updatedAt,
@@ -168,7 +171,7 @@ export class ProxyProviderRepository {
   update(p: ProxyProvider): void {
     this.db
       .prepare(
-        "UPDATE proxy_providers SET name=?, source_path=?, sheet_id=?, sheet_range=?, delimiter=?, has_header=?, distribution=?, cursor=?, last_refreshed_at=?, updated_at=? WHERE id=?",
+        "UPDATE proxy_providers SET name=?, source_path=?, sheet_id=?, sheet_range=?, delimiter=?, has_header=?, distribution=?, cursor=?, starred=?, last_refreshed_at=?, updated_at=? WHERE id=?",
       )
       .run(
         p.name,
@@ -179,6 +182,7 @@ export class ProxyProviderRepository {
         p.hasHeader ? 1 : 0,
         p.distribution,
         p.cursor,
+        p.starred ? 1 : 0,
         p.lastRefreshedAt,
         p.updatedAt,
         p.id,

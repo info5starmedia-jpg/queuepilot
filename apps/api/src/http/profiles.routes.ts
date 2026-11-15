@@ -36,11 +36,16 @@ export function registerProfileRoutes(
   });
 
   app.get("/profiles", async (req) => {
-    const q = req.query as { group?: string; query?: string };
+    const q = req.query as { group?: string; query?: string; favorite?: string };
     const filter: { group?: string; query?: string } = {};
     if (q.group !== undefined) filter.group = q.group;
     if (q.query !== undefined) filter.query = q.query;
-    return { profiles: service.list(filter) };
+    let profiles = service.list(filter);
+    // Jancy favorite filter — reads the persona bag (extra.favorite).
+    if (q.favorite === "true") {
+      profiles = profiles.filter((p) => personaFieldsOf(p.extra).favorite);
+    }
+    return { profiles };
   });
 
   app.post("/profiles", async (req, reply) => {

@@ -377,6 +377,8 @@ export const ProxyProviderSchema = z.object({
   distribution: ProxyDistributionSchema.default("start-over"),
   /** Cursor for start-over/persist distribution; survives restarts. */
   cursor: z.number().int().min(0).default(0),
+  /** Jancy star: marks the default provider (console pin + CLI picker). */
+  starred: z.boolean().default(false),
   lastRefreshedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

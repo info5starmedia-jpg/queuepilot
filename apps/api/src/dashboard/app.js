@@ -129,10 +129,14 @@ async function loadProfiles() {
       }
     }
 
+    const favorite = p.extra?.favorite === true;
+    const tabColor = typeof p.extra?.tabColor === "string" ? p.extra.tabColor : null;
+
     card.innerHTML = `
-      <div><span class="name">${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
+      <div><span class="name">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
       <div class="meta">${esc(p.group)}${p.email ? " · " + esc(p.email) : ""}${tabsInfo ? " · " + tabsInfo : ""}</div>
       <div class="actions">
+        <button class="secondary" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</button>
         ${
           p.status === "running"
             ? `<button class="danger" data-act="stop">Stop</button>`
@@ -143,13 +147,13 @@ async function loadProfiles() {
     card
       .querySelectorAll("button")
       .forEach((b) =>
-        b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act)),
+        b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act, p)),
       );
     grid.appendChild(card);
   }
 }
 
-async function onProfileAction(id, act) {
+async function onProfileAction(id, act, profile) {
   try {
     if (act === "start")
       await api(`/profiles/${id}/start`, { method: "POST", body: "{}" });
@@ -159,6 +163,13 @@ async function onProfileAction(id, act) {
         method: "POST",
         body: "{}",
       });
+    if (act === "favorite") {
+      const next = profile?.extra?.favorite === true ? false : true;
+      await api(`/profiles/${id}/persona`, {
+        method: "PATCH",
+        body: JSON.stringify({ favorite: next }),
+      });
+    }
   } catch (err) {
     pushEvent({
       type: "error",
@@ -290,6 +301,70 @@ $("#import-apply").addEventListener("click", async () => {
     pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
   }
 });
+
+/* ---------------- proxy providers (star = default) ---------------- */
+
+async function loadProxyProviders() {
+  let data;
+  try {
+    data = await api("/proxy-providers");
+  } catch {
+    return; // providers surface optional
+  }
+  let section = $("#proxy-providers");
+  if (!section) {
+    // Build the section lazily after the Proxies table.
+    const proxiesSection = $("#proxies")?.closest("section");
+    if (!proxiesSection) return;
+    section = document.createElement("section");
+    section.innerHTML = `
+      <div class="section-head"><h2>Proxy providers</h2>
+        <span class="hint">★ = default provider</span></div>
+      <table id="proxy-providers">
+        <thead><tr><th></th><th>name</th><th>type</th><th>distribution</th><th>proxies</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>`;
+    proxiesSection.after(section);
+  }
+  const tbody = section.querySelector("tbody");
+  tbody.innerHTML = "";
+  for (const p of data.providers ?? []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><button class="secondary" data-star title="star as default">${p.starred ? "★" : "☆"}</button></td>
+      <td>${esc(p.name)}</td>
+      <td>${esc(p.type)}</td>
+      <td>${esc(p.distribution)}</td>
+      <td class="meta" data-count>…</td>
+      <td><button class="secondary" data-act="refresh">refresh</button> <span class="meta" data-msg></span></td>`;
+    tr.querySelector("[data-star]").addEventListener("click", async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await api(`/proxy-providers/${p.id}/star`, {
+          method: "POST",
+          body: JSON.stringify({ starred: !p.starred }),
+        });
+        await loadProxyProviders();
+      } catch (err) {
+        pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+        ev.target.disabled = false;
+      }
+    });
+    tr.querySelector("[data-act='refresh']").addEventListener("click", async (ev) => {
+      const msg = tr.querySelector("[data-msg]");
+      msg.textContent = "…";
+      try {
+        await api(`/proxy-providers/${p.id}/refresh`, { method: "POST" });
+        msg.textContent = "ok";
+        await loadProxies();
+        await loadProxyProviders();
+      } catch (err) {
+        msg.textContent = err.message;
+      }
+    });
+    tbody.appendChild(tr);
+  }
+}
 
 /* ---------------- tabs (Tab Thinger + mass select) ---------------- */
 
@@ -463,6 +538,7 @@ refreshHealth();
 loadChecklist();
 loadProfiles();
 loadProxies();
+loadProxyProviders();
 refreshTabsProfiles();
 connectEvents();
 setInterval(refreshHealth, 30_000);

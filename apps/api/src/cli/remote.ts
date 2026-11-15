@@ -27,6 +27,7 @@ interface Flags {
   json: boolean;
   group?: string | undefined;
   query?: string | undefined;
+  proxyProvider?: string | undefined;
   dryRun: boolean;
   upsert: boolean;
 }
@@ -40,6 +41,7 @@ export function parseRemoteFlags(argv: string[]): Flags {
     else if (a === "--no-upsert") f.upsert = false;
     else if (a === "--group") f.group = argv[++i];
     else if (a === "--query") f.query = argv[++i];
+    else if (a === "--proxy-provider") f.proxyProvider = argv[++i];
     else f._.push(a);
   }
   return f;
@@ -77,7 +79,7 @@ async function call(
 const USAGE = `usage:
   queuepilot profiles list [--group g] [--query q] [--json]
   queuepilot profiles import <file.csv> [--dry-run] [--no-upsert] [--json]
-  queuepilot profile start|stop|run <name-or-id> [--json]`;
+  queuepilot profile start|stop|run <name-or-id> [--proxy-provider name] [--json]`;
 
 export async function runRemoteCli(
   argv: string[],
@@ -135,6 +137,32 @@ export async function runRemoteCli(
       if (!id) {
         err(`profile "${rest[0]}" not found (name or id expected)`);
         return 2;
+      }
+      // --proxy-provider: attach the provider's next proxy before starting.
+      // The proxy row lives in the DB; the engine resolves its password from
+      // the SecretStore server-side at launch — the CLI never sees it.
+      if (flags.proxyProvider) {
+        if (action !== "start") {
+          err("--proxy-provider only applies to profile start");
+          return 2;
+        }
+        const provRes = await call(d, "GET", "/proxy-providers");
+        if (provRes.status !== 200) return fail(err, provRes.status, provRes.data);
+        const providers = (provRes.data as {
+          providers: { id: string; name: string }[];
+        }).providers;
+        const provider =
+          providers.find((p) => p.name === flags.proxyProvider) ??
+          providers.find((p) => p.id === flags.proxyProvider);
+        if (!provider) {
+          err(`proxy provider "${flags.proxyProvider}" not found`);
+          return 2;
+        }
+        const nextRes = await call(d, "POST", `/proxy-providers/${provider.id}/next`);
+        if (nextRes.status !== 200) return fail(err, nextRes.status, nextRes.data);
+        const proxy = (nextRes.data as { proxy: { id: string } }).proxy;
+        const attach = await call(d, "PATCH", `/profiles/${id}`, { proxyId: proxy.id });
+        if (attach.status !== 200) return fail(err, attach.status, attach.data);
       }
       const path = action === "run" ? `/profiles/${id}/run` : `/profiles/${id}/${action}`;
       const { status, data } = await call(d, action === "run" ? "GET" : "POST", path);

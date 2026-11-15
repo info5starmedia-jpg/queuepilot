@@ -117,6 +117,14 @@ export const PersonaFieldsSchema = z.object({
    * "system connection". `extra.proxyIndex` selects the current entry.
    */
   proxies: z.array(z.string().min(1).max(500)).max(50).default([]),
+  /** Jancy favorite column — surfaces first in panels, filterable. */
+  favorite: z.boolean().default(false),
+  /** Jancy tab-color column; #rgb or #rrggbb, null = default chrome color. */
+  tabColor: z
+    .string()
+    .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+    .nullable()
+    .default(null),
 });
 export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
 
@@ -133,6 +141,14 @@ export const UpdatePersonaInputSchema = z
     creditCards: z.array(PersonaCreditCardSchema).max(20).optional(),
     /** Per-profile proxy list entries (see PersonaFieldsSchema.proxies). */
     proxies: z.array(z.string().min(1).max(500)).max(50).optional(),
+    /** Jancy favorite column. */
+    favorite: z.boolean().optional(),
+    /** Jancy tab-color column (#rgb/#rrggbb, null clears). */
+    tabColor: z
+      .string()
+      .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+      .nullable()
+      .optional(),
     /**
      * Well-known 2FA fields (see PERSONA_WELL_KNOWN_FIELDS), stored in
      * `extra.fields`. Values may be literals OR resolver specs (`webhook:…`,

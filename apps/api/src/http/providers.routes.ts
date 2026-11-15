@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   CreateProfileProviderInputSchema,
   CreateProxyProviderInputSchema,
@@ -59,6 +60,18 @@ export function registerProviderRoutes(
   app.post("/proxy-providers/:id/refresh", async (req) => {
     const { id } = req.params as { id: string };
     return proxyProviders.refresh(id);
+  });
+
+  /**
+   * Star/unstar (Jancy pin-as-default). Starring one provider clears the
+   * star on all others — at most one default exists.
+   */
+  app.post("/proxy-providers/:id/star", async (req) => {
+    const { id } = req.params as { id: string };
+    const { starred } = z
+      .object({ starred: z.boolean() })
+      .parse(req.body ?? {});
+    return proxyProviders.setStarred(id, starred);
   });
 
   /** Hand out the next proxy per the provider's distribution mode. */

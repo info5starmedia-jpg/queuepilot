@@ -7,11 +7,14 @@ import type { ProxyService } from "../proxies/proxy.service.js";
  * P6.1 — bulk profile import from CSV.
  *
  * Columns (header row required, order fixed, extras ignored):
- *   name, email, proxy, group, tags, notes, platform, timezone, locale
+ *   name, email, proxy, group, tags, notes, platform, timezone, locale,
+ *   favorite, color
  *
  * - name: required, unique key — re-import UPSERTS by name (update in place).
  * - email: optional, validated as an email address; on re-import an empty
  *   cell leaves the stored email unchanged.
+ * - favorite: "1"/"true"/"yes" star the profile (anything else = unstarred).
+ * - color: tab color, #rgb or #rrggbb; a bad value fails only that row.
  * - proxy: empty = direct. Accepted shapes:
  *     host:port
  *     host:port:user:pass
@@ -61,6 +64,8 @@ const COLUMNS = [
   "platform",
   "timezone",
   "locale",
+  "favorite",
+  "color",
 ] as const;
 
 const PlatformEnum = z.enum(["windows", "macos", "linux"]);
@@ -267,6 +272,24 @@ export function importProfilesCsv(
         fail(`a profile named "${name}" already exists (upsert disabled)`);
         continue;
       }
+
+      // Jancy favorite + tab-color columns ride the persona bag; a column
+      // absent from the header (or an empty cell) leaves existing values.
+      // Validated BEFORE the dry-run check so a bad color fails the row in
+      // dry-run exactly as it would on apply.
+      const persona: Record<string, unknown> = {};
+      if (header.includes("favorite") && col(r, "favorite")) {
+        persona.favorite = ["1", "true", "yes"].includes(col(r, "favorite").toLowerCase());
+      }
+      if (header.includes("color") && col(r, "color")) {
+        const color = col(r, "color");
+        if (!/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) {
+          fail(`color "${color}" must be #rgb or #rrggbb`);
+          continue;
+        }
+        persona.tabColor = color;
+      }
+
       const action = prior ? "updated" : "created";
       if (dryRun) {
         report.results.push({
@@ -301,6 +324,9 @@ export function importProfilesCsv(
           notes,
           tags,
         });
+        if (Object.keys(persona).length > 0) {
+          profile = profiles.updatePersona(profile.id, persona);
+        }
       } else {
         profile = profiles.create({
           name,
@@ -314,6 +340,9 @@ export function importProfilesCsv(
           locale,
           generateFingerprint: true,
         });
+        if (Object.keys(persona).length > 0) {
+          profile = profiles.updatePersona(profile.id, persona);
+        }
         existingByName.set(name, profile);
       }
       report.results.push({ row: rowNo, name, action, profileId: profile.id, proxyId });

@@ -16,7 +16,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | --- | --- | --- |
 | Profile providers (CSV + Google Sheets, refreshable, many) | 🟡 | Sheets provider ✅ (P1.5). CSV import ✅ but see columns below |
 | Required columns `Profile/Name/Email` | ✅ | v0.14.7: `email` column in CSV import (validated; empty cell on re-import leaves it unchanged), `PATCH /profiles/:id` accepts `email` incl. explicit null-clear; profile create takes `email` |
-| Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ❌ |
+| Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ✅ v0.14.10 (persona bag, CSV `favorite` column, `?favorite=true` filter, console ★) |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
 | Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ — index only moves via rotate |
@@ -45,11 +45,11 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | --- | --- | --- |
 | Proxy providers (delimited, header, timezone column) | ✅ | P1.5 incl. Sheets |
 | Distribution: persist / start-over / random | ✅ | `POST /proxy-providers/:id/next` |
-| Provider actions (star default, refresh, trash, test) | 🟡 | refresh/test/delete ✅; star/default ❌ |
+| Provider actions (star default, refresh, trash, test) | ✅ | refresh/test/delete ✅; star/default ✅ v0.14.10 (`POST /proxy-providers/:id/star`, one starred default per workspace, console section) |
 | Per-proxy timezone applied at assignment | 🟡 | Timezone lives on identity, not per-proxy switch |
 | Temporary proxies per launch | ✅ | P1.5, never persisted |
 | socks5 upstream in relay | ✅ | P7.2 done; live `egress-via-socks5` PASS |
-| CLI `--proxy-provider` | ❌ | CLI exists; no provider flag |
+| CLI `--proxy-provider` | ✅ | v0.14.10: `profile start NAME --proxy-provider POOL` — next-proxy attach then start; password never leaves the server |
 
 ## 4. Tabs
 

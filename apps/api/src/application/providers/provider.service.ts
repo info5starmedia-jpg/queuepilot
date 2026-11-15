@@ -262,6 +262,7 @@ export class ProxyProviderService {
       hasHeader: input.hasHeader ?? false,
       distribution: input.distribution ?? "start-over",
       cursor: 0,
+      starred: false,
       lastRefreshedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -284,6 +285,24 @@ export class ProxyProviderService {
 
   list(): ProxyProvider[] {
     return this.providers.list();
+  }
+
+  /**
+   * Star/unstar — Jancy's pin-as-default. Starring one provider clears the
+   * star on every other (there is at most one default); unstar leaves the
+   * rest untouched.
+   */
+  setStarred(id: string, starred: boolean): ProxyProvider {
+    const target = this.get(id);
+    if (starred) {
+      for (const p of this.providers.list()) {
+        if (p.id !== id && p.starred) {
+          this.providers.update({ ...p, starred: false, updatedAt: new Date().toISOString() });
+        }
+      }
+    }
+    this.providers.update({ ...target, starred, updatedAt: new Date().toISOString() });
+    return this.get(id);
   }
 
   async refresh(id: string): Promise<RefreshResult> {

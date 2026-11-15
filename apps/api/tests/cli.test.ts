@@ -69,6 +69,31 @@ describe("remote CLI against a live server", () => {
     expect(await runRemoteCli(["profile", "start", "ghost"], deps)).toBe(2);
     await app.close();
   });
+
+  it("profile start --proxy-provider attaches the provider's next proxy", async () => {
+    const { app, profiles, out, deps } = await live();
+    const p = profiles.create({ name: "cli-pp", generateFingerprint: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-cli-pp-"));
+    fs.writeFileSync(
+      path.join(dir, "pp.txt"),
+      "rot-1,9.9.9.9,8080,u,p,America/Toronto\n",
+    );
+    const res = await fetch(`${deps.baseUrl}/proxy-providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "rotator", sourcePath: path.join(dir, "pp.txt") }),
+    });
+    expect(res.status).toBe(201);
+
+    const code = await runRemoteCli(
+      ["profile", "start", "cli-pp", "--proxy-provider", "rotator"],
+      deps,
+    );
+    expect(code, out.join("\n")).toBe(0);
+    expect(profiles.get(p.id).proxyId).not.toBeNull();
+    await runRemoteCli(["profile", "stop", "cli-pp"], deps);
+    await app.close();
+  });
 });
 
 describe("compareVersions", () => {

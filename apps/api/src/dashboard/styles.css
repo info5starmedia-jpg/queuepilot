@@ -252,3 +252,14 @@ td.mono {
 .checklist .mark { display: inline-block; width: 22px; font-weight: 700; }
 .check-ok .mark { color: var(--green); }
 .check-warn .mark { color: var(--amber); }
+
+/* v0.14.10: profile tab-color dot */
+.color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
