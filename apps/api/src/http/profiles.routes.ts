@@ -97,6 +97,13 @@ export function registerProfileRoutes(
     return service.regenerateFingerprint(id, body.platform);
   });
 
+  // Jancy clone — same persona/proxy/group, fresh fingerprint identity.
+  app.post("/profiles/:id/clone", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { name?: string };
+    return reply.code(201).send(service.clone(id, body.name));
+  });
+
   // Jancy 2FA/persona columns — typed merge over profile.extra.
   app.patch("/profiles/:id/persona", async (req) => {
     const { id } = req.params as { id: string };

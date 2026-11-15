@@ -22,6 +22,10 @@ const BatchStartBodySchema = z.object({
   staggerMs: z.number().int().min(0).max(60_000).default(0),
 });
 
+const BatchStopBodySchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+});
+
 /** Native run-control API (QueuePilot's own shape, not the compat surface). */
 export function registerRunRoutes(
   app: FastifyInstance,
@@ -119,6 +123,32 @@ export function registerRunRoutes(
       try {
         const run = await lifecycle.start(id, {});
         results.push({ id, status: "started", run });
+      } catch (err) {
+        results.push({
+          id,
+          status: "failed",
+          error: {
+            code: err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "INTERNAL",
+            message: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    }
+    return { results };
+  });
+
+  /** Batch stop — the mirror of batch-start: stop everything selected. */
+  app.post("/profiles/batch-stop", async (req) => {
+    const body = BatchStopBodySchema.parse(req.body ?? {});
+    const results: {
+      id: string;
+      status: "stopped" | "failed";
+      error?: { code: string; message: string };
+    }[] = [];
+    for (const id of body.ids) {
+      try {
+        await lifecycle.stop(id);
+        results.push({ id, status: "stopped" }); // idempotent: already-stopped still counts
       } catch (err) {
         results.push({
           id,

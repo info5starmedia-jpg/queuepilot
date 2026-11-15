@@ -153,6 +153,8 @@ async function startSelected() {
    is instant; SSE reloads refresh both the tabs and the grid. */
 let allProfiles = [];
 let activeGroup = "all";
+/* v0.14.19 search box — client-side filter over the already-fetched list. */
+let profileQuery = "";
 
 function renderProfileTabs(groups) {
   const bar = $("#profile-tabs");
@@ -207,9 +209,19 @@ function renderProfileTabs(groups) {
 }
 
 function visibleProfiles() {
-  return activeGroup === "all"
+  let list = activeGroup === "all"
     ? allProfiles
     : allProfiles.filter((p) => p.group === activeGroup);
+  if (profileQuery) {
+    const q = profileQuery;
+    list = list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.email ?? "").toLowerCase().includes(q) ||
+        (p.group ?? "").toLowerCase().includes(q),
+    );
+  }
+  return list;
 }
 
 async function loadProfiles() {
@@ -258,6 +270,7 @@ function renderProfileGrid() {
             : `<button data-act="start">Start</button>`
         }
         <button class="secondary" data-act="regen" title="regenerate fingerprint">New fingerprint</button>
+        <button class="secondary" data-act="clone" title="duplicate this profile with a fresh fingerprint">Clone</button>
       </div>`;
     card
       .querySelectorAll("button")
@@ -278,6 +291,11 @@ async function onProfileAction(id, act, profile) {
         method: "POST",
         body: "{}",
       });
+    if (act === "clone") {
+      const name = window.prompt("Name for the copy (blank = auto):", `${profile?.name ?? ""} copy`);
+      const payload = name && name.trim() !== "" ? { name: name.trim() } : {};
+      await api(`/profiles/${id}/clone`, { method: "POST", body: JSON.stringify(payload) });
+    }
     if (act === "favorite") {
       const next = profile?.extra?.favorite === true ? false : true;
       await api(`/profiles/${id}/persona`, {
@@ -326,6 +344,43 @@ $("#profiles").addEventListener("change", (e) => {
 });
 
 $("#batch-start")?.addEventListener("click", startSelected);
+
+/* v0.14.19 search box — re-render only; data is already client-side. */
+$("#profile-search")?.addEventListener("input", (e) => {
+  profileQuery = e.target.value.trim().toLowerCase();
+  renderProfileGrid();
+});
+
+/* v0.14.19 batch stop — mirror of startSelected; stop is idempotent, so
+   already-stopped profiles still count as success. Selection is kept. */
+async function stopSelected() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  const btn = $("#batch-stop");
+  btn.disabled = true;
+  try {
+    const r = await api("/profiles/batch-stop", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    const failed = r.results.filter((x) => x.status === "failed").length;
+    pushEvent({
+      type: "info",
+      detail: `batch-stop: ${r.results.length - failed}/${r.results.length} stopped${failed ? `, ${failed} failed` : ""}`,
+      at: new Date().toISOString(),
+    });
+    for (const x of r.results.filter((x) => x.status === "failed")) {
+      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
+    }
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  } finally {
+    btn.disabled = false;
+  }
+  await loadProfiles();
+}
+
+$("#batch-stop")?.addEventListener("click", stopSelected);
 
 async function tileSelected(preset) {
   const ids = [...batchSelection];

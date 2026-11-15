@@ -708,6 +708,30 @@ its sub-steps and goal in one place.
       lifecycle guard (denied/held-then-released/failed-launch) + 4 sync
       loop (tick+skip, unconfigured no-op, bad-passphrase retry,
       restart-safe watermark).
+23. ✅ **Daily-driver batch** (2026-11-15, v0.14.19) — search box,
+    batch-stop, clone. The three console gaps that made big libraries
+    painful:
+    - **Search box** — client-side filter over the already-fetched list
+      (name / email / group, case-insensitive), so typing re-renders the
+      grid instantly with zero round-trips; the existing
+      `GET /profiles?query=` stays as the API-side equivalent.
+    - **Batch stop** — `POST /profiles/batch-stop {ids}` is the mirror of
+      batch-start: sequential stops, per-profile rows, one failure never
+      aborts the batch. Stop is idempotent, so an already-idle profile
+      still reports `stopped` (unlike batch-start where already-running
+      is a failed row — starting twice is a mistake, stopping twice is
+      not). Console: "Stop selected" on the A2 batch bar; selection is
+      kept after a stop.
+    - **Clone** — `POST /profiles/:id/clone` (Jancy's clone): copies
+      name (+" copy" unless one is given), group, email, notes, tags,
+      proxy link and the persona bag, but generates a FRESH fingerprint
+      identity — two profiles sharing one identityId would be a linkage
+      a detector could follow. Provider linkage does NOT travel (upsert
+      keys must stay 1:1 with the source row). Console: "Clone" button on
+      every card with an optional name prompt.
+    - Tests: 8 (clone persona/fresh-identity/provider-reset, explicit
+      name, 404; batch-stop running/idle-idempotent/ghost-row/400;
+      server-side query filter).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

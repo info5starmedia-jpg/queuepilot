@@ -52,3 +52,6 @@ tabs) and any headless mode are **out of scope** — owner ruled both out on
    per-profile geometry remembered in the persona layer (v0.14.15).
 4. ✅ Folder/group tabs above the profiles grid — "All" + per-group tabs
    with total/running badges, client-side filtering (v0.14.16).
+5. ✅ Daily-driver batch (v0.14.19) — profile search box (client-side
+   name/email/group filter), "Stop selected" on the batch bar, and a
+   "Clone" button per card (fresh fingerprint, persona/proxy copied).

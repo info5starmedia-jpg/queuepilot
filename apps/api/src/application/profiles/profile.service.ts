@@ -118,6 +118,42 @@ export class ProfileService {
     return { moved };
   }
 
+  /**
+   * Clone a profile (v0.14.19, Jancy's clone). Copies name (+" copy" unless
+   * one is given), group, email, notes, tags, proxy link and the persona
+   * bag; generates a FRESH fingerprint identity — two clones sharing one
+   * identity would be a linkage a detector could follow. The provider
+   * linkage does NOT travel: provider upsert keys must stay 1:1 with their
+   * source row.
+   */
+  clone(id: string, name?: string): Profile {
+    const src = this.get(id);
+    const current = src.identityId ? this.identities.get(src.identityId) : null;
+    const identity = generateIdentity(
+      current?.platform ?? "windows",
+      current?.timezone ?? "UTC",
+      current?.locale ?? "en-US",
+      undefined,
+      hostPrimaryDisplay(),
+    );
+    this.identities.create(identity);
+    const now = new Date().toISOString();
+    const profile: Profile = {
+      ...src,
+      id: randomUUID(),
+      name: name?.trim() ? name.trim() : `${src.name} copy`,
+      identityId: identity.id,
+      status: "idle",
+      providerId: null,
+      providerKey: null,
+      extra: { ...src.extra },
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.profiles.create(profile);
+    return profile;
+  }
+
   update(id: string, input: UpdateProfileInput): Profile {
     const p = this.get(id);
     if (input.proxyId && !this.proxies.get(input.proxyId)) {
