@@ -22,7 +22,7 @@ describe("parseRemoteFlags", () => {
 
 describe("remote CLI against a live server", () => {
   async function live() {
-    const { app, profiles } = makeTestContext();
+    const { app, profiles, dataDir } = makeTestContext();
     const address = await app.listen({ port: 0, host: "127.0.0.1" });
     const out: string[] = [];
     const deps = {
@@ -30,7 +30,7 @@ describe("remote CLI against a live server", () => {
       log: (m: string) => out.push(m),
       err: (m: string) => out.push(`ERR ${m}`),
     };
-    return { app, profiles, out, deps };
+    return { app, profiles, out, deps, dataDir };
   }
 
   it("profiles list --json round-trips", async () => {
@@ -71,9 +71,11 @@ describe("remote CLI against a live server", () => {
   });
 
   it("profile start --proxy-provider attaches the provider's next proxy", async () => {
-    const { app, profiles, out, deps } = await live();
+    const { app, profiles, out, deps, dataDir } = await live();
     const p = profiles.create({ name: "cli-pp", generateFingerprint: true });
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-cli-pp-"));
+    // Provider sources are contained under <dataDir>/imports (audit A-rec #2).
+    const dir = path.join(dataDir, "imports");
+    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "pp.txt"),
       "rot-1,9.9.9.9,8080,u,p,America/Toronto\n",

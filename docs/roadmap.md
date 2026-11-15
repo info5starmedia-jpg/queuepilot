@@ -787,8 +787,30 @@ for this build (deferred, revisit with real usage): RBAC/multi-user, recorder
     - Tests: 4 updated (new honest sync semantics, incl. restart-safe) + 1
       new lease-heartbeat + 1 new SSE header pin.
 
-Remaining v0.15.0 items: cookie-route gating + raw-value opt-in, `sourcePath`
-containment, plugin/JYL endpoint gating, zip-bomb limits, PAN/CVV →
+26. ✅ **Audit P0 batch 2** (2026-11-15, v0.15.0) — treat loopback as hostile:
+    - **A5 Cookie redaction + opt-in raw export** — `GET /profiles/:id/cookies`
+      returned raw session values to anything that could reach the port.
+      Values are now `***` by default (metadata intact); `?reveal=raw` works
+      only when the install runs with `SPECTRA_API_TOKEN` set — configuring a
+      token IS the explicit operator opt-in. New `FORBIDDEN` error code → 403.
+    - **A-rec #2 sourcePath containment** — provider refreshes and extension
+      installs took caller-supplied paths, so any visited web page could have
+      the API read/copy arbitrary local files. New
+      `resolveContainedPath()` (resolve → per-component symlink rejection →
+      containment against realpath'd roots). Production roots:
+      `<dataDir>/imports` (provider CSVs) and `<dataDir>/extension-sources`
+      (extension packages), both created at boot. Both provider services take
+      `sourceRoots`; `ExtensionRegistry.install` enforces the same way.
+    - **A-rec #1 constant-time token compare** — the bearer-token hook used
+      string `!==`, leaking the token via response timing. Now
+      `timingSafeEqual` over equal-length buffers.
+    - Tests: new `contained-path` unit suite (10 cases: containment,
+      traversal, symlink file/dir, missing tail) + cookie redaction suite
+      (default mask, 403 without token, raw WITH token incl. bearer check) +
+      provider/extension containment rejections; 6 existing test files
+      updated to the new honest path rules.
+
+Remaining v0.15.0 items: plugin/JYL endpoint gating, zip-bomb limits, PAN/CVV →
 SecretStore + `extra` redaction on profile reads. v0.15.1 daily-driver:
 cookie import/export formats, trash/restore, proxy validation, fingerprint
 editing, dashboard batch endpoints.

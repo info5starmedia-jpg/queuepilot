@@ -52,6 +52,13 @@ export class FakeSheets implements SheetReader {
   }
 }
 
+/**
+ * Shared fixture drop for provider CSVs in tests — mirrors production's
+ * `<dataDir>/imports` containment (audit A-rec #2). Tests wire this as an
+ * allowed source root alongside the per-context dataDir.
+ */
+export const TEST_IMPORTS_DIR = path.join(os.tmpdir(), "queuepilot-test-imports");
+
 export interface TestContext {
   app: FastifyInstance;
   lifecycle: BrowserLifecycleService;
@@ -74,6 +81,7 @@ export interface TestContext {
 
 export function makeTestContext(
   runtime: FakeBrowserRuntime = new FakeBrowserRuntime(),
+  configPatch: Partial<AppConfig> = {},
 ): TestContext {
   const db = openTestDatabase();
   const profileRepo = new ProfileRepository(db);
@@ -109,11 +117,14 @@ export function makeTestContext(
     identityRepo,
     sheets,
     secrets,
+    [dataDir, TEST_IMPORTS_DIR],
   );
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
     proxyRepo,
     sheets,
+    undefined,
+    [dataDir, TEST_IMPORTS_DIR],
   );
   const aliases = secretAliasStore(secrets);
   const resolvers = new ResolverRegistry();
@@ -128,6 +139,7 @@ export function makeTestContext(
     dataDir,
     runtime: "fake",
     dbPath: ":memory:",
+    ...configPatch,
   };
   const app = buildApp({
     config,

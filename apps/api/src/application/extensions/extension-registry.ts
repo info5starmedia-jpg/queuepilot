@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { SecretStore } from "../secrets/secret-store.js";
 import { pinnedExtensionKey } from "./extension-id.js";
 import { crxToZip, unzipTo } from "./zip.js";
+import { resolveContainedPath } from "../paths/contained-path.js";
 
 /**
  * Per-profile extension registry (P7, Fury 0.5.4 v2 semantics).
@@ -82,7 +83,13 @@ export class ExtensionRegistry {
    * Atomic-ish: extract into a temp dir, then rename into place.
    */
   install(profileId: string, sourcePath: string): InstalledExtension {
-    if (!fs.existsSync(sourcePath)) {
+    // v0.15.0 (audit A-rec #2): the install source is an HTTP-supplied path —
+    // confine it to `<dataDir>/extension-sources` and refuse symlinks, so a
+    // loopback web page cannot hand us an arbitrary local file to copy.
+    const safe = resolveContainedPath(sourcePath, [
+      path.join(this.dataDir, "extension-sources"),
+    ]);
+    if (!fs.existsSync(safe)) {
       throw new Error(`extension source not found: ${sourcePath}`);
     }
     const staging = path.join(
@@ -93,13 +100,13 @@ export class ExtensionRegistry {
     fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true });
     try {
-      const stat = fs.statSync(sourcePath);
+      const stat = fs.statSync(safe);
       if (stat.isDirectory()) {
-        copyTree(sourcePath, staging);
+        copyTree(safe, staging);
       } else {
-        const buf = fs.readFileSync(sourcePath);
+        const buf = fs.readFileSync(safe);
         const zip =
-          sourcePath.toLowerCase().endsWith(".crx") ? crxToZip(buf) : buf;
+          safe.toLowerCase().endsWith(".crx") ? crxToZip(buf) : buf;
         unzipTo(zip, staging);
       }
       // Packages frequently nest everything one folder deep ("ext-1.2.3/

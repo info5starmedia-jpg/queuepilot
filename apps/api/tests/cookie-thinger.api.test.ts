@@ -89,6 +89,66 @@ describe("GET /profiles/:id/cookies", () => {
   });
 });
 
+describe("GET /profiles/:id/cookies redaction (audit A5, v0.15.0)", () => {
+  it("redacts every cookie value by default", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}/cookies` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().revealed).toBe(false);
+    expect(res.json().cookies).toHaveLength(2);
+    for (const c of res.json().cookies) expect(c.value).toBe("***");
+    // metadata survives redaction
+    expect(res.json().cookies.find((c: { name: string }) => c.name === "session")).toMatchObject({
+      domain: ".shop.example",
+      httpOnly: true,
+    });
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("refuses reveal=raw with 403 when no API token is configured", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies?reveal=raw`,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("FORBIDDEN");
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("serves reveal=raw when the install runs with SPECTRA_API_TOKEN", async () => {
+    runtime = new FakeBrowserRuntime();
+    mock = new MockCdpServer();
+    mock.allCookies = COOKIES.map((c) => ({ ...c }));
+    const { wsUrl } = await mock.start();
+    runtime.nextWsEndpoint = wsUrl;
+    // Token-configured install: the bearer hook applies to every request,
+    // and raw export is the operator's explicit opt-in.
+    ctx = makeTestContext(runtime, { apiToken: "test-token-16" });
+    const p = ctx.profiles.create({ name: "ck-raw", generateFingerprint: true });
+    await ctx.lifecycle.start(p.id);
+
+    const denied = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies?reveal=raw`,
+    });
+    expect(denied.statusCode).toBe(401);
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies?reveal=raw`,
+      headers: { authorization: "Bearer test-token-16" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().revealed).toBe(true);
+    expect(res.json().cookies.find((c: { name: string }) => c.name === "session").value).toBe("abc");
+
+    await ctx.lifecycle.stop(p.id);
+  });
+});
+
 describe("POST /profiles/:id/cookies", () => {
   it("sets a cookie browser-level by default", async () => {
     const p = await boot();

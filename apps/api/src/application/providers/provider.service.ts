@@ -32,6 +32,7 @@ import type {
 import type { Proxy } from "@queuepilot/contracts";
 import { publicProxy } from "../proxies/proxy.repository.js";
 import type { SheetReader } from "../google/sheets-client.js";
+import { resolveContainedPath } from "../paths/contained-path.js";
 
 export interface RefreshResult {
   imported: number;
@@ -39,13 +40,21 @@ export interface RefreshResult {
   issues: CsvImportIssue[];
 }
 
+/**
+ * Audit A-rec #2 (v0.15.0): sourcePath arrives over HTTP, so on loopback any
+ * web page could point a provider at an arbitrary local file. Reads are
+ * confined to `sourceRoots` (production: `<dataDir>/imports`), and symlinks
+ * are refused outright.
+ */
 function readSource(provider: {
   sourcePath: string | null;
   name: string;
-}): string {
+}, sourceRoots: string[]): string {
   try {
-    return fs.readFileSync(provider.sourcePath!, "utf8");
+    const safe = resolveContainedPath(provider.sourcePath!, sourceRoots);
+    return fs.readFileSync(safe, "utf8");
   } catch (err) {
+    if (err instanceof DomainError) throw err;
     throw new DomainError(
       ErrorCodes.PROVIDER_SOURCE_UNREADABLE,
       `cannot read ${provider.sourcePath}: ${err instanceof Error ? err.message : String(err)}`,
@@ -77,6 +86,11 @@ export class ProfileProviderService {
      * secrets simply skip seeding (the column is dropped loudly in issues).
      */
     private readonly secrets?: SecretStore | undefined,
+    /**
+     * v0.15.0 (audit A-rec #2): directories a CSV sourcePath is allowed to
+     * live in. Production wires `<dataDir>/imports`; tests wire the dataDir.
+     */
+    private readonly sourceRoots: string[] = [],
   ) {}
 
   async create(
@@ -207,7 +221,7 @@ export class ProfileProviderService {
         provider.sheetRange ?? DEFAULT_SHEET_RANGE,
       );
     }
-    return parseCsv(readSource(provider));
+    return parseCsv(readSource(provider, this.sourceRoots));
   }
 }
 
@@ -245,6 +259,11 @@ export class ProxyProviderService {
     private readonly sheets?: SheetReader,
     /** P6: when present, imported passwords go to the SecretStore, never the row. */
     private readonly secrets?: import("../secrets/secret-store.js").SecretStore,
+    /**
+     * v0.15.0 (audit A-rec #2): directories a sourcePath is allowed to live
+     * in. Production wires `<dataDir>/imports`; tests wire the dataDir.
+     */
+    private readonly sourceRoots: string[] = [],
   ) {}
 
   async create(
@@ -422,7 +441,7 @@ export class ProxyProviderService {
         provider.sheetRange ?? DEFAULT_SHEET_RANGE,
       );
     }
-    return readSource(provider)
+    return readSource(provider, this.sourceRoots)
       .split(/\r?\n/)
       .filter((l) => l.trim() !== "")
       .map((l) => l.split(provider.delimiter).map((c) => c.trim()));

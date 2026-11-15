@@ -44,6 +44,8 @@ export const ErrorCodes = {
   TEAM_REVISION_CONFLICT: "TEAM_REVISION_CONFLICT",
   /** P7.7b — another machine holds the launch lease for this profile. */
   TEAM_LEASE_HELD: "TEAM_LEASE_HELD",
+  /** v0.15.0 — authenticated but the operation is not permitted (e.g. raw cookie export without a token-configured install). */
+  FORBIDDEN: "FORBIDDEN",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 

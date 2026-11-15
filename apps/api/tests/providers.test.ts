@@ -7,11 +7,14 @@ import {
   parseProfileCsv,
   parseProxyFile,
 } from "@queuepilot/contracts";
-import { makeTestContext } from "./helpers.js";
+import { makeTestContext, TEST_IMPORTS_DIR } from "./helpers.js";
 
 function writeTmp(name: string, content: string): string {
+  // Provider sources must sit in an allowed root (audit A-rec #2) — the
+  // shared test imports dir is wired as one in makeTestContext.
+  fs.mkdirSync(TEST_IMPORTS_DIR, { recursive: true });
   const file = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-csv-")),
+    fs.mkdtempSync(path.join(TEST_IMPORTS_DIR, "csv-")),
     name,
   );
   fs.writeFileSync(file, content);
@@ -157,12 +160,43 @@ describe("ProfileProviderService", () => {
 
   it("refuses an unreadable source with PROVIDER_SOURCE_UNREADABLE", async () => {
     const { profileProviders } = makeTestContext();
+    // Under the allowed root, so containment passes and the read itself fails.
+    const ghost = writeTmp("ghost.csv", "");
+    fs.rmSync(ghost);
     await expect(
       profileProviders.create({
         name: "ghost",
-        sourcePath: "/nonexistent/nope.csv",
+        sourcePath: ghost,
       }),
     ).rejects.toMatchObject({ code: ErrorCodes.PROVIDER_SOURCE_UNREADABLE });
+  });
+
+  it("refuses a source outside the allowed roots (audit A-rec #2)", async () => {
+    const { profileProviders } = makeTestContext();
+    // Outside every allowed root: rejected before any read happens. The
+    // tmpdir itself is not an allowed root — only dataDir + test imports.
+    const outside = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-out-")),
+      "evil.csv",
+    );
+    fs.writeFileSync(outside, "Profile,Name,Email\nx,y,z@example.com");
+    await expect(
+      profileProviders.create({ name: "escape", sourcePath: outside }),
+    ).rejects.toMatchObject({ code: ErrorCodes.VALIDATION_FAILED });
+    await expect(
+      profileProviders.create({ name: "escape", sourcePath: outside }),
+    ).rejects.toThrow(/outside the allowed directories/);
+  });
+
+  it("refuses a symlinked source even when it points inside the root", async () => {
+    const { profileProviders } = makeTestContext();
+    if (process.platform === "win32") return; // symlink privilege varies on Windows
+    const real = writeTmp("real.csv", "Profile,Name,Email\na,B,b@example.com");
+    const link = path.join(TEST_IMPORTS_DIR, `link-${Date.now()}.csv`);
+    fs.symlinkSync(real, link);
+    await expect(
+      profileProviders.create({ name: "symlink", sourcePath: link }),
+    ).rejects.toMatchObject({ code: ErrorCodes.VALIDATION_FAILED });
   });
 });
 

@@ -142,33 +142,39 @@ describe("ExtensionRegistry", () => {
   function profileDir(id: string): string {
     return path.join(dir, "profiles", id);
   }
+  /** Install sources must live under <dataDir>/extension-sources (audit A-rec #2). */
+  function src(...names: string[]): string {
+    const p = path.join(dir, "extension-sources", ...names);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    return p;
+  }
 
   it("installs from an unpacked folder, lists, and re-installs idempotently by name", () => {
-    const src = path.join(dir, "src-ext");
-    fs.mkdirSync(src, { recursive: true });
-    fs.writeFileSync(path.join(src, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "FolderExt", version: "2.1.0" }));
+    const srcDir = src("src-ext");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "FolderExt", version: "2.1.0" }));
     const reg = make();
-    const e1 = reg.install("p1", src);
+    const e1 = reg.install("p1", srcDir);
     expect(e1).toMatchObject({ name: "FolderExt", version: "2.1.0" });
     expect(e1.id).toMatch(/^[a-p]{32}$/);
     expect(fs.existsSync(path.join(profileDir("p1"), "Default", "Extensions", e1.id, "2.1.0", "manifest.json"))).toBe(true);
 
-    const e2 = reg.install("p2", src);
+    const e2 = reg.install("p2", srcDir);
     expect(e2.id).toBe(e1.id); // pinned across profiles
     expect(reg.list("p1")).toHaveLength(1);
 
     // upgraded version replaces, id survives
-    fs.writeFileSync(path.join(src, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "FolderExt", version: "2.2.0" }));
-    const e3 = reg.install("p1", src);
+    fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "FolderExt", version: "2.2.0" }));
+    const e3 = reg.install("p1", srcDir);
     expect(e3.id).toBe(e1.id);
     expect(e3.version).toBe("2.2.0");
     expect(reg.list("p1")).toHaveLength(1);
   });
 
   it("installs from .zip and .crx", () => {
-    const zipPath = path.join(dir, "z.zip");
+    const zipPath = src("z.zip");
     fs.writeFileSync(zipPath, manifestZip("ZipExt", "1.2.3"));
-    const crxPath = path.join(dir, "c.crx");
+    const crxPath = src("c.crx");
     fs.writeFileSync(crxPath, crx3(manifestZip("CrxExt", "3.2.1")));
     const reg = make();
     expect(reg.install("p1", zipPath).name).toBe("ZipExt");
@@ -177,14 +183,22 @@ describe("ExtensionRegistry", () => {
   });
 
   it("rejects packages without a manifest", () => {
-    const bad = path.join(dir, "bad.zip");
+    const bad = src("bad.zip");
     fs.writeFileSync(bad, buildZip({ "readme.txt": "hi" }));
     const reg = make();
     expect(() => reg.install("p1", bad)).toThrow(/manifest/);
   });
 
+  it("rejects install sources outside <dataDir>/extension-sources (audit A-rec #2)", () => {
+    const outside = path.join(dir, "outside.zip");
+    fs.writeFileSync(outside, manifestZip("Outside", "1.0.0"));
+    const reg = make();
+    expect(() => reg.install("p1", outside)).toThrow(/outside the allowed directories/);
+    expect(reg.list("p1")).toHaveLength(0);
+  });
+
   it("lifts a single nested root folder so a nested manifest installs (Fury issue-28)", () => {
-    const zipPath = path.join(dir, "nested.zip");
+    const zipPath = src("nested.zip");
     fs.writeFileSync(
       zipPath,
       buildZip({
@@ -201,7 +215,7 @@ describe("ExtensionRegistry", () => {
   });
 
   it("drops __MACOSX junk from zips and folder copies", () => {
-    const zipPath = path.join(dir, "mac.zip");
+    const zipPath = src("mac.zip");
     fs.writeFileSync(
       zipPath,
       buildZip({
@@ -217,7 +231,7 @@ describe("ExtensionRegistry", () => {
     expect(JSON.stringify(fs.readdirSync(installDir, { recursive: true }))).not.toContain("__MACOSX");
 
     // folder sources with __MACOSX are filtered the same way
-    const srcDir = path.join(dir, "src-mac");
+    const srcDir = src("src-mac");
     fs.mkdirSync(path.join(srcDir, "__MACOSX"), { recursive: true });
     fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "MacFolder", version: "1.0.0" }));
     fs.writeFileSync(path.join(srcDir, "__MACOSX", "._manifest.json"), "junk");
@@ -228,11 +242,11 @@ describe("ExtensionRegistry", () => {
   });
 
   it("copyFrom copies the install dir WITHOUT the source profile's storage", () => {
-    const src = path.join(dir, "src-ext");
-    fs.mkdirSync(src, { recursive: true });
-    fs.writeFileSync(path.join(src, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "CopyExt", version: "1.0.0" }));
+    const srcDir = src("src-ext");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "CopyExt", version: "1.0.0" }));
     const reg = make();
-    const installed = reg.install("p1", src);
+    const installed = reg.install("p1", srcDir);
     // simulate browser-made storage for the extension on the source profile
     const storageDir = path.join(profileDir("p1"), "Default", "Local Extension Settings", installed.id);
     fs.mkdirSync(path.join(storageDir, "leveldb"), { recursive: true });
@@ -248,11 +262,11 @@ describe("ExtensionRegistry", () => {
   });
 
   it("remove deletes code AND the profile's storage for it", () => {
-    const src = path.join(dir, "src-ext");
-    fs.mkdirSync(src, { recursive: true });
-    fs.writeFileSync(path.join(src, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "RmvExt", version: "1.0.0" }));
+    const srcDir = src("src-ext");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "RmvExt", version: "1.0.0" }));
     const reg = make();
-    const installed = reg.install("p1", src);
+    const installed = reg.install("p1", srcDir);
     const storageDir = path.join(profileDir("p1"), "Default", "Local Extension Settings", installed.id);
     fs.mkdirSync(storageDir, { recursive: true });
 

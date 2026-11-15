@@ -54,6 +54,7 @@ import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
+import fs from "node:fs";
 import path from "node:path";
 
 /**
@@ -124,12 +125,20 @@ export async function main(): Promise<void> {
   registerGmailResolver(resolvers, google);
   const sheets = new SheetsClient(google);
 
+  // v0.15.0 (audit A-rec #2): provider CSVs and extension packages must live
+  // under these drops — the HTTP-supplied sourcePath is contained to them.
+  const importsDir = path.join(config.dataDir, "imports");
+  const extensionSourcesDir = path.join(config.dataDir, "extension-sources");
+  fs.mkdirSync(importsDir, { recursive: true });
+  fs.mkdirSync(extensionSourcesDir, { recursive: true });
+
   const profileProviders = new ProfileProviderService(
     new ProfileProviderRepository(db),
     profileRepo,
     identityRepo,
     sheets,
     secretStore,
+    [importsDir],
   );
   const totp = new TotpService(profiles, secretStore);
   const proxyProviders = new ProxyProviderService(
@@ -137,6 +146,7 @@ export async function main(): Promise<void> {
     proxyRepo,
     sheets,
     secretStore,
+    [importsDir],
   );
 
   const runtime: BrowserRuntime =

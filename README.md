@@ -299,13 +299,22 @@ cannot manage tabs answers `501 TABS_UNSUPPORTED` rather than pretending.
 
 ### Import a profile CSV
 
+Since v0.15.0 the CSV must live inside the imports drop (audit-hardened
+containment — an HTTP-supplied path may not point anywhere on disk):
+
 ```bash
+# drop the file into <dataDir>/imports first (created at boot), then:
 curl -X POST http://127.0.0.1:50325/profile-providers \
   -H 'content-type: application/json' \
-  -d '{"name":"my-sheet","sourcePath":"/path/to/profiles.csv"}'
+  -d '{"name":"my-sheet","sourcePath":"<dataDir>/imports/profiles.csv"}'
 # -> {"provider":{...},"refresh":{"imported":N,"updated":M,"issues":[]}}
 # re-read the file later: POST /profile-providers/<id>/refresh
 ```
+
+Symlinks are refused, and extension installs follow the same rule with
+`<dataDir>/extension-sources`. `GET /profiles/<id>/cookies` returns redacted
+values unless the install runs with `SPECTRA_API_TOKEN` (then pass
+`?reveal=raw` with the bearer token).
 
 ### Import from Google Sheets
 

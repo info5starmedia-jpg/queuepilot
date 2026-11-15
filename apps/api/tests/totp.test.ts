@@ -8,7 +8,7 @@ import {
   totpSecretKey,
   TotpService,
 } from "../src/application/profiles/totp.service.js";
-import { makeTestContext, MapSecretStore } from "./helpers.js";
+import { makeTestContext, MapSecretStore, TEST_IMPORTS_DIR } from "./helpers.js";
 
 /** RFC 6238 Appendix B test key: ASCII "12345678901234567890", SHA-1. */
 const RFC_SEED_B32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -69,8 +69,11 @@ describe("TotpService", () => {
 describe("TOTP import column", () => {
   it("CSV/Sheets 'TOTP' column lands in the SecretStore keyed by identity, never in extra", async () => {
     const { profileProviders, profiles, secrets } = makeTestContext();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-totp-import-"));
-    const csv = path.join(dir, "in.csv");
+    fs.mkdirSync(TEST_IMPORTS_DIR, { recursive: true });
+    const csv = path.join(
+      fs.mkdtempSync(path.join(TEST_IMPORTS_DIR, "totp-")),
+      "in.csv",
+    );
     fs.writeFileSync(
       csv,
       [

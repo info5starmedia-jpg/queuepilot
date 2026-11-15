@@ -134,6 +134,12 @@ describe("settings bundles (HTTP)", () => {
     // values are reported as not-imported (they're secrets).
     const ctx2 = makeTestContext();
     ctx2.sheets.sheets.set("sheet-1", [["host:port:user:pass"], ["10.0.0.1:8000:u:p"]]);
+    // The exported sourcePath is machine-local and points at ctx's dataDir;
+    // for the import to succeed the CSV must exist inside ctx2's allowed
+    // roots (audit A-rec #2 containment).
+    const csv2 = path.join(ctx2.dataDir, "people.csv");
+    fs.writeFileSync(csv2, "key,name\nk1,Alice\n");
+    bundle.profileProviders[0].sourcePath = csv2;
     const importRes = await ctx2.app.inject({
       method: "POST",
       url: "/settings/import",

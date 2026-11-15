@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import type { AppConfig } from "./config/config.js";
 import type { ProfileService } from "./application/profiles/profile.service.js";
 import type { ProxyService } from "./application/proxies/proxy.service.js";
@@ -64,9 +65,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   if (deps.config.apiToken) {
     const token = deps.config.apiToken;
+    const expected = Buffer.from(`Bearer ${token}`, "utf8");
     app.addHook("onRequest", async (req, reply) => {
       if (req.url === "/health") return;
-      if (req.headers.authorization !== `Bearer ${token}`) {
+      // Constant-time compare (audit A-rec #1): a plain string !== leaks
+      // the token byte-by-byte through response timing.
+      const given = Buffer.from(req.headers.authorization ?? "", "utf8");
+      if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
         return reply
           .code(401)
           .send({ error: { code: "UNAUTHORIZED", message: "invalid token" } });
@@ -90,7 +95,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
-  registerCookieRoutes(app, deps.lifecycle);
+  registerCookieRoutes(app, deps.lifecycle, {
+    // Audit A5: raw cookie values only on installs that explicitly set a
+    // token — that choice is the operator's opt-in to raw export.
+    rawCookieExportAllowed: Boolean(deps.config.apiToken),
+  });
   registerGoogleRoutes(app, deps.google);
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);

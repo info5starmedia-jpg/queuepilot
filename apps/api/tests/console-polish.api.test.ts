@@ -24,6 +24,9 @@ describe("proxy provider star", () => {
     svc = new ProxyProviderService(
       new ProxyProviderRepository(db),
       new ProxyRepository(db),
+      undefined,
+      undefined,
+      [dir], // the fixture dir is this test's allowed source root
     );
   });
 

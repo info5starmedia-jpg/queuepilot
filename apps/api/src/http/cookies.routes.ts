@@ -18,6 +18,12 @@ const FilterSchema = z.object({
   domain: z.string().max(300).optional(),
   name: z.string().max(300).optional(),
   partitionId: z.string().uuid().optional(),
+  /**
+   * v0.15.0 (audit A5): values are REDACTED by default. `reveal=raw` returns
+   * full values but only works when the install runs with SPECTRA_API_TOKEN
+   * set — the explicit opt-in that says "this operator accepts the risk".
+   */
+  reveal: z.enum(["raw"]).optional(),
 });
 
 const SetCookieBodySchema = z
@@ -36,6 +42,7 @@ const SetCookieBodySchema = z
 export function registerCookieRoutes(
   app: FastifyInstance,
   lifecycle: BrowserLifecycleService,
+  opts: { rawCookieExportAllowed: boolean } = { rawCookieExportAllowed: false },
 ): void {
   function requireRunning(profileId: string) {
     const run = lifecycle.activeRun(profileId);
@@ -70,7 +77,22 @@ export function registerCookieRoutes(
     const q = FilterSchema.parse(req.query ?? {});
     const engineTabIds = partitionTabIds(id, q.partitionId);
     const cookies = await listCookies(wsEndpoint, q, { engineTabIds });
-    return { cookies, total: cookies.length };
+    // Audit A5 (v0.15.0): full values are session-theft material — the
+    // default list is redacted; raw values need the explicit opt-in.
+    if (q.reveal === "raw") {
+      if (!opts.rawCookieExportAllowed) {
+        throw new DomainError(
+          ErrorCodes.FORBIDDEN,
+          "raw cookie export requires SPECTRA_API_TOKEN to be configured on this install",
+        );
+      }
+      return { cookies, total: cookies.length, revealed: true };
+    }
+    return {
+      cookies: cookies.map((c) => ({ ...c, value: "***" })),
+      total: cookies.length,
+      revealed: false,
+    };
   });
 
   app.post("/profiles/:id/cookies", async (req, reply) => {
