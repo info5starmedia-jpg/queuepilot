@@ -621,6 +621,19 @@ its sub-steps and goal in one place.
       jancy dark theme IS the shipped look), startOnBoot wiring (schema only).
     - Tests: 10 (service defaults/merge/persistence-across-restart/rejections
       + HTTP incl. bundle-route coexistence); 456/456 green.
+18. ✅ **Batch-start controller** (2026-11-15, v0.14.14) — A2 from the
+    workspace brainstorm; select many profiles, start them in one action:
+    - **API** — `POST /profiles/batch-start {ids, staggerMs}`: sequential
+      starts honoring the per-profile launch mutex and the host capacity
+      cap; one profile failing never aborts the batch (its result row
+      carries the error, CSV-importer philosophy); `staggerMs` 0–60 000.
+    - **Console** — checkbox on every profile card; selection lives in a
+      module-level Set so SSE-driven grid reloads don't wipe it; sticky
+      action bar (start selected / clear) appears at the bottom edge when
+      ≥1 selected; the start delay is read from Settings → Launch
+      (`batchStaggerMs`), so A1 and A2 compose without extra UI.
+    - Tests: 5 (all-start, failure isolation, already-running row, stagger
+      timing, input validation).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

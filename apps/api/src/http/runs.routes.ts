@@ -16,6 +16,12 @@ const StartRunBodySchema = z
   })
   .strict();
 
+const BatchStartBodySchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  /** Delay between starts (ms). A copy of the launch setting, passed per call. */
+  staggerMs: z.number().int().min(0).max(60_000).default(0),
+});
+
 /** Native run-control API (QueuePilot's own shape, not the compat surface). */
 export function registerRunRoutes(
   app: FastifyInstance,
@@ -88,6 +94,43 @@ export function registerRunRoutes(
     const { id } = req.params as { id: string };
     const run = await lifecycle.stop(id);
     return { stopped: run !== null, run };
+  });
+
+  /**
+   * Batch start (A2): sequential starts honoring the per-profile launch
+   * mutex and the host capacity cap. One profile failing never aborts the
+   * batch — its result row carries the error, same philosophy as the CSV
+   * importer.
+   */
+  app.post("/profiles/batch-start", async (req) => {
+    const body = BatchStartBodySchema.parse(req.body ?? {});
+    const results: {
+      id: string;
+      status: "started" | "failed";
+      run?: unknown;
+      error?: { code: string; message: string };
+    }[] = [];
+    for (let i = 0; i < body.ids.length; i++) {
+      if (i > 0 && body.staggerMs > 0) {
+        await new Promise((r) => setTimeout(r, body.staggerMs));
+      }
+      const id = body.ids[i];
+      if (id === undefined) continue; // unreachable: zod guarantees min(1) strings
+      try {
+        const run = await lifecycle.start(id, {});
+        results.push({ id, status: "started", run });
+      } catch (err) {
+        results.push({
+          id,
+          status: "failed",
+          error: {
+            code: err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "INTERNAL",
+            message: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    }
+    return { results };
   });
 
   app.get("/profiles/:id/run", async (req) => {

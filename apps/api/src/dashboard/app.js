@@ -106,6 +106,48 @@ async function loadChecklist() {
 
 /* ---------------- profiles ---------------- */
 
+/* A2 batch selection — survives card re-renders (SSE run.* events reload
+   the grid constantly, so selection lives here, not in the DOM). */
+const batchSelection = new Set();
+
+function updateBatchBar() {
+  const bar = $("#batch-bar");
+  if (!bar) return;
+  const n = batchSelection.size;
+  bar.hidden = n === 0;
+  $("#batch-count").textContent = `${n} selected`;
+}
+
+async function startSelected() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  const staggerMs = settingsData?.launch?.batchStaggerMs ?? 0;
+  const btn = $("#batch-start");
+  btn.disabled = true;
+  try {
+    const r = await api("/profiles/batch-start", {
+      method: "POST",
+      body: JSON.stringify({ ids, staggerMs }),
+    });
+    const failed = r.results.filter((x) => x.status === "failed").length;
+    pushEvent({
+      type: "info",
+      detail: `batch-start: ${r.results.length - failed}/${r.results.length} started${failed ? `, ${failed} failed` : ""}`,
+      at: new Date().toISOString(),
+    });
+    for (const x of r.results.filter((x) => x.status === "failed")) {
+      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
+    }
+    batchSelection.clear();
+    updateBatchBar();
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  } finally {
+    btn.disabled = false;
+  }
+  await loadProfiles();
+}
+
 async function loadProfiles() {
   const { profiles } = await api("/profiles");
   const grid = $("#profiles");
@@ -133,7 +175,7 @@ async function loadProfiles() {
     const tabColor = typeof p.extra?.tabColor === "string" ? p.extra.tabColor : null;
 
     card.innerHTML = `
-      <div><span class="name">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
+      <div><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select for batch" ${batchSelection.has(p.id) ? "checked" : ""} /> <span class="name">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
       <div class="meta">${esc(p.group)}${p.email ? " · " + esc(p.email) : ""}${tabsInfo ? " · " + tabsInfo : ""}</div>
       <div class="actions">
         <button class="secondary" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</button>
@@ -180,8 +222,7 @@ async function onProfileAction(id, act, profile) {
   await loadProfiles();
 }
 
-$("#create-profile").addEventListener("submit", async (e) => {
-  e.preventDefault();
+$("#create-profile").addEventListener("submit", async (e) => {  e.preventDefault();
   const name = $("#new-name").value.trim();
   const group = $("#new-group").value.trim();
   if (!name) return;
@@ -200,6 +241,22 @@ $("#create-profile").addEventListener("submit", async (e) => {
     });
   }
   await loadProfiles();
+});
+
+// A2 batch selection: delegated so it survives grid re-renders.
+$("#profiles").addEventListener("change", (e) => {
+  const cb = e.target.closest?.(".batch-check");
+  if (!cb) return;
+  if (cb.checked) batchSelection.add(cb.dataset.batch);
+  else batchSelection.delete(cb.dataset.batch);
+  updateBatchBar();
+});
+
+$("#batch-start")?.addEventListener("click", startSelected);
+$("#batch-clear")?.addEventListener("click", () => {
+  batchSelection.clear();
+  updateBatchBar();
+  loadProfiles();
 });
 
 /* ---------------- proxies ---------------- */

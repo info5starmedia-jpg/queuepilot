@@ -282,3 +282,18 @@ td.mono {
   box-sizing: border-box;
 }
 .settings-field input[type="checkbox"] { width: auto; align-self: flex-start; }
+
+/* v0.14.14: batch-start sticky bar */
+.batch-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.batch-check { margin-right: 2px; }
