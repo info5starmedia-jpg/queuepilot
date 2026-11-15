@@ -57,6 +57,10 @@ export class TeamSyncService {
     profileId: string;
     created: boolean;
     cookiesImported: number;
+    /** Bundle still holds cookies/tabs that never reached an engine. */
+    cookiesPending: boolean;
+    /** The sealed bundle (base64) — pass to finishPull to complete the import. */
+    rawBundle: string;
   }> {
     let pulled;
     try {
@@ -68,9 +72,10 @@ export class TeamSyncService {
     // manifest's name (a bundle IS the whole profile), starts it when asked
     // (cookies only travel INTO a live engine), and never invents proxy
     // credentials that are machine-bound on the source.
+    const rawBundle = pulled.payload.toString("base64");
     const out = await this.bundles.restoreBundle(
       passphrase,
-      pulled.payload.toString("base64"),
+      rawBundle,
       { startNow: opts.startNow ?? true },
     );
     return {
@@ -78,7 +83,28 @@ export class TeamSyncService {
       profileId: out.profileId,
       created: out.created,
       cookiesImported: out.cookiesImported,
+      // v0.15.0 (audit B2): true when the bundle still holds cookies/tabs
+      // that never reached an engine (startNow:false and the profile wasn't
+      // started). The sync loop uses this to hold the watermark back instead
+      // of marking a half-imported profile as synced.
+      cookiesPending:
+        (opts.startNow ?? true) === false &&
+        out.warnings.some((w) => w.includes("startNow was false")),
+      rawBundle,
     };
+  }
+
+  /**
+   * Finish a pull whose cookies were left inside the bundle: import them into
+   * the LIVE engine of an already-running profile. Throws when the profile is
+   * not running — callers check isRunning first.
+   */
+  async finishPull(
+    passphrase: string,
+    rawBundle: string,
+    localProfileId: string,
+  ): Promise<{ imported: number }> {
+    return this.bundles.importBundle(localProfileId, passphrase, rawBundle);
   }
 
   async listRemote(): Promise<

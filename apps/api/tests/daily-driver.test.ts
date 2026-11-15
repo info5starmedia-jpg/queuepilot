@@ -198,3 +198,21 @@ describe("profile panel contract (v0.14.20)", () => {
     expect(ctx.profiles.get(p.id).proxyId).toBeNull();
   });
 });
+
+describe("SSE hardening (audit A1, v0.15.0)", () => {
+  it("/events sends no access-control-allow-origin header", async () => {
+    const ctx = makeTestContext();
+    await ctx.app.listen({ host: "127.0.0.1", port: 0 });
+    const address = ctx.app.server.address() as import("node:net").AddressInfo;
+    const ac = new AbortController();
+    try {
+      const res = await fetch(`http://127.0.0.1:${address.port}/events`, { signal: ac.signal });
+      // A wildcard here is how any website the operator visits could read
+      // lifecycle events off loopback — it must never come back.
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
+      ac.abort();
+    } finally {
+      await ctx.app.close();
+    }
+  });
+});

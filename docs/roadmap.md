@@ -754,6 +754,45 @@ its sub-steps and goal in one place.
       exposes every edited persona field, PATCH null-clears email+proxy
       in one call).
 
+## v0.15 — Security hardening + daily-driver gaps (external-audit driven)
+
+Direction approved 2026-11-15 after the dual external audit
+(`docs/audits/side-by-side-2026-11-15.md`, GPT-5.2 + Claude Sonnet 5.5, all
+findings grep-verified before acceptance). Sequencing: harden first, then
+daily-driver Jancy gaps, then feature work. macOS/Linux port is an approved
+post-usability phase. Scripts-as-plugins (JYL + plugin registry) already
+exists — the cookie-warmer script drops in as a plugin later. Out of scope
+for this build (deferred, revisit with real usage): RBAC/multi-user, recorder
+/visual builder, PAC/proxy chaining, LocalStorage/IndexedDB in bundles.
+
+25. ✅ **Audit P0 batch 1** (2026-11-15, v0.15.0) — the three cheapest,
+    highest-severity audit items, all verified against source first:
+    - **A1 SSE CORS** — removed `Access-Control-Allow-Origin: *` from
+      `/events`. The dashboard is same-origin (served by this API), so it
+      needs no CORS — and the wildcard let any visited website read lifecycle
+      events off loopback via EventSource. Regression test pins the header
+      absence.
+    - **B1 Lease renewal** — the cross-machine double-start guard silently
+      expired 60 s after every launch: `renewLease` existed on the HTTP
+      client but nothing called it. `TeamLeaseGuard` gained `renew()`;
+      BrowserLifecycleService heartbeat-calls it per live run (30 s default,
+      unref'd, self-cleaning on stop/crash). Guard interface extended with
+      optional `renew`.
+    - **B2 Sync watermark honesty** — the background team-sync loop advanced
+      its revision watermark while the bundle's cookies were still inside the
+      bundle (profiles looked synced, cookies never arrived). `pullProfile`
+      now reports `cookiesPending` + carries `rawBundle`; the loop holds the
+      watermark back until the engine is live, then finishes the import via
+      `finishPull` → `importBundle`. `SyncTickResult` gained `pending`.
+    - Tests: 4 updated (new honest sync semantics, incl. restart-safe) + 1
+      new lease-heartbeat + 1 new SSE header pin.
+
+Remaining v0.15.0 items: cookie-route gating + raw-value opt-in, `sourcePath`
+containment, plugin/JYL endpoint gating, zip-bomb limits, PAN/CVV →
+SecretStore + `extra` redaction on profile reads. v0.15.1 daily-driver:
+cookie import/export formats, trash/restore, proxy validation, fingerprint
+editing, dashboard batch endpoints.
+
 ## v0.14 — Persona fields / 2FA layer (first item)
 
 See P7 Jancy-gap item 5 above for sub-steps and goal. The v0.14 list is

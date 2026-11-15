@@ -16,6 +16,11 @@ import path from "node:path";
  * B's loop (configured via Settings → Team) pulls it on tick, records the
  * revision watermark, and skips it on later ticks. A misconfigured machine
  * no-ops.
+ *
+ * v0.15.0 (audit B2): metadata imports immediately, but the watermark only
+ * advances once the bundle's cookies have actually landed in an engine —
+ * before this, the loop advanced the watermark with the cookies still inside
+ * the bundle, so profiles looked synced while their cookies never arrived.
  */
 
 const PASSPHRASE = "family-shared-secret";
@@ -84,21 +89,32 @@ describe("TeamSyncLoop", () => {
     return { ctx, loop };
   }
 
-  it("pulls a new remote bundle on tick and skips it once the watermark is recorded", async () => {
+  it("imports metadata on tick, holds the watermark until the engine is live, then finishes (audit B2)", async () => {
     const a = pusher();
     await a.pushFresh("loop-src");
 
     const b = loopMachine({ configured: true });
+    // First tick: the profile lands on machine B, but its cookies are still
+    // inside the bundle (engine not running) — the watermark must NOT advance.
     const first = await b.loop.tick();
     expect(first.enabled).toBe(true);
     expect(first.checked).toBe(1);
-    expect(first.imported).toBe(1);
-    // the profile landed on machine B with the bundle's name
-    const names = b.ctx.profiles.list().map((x) => x.name);
-    expect(names).toContain("loop-src");
+    expect(first.imported).toBe(0);
+    expect(first.pending).toBe(1);
+    expect(b.ctx.profiles.list().map((x) => x.name)).toContain("loop-src");
 
+    // Engine comes live: the next tick finishes the cookie import and only
+    // NOW advances the watermark.
+    const local = b.ctx.profiles.list().find((x) => x.name === "loop-src")!;
+    await b.ctx.lifecycle.start(local.id);
     const second = await b.loop.tick();
-    expect(second.imported).toBe(0); // watermark matches — skipped
+    expect(second.imported).toBe(1);
+    expect(second.pending).toBe(0);
+
+    // Watermark recorded — later ticks skip the profile entirely.
+    const third = await b.loop.tick();
+    expect(third.imported).toBe(0);
+    expect(third.pending).toBe(0);
     expect(b.ctx.profiles.list()).toHaveLength(1);
   });
 
@@ -108,7 +124,7 @@ describe("TeamSyncLoop", () => {
 
     const b = loopMachine({ configured: false });
     const res = await b.loop.tick();
-    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, failed: 0 });
+    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, pending: 0, failed: 0 });
     expect(b.ctx.profiles.list()).toHaveLength(0);
   });
 
@@ -126,7 +142,12 @@ describe("TeamSyncLoop", () => {
     // fix the passphrase: the next tick retries (watermark never advanced)
     b.ctx.settings.patch("team", { syncPassphrase: PASSPHRASE });
     const retry = await b.loop.tick();
-    expect(retry.imported).toBe(1);
+    expect(retry.failed).toBe(0);
+    expect(retry.pending).toBe(1); // cookies held — engine not running yet
+    const local = b.ctx.profiles.list().find((x) => x.name === "loop-badpass")!;
+    await b.ctx.lifecycle.start(local.id);
+    const finish = await b.loop.tick();
+    expect(finish.imported).toBe(1);
     expect(b.ctx.profiles.list().map((x) => x.name)).toContain("loop-badpass");
   });
 
@@ -142,7 +163,13 @@ describe("TeamSyncLoop", () => {
     }, ctx.proxies);
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-sync-loop-"));
     const first = new TeamSyncLoop({ bundles, settings: ctx.settings, dataDir });
-    expect((await first.tick()).imported).toBe(1);
+    // metadata in, cookies pending (engine not running) — watermark held back
+    expect(await first.tick()).toMatchObject({ imported: 0, pending: 1 });
+
+    // finish the import so the watermark can advance
+    const local = ctx.profiles.list()[0]!;
+    await ctx.lifecycle.start(local.id);
+    expect(await first.tick()).toMatchObject({ imported: 1, pending: 0 });
 
     // "restart": a fresh loop over the same dataDir must not re-import
     const second = new TeamSyncLoop({ bundles, settings: ctx.settings, dataDir });

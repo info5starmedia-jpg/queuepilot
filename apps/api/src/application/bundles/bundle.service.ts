@@ -32,6 +32,15 @@ export class BundleService {
     private readonly proxies: ProxyService | null = null,
   ) {}
 
+  /**
+   * v0.15.0 (audit B2): is this profile's engine live RIGHT NOW? The sync
+   * loop asks before finishing a half-imported pull — cookies only travel
+   * into a running engine.
+   */
+  isRunning(profileId: string): boolean {
+    return this.lifecycle.activeRun(profileId) !== null;
+  }
+
   async exportBundle(profileId: string, passphrase: string): Promise<{
     bundle: string; // base64 — the .qpbundle file content
     cookieCount: number;

@@ -21,10 +21,14 @@ import path from "node:path";
  * the live session's lease.
  */
 
-function makeCtx(guard: {
-  acquire(profileId: string): Promise<void>;
-  release(profileId: string): Promise<void>;
-}) {
+function makeCtx(
+  guard: {
+    acquire(profileId: string): Promise<void>;
+    release(profileId: string): Promise<void>;
+    renew?(profileId: string): Promise<void>;
+  },
+  renewIntervalMs?: number,
+) {
   const db = openTestDatabase();
   const profileRepo = new ProfileRepository(db);
   const identityRepo = new FingerprintIdentityRepository(db);
@@ -41,6 +45,7 @@ function makeCtx(guard: {
     dataDir,
     new LaunchIdentityService(dataDir),
     guard,
+    renewIntervalMs,
   );
   return { profiles, lifecycle };
 }
@@ -118,4 +123,35 @@ describe("lease guard in the lifecycle (P7.7b)", () => {
     expect(calls).toEqual([`acquire:${p.id}`, `release:${p.id}`]);
     expect(lifecycle.activeRun(p.id)).toBeNull();
   });
+
+  it("renews the lease on a timer while the run is live, and stops after stop (audit B1)", async () => {
+    const calls: string[] = [];
+    const ctx = makeCtx(
+      {
+        async acquire(id) {
+          calls.push(`acquire:${id}`);
+        },
+        async release(id) {
+          calls.push(`release:${id}`);
+        },
+        async renew(id) {
+          calls.push(`renew:${id}`);
+        },
+      },
+      20, // fast heartbeat for the test; production default is 30 s
+    );
+    const p = ctx.profiles.create({ name: "lease-renew", generateFingerprint: true });
+
+    await ctx.lifecycle.start(p.id);
+    await sleep(70);
+    const renewals = calls.filter((c) => c.startsWith("renew")).length;
+    expect(renewals).toBeGreaterThanOrEqual(2); // heartbeat ran while live
+
+    await ctx.lifecycle.stop(p.id);
+    await sleep(50);
+    expect(calls.filter((c) => c.startsWith("renew"))).toHaveLength(renewals);
+    expect(calls[calls.length - 1]).toBe(`release:${p.id}`);
+  });
 });
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

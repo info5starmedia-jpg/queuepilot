@@ -78,6 +78,8 @@ export interface StartOptions {
  */
 export class BrowserLifecycleService {
   private readonly sessions = new Map<string, BrowserSession>();
+  /** Per-run lease heartbeats (audit B1); cleared with the session. */
+  private readonly leaseRenewers = new Map<string, ReturnType<typeof setInterval>>();
   readonly events = new EventEmitter();
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
@@ -103,12 +105,17 @@ export class BrowserLifecycleService {
     /**
      * Optional cross-machine launch guard (P7.7b): acquire() runs before the
      * launch is admitted and may throw (LEASE_HELD / server down); release()
-     * runs on explicit stop. Absent = single-machine deployments, untouched.
+     * runs on explicit stop. renew(), when present, is heartbeat-called by the
+     * lifecycle for every live run so a long session never outlives its TTL
+     * (audit B1). Absent = single-machine deployments, untouched.
      */
     private readonly leaseGuard?: {
       acquire(profileId: string): Promise<void>;
       release(profileId: string): Promise<void>;
+      renew?(profileId: string): Promise<void>;
     },
+    /** How often a live run renews its lease. Default 30 s (TTL 60 s). */
+    private readonly leaseRenewIntervalMs = 30_000,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -277,6 +284,7 @@ export class BrowserLifecycleService {
       };
       this.runs.update(live);
       this.sessions.set(profileId, session);
+      this.startLeaseRenewal(profileId);
       // Identity of record: snapshot exactly what the engine launched with.
       // Later edits to the profile drift against this and apply at next start.
       this.snapshots?.capture({
@@ -309,6 +317,7 @@ export class BrowserLifecycleService {
       if (!run) return null; // idempotent stop
       const session = this.sessions.get(profileId);
       this.sessions.delete(profileId);
+      this.stopLeaseRenewal(profileId);
       // Mark the row stopped BEFORE stopping the engine: session.stop()
       // resolves the exit promise, and the exit handler consults this row to
       // decide whether the exit was already accounted for. Writing first is
@@ -340,6 +349,34 @@ export class BrowserLifecycleService {
 
   activeRun(profileId: string): BrowserRun | null {
     return this.runs.occupyingForProfile(profileId);
+  }
+
+  /**
+   * Lease heartbeat (audit B1): the server-side TTL is 60 s, so without
+   * renewal the cross-machine double-start guard silently expired one minute
+   * into every session. One unref'd timer per live run; each tick no-ops
+   * itself out if the run is no longer occupying (a missed exit path).
+   */
+  private startLeaseRenewal(profileId: string): void {
+    if (!this.leaseGuard?.renew) return;
+    if (this.leaseRenewers.has(profileId)) return;
+    const timer = setInterval(() => {
+      if (!this.runs.occupyingForProfile(profileId)) {
+        this.stopLeaseRenewal(profileId);
+        return;
+      }
+      void this.leaseGuard?.renew?.(profileId).catch(() => {
+        /* best-effort; the next tick retries, TTL reaps a truly dead lease */
+      });
+    }, this.leaseRenewIntervalMs);
+    timer.unref?.();
+    this.leaseRenewers.set(profileId, timer);
+  }
+
+  private stopLeaseRenewal(profileId: string): void {
+    const timer = this.leaseRenewers.get(profileId);
+    if (timer) clearInterval(timer);
+    this.leaseRenewers.delete(profileId);
   }
 
   /**
@@ -628,6 +665,7 @@ export class BrowserLifecycleService {
     if (!run || (run.status !== "running" && run.status !== "launching"))
       return;
     this.sessions.delete(profileId);
+    this.stopLeaseRenewal(profileId);
     this.tabRegistry.clearRun(runId); // tabs die with the engine
     const clean = code === 0;
     const final: BrowserRun = {

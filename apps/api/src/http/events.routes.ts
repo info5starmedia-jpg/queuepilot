@@ -21,7 +21,10 @@ export function registerEventRoutes(app: FastifyInstance, lifecycle: BrowserLife
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
-      "access-control-allow-origin": "*",
+      // v0.15.0 (audit A1): NO access-control-allow-origin here. The
+      // dashboard is same-origin (served by this API), so it needs no CORS —
+      // and a wildcard on a loopback event stream lets ANY website the
+      // operator visits read lifecycle events via EventSource.
     });
     reply.raw.write(`data: ${JSON.stringify({ type: "profile.updated", profileId: "00000000-0000-0000-0000-000000000000", runId: null, at: new Date().toISOString(), detail: "connected" })}\n\n`);
     clients.add(reply);

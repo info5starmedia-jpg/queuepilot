@@ -31,6 +31,8 @@ export interface SyncTickResult {
   enabled: boolean;
   checked: number;
   imported: number;
+  /** Profiles whose metadata imported but whose cookies are still pending (engine not live). */
+  pending: number;
   failed: number;
 }
 
@@ -74,7 +76,7 @@ export class TeamSyncLoop {
   async tick(): Promise<SyncTickResult> {
     const team = this.deps.settings.get("team");
     if (!team.serverUrl || !team.token || !team.syncPassphrase) {
-      return { enabled: false, checked: 0, imported: 0, failed: 0 };
+      return { enabled: false, checked: 0, imported: 0, pending: 0, failed: 0 };
     }
     const sync = new TeamSyncService(
       this.deps.bundles,
@@ -83,13 +85,30 @@ export class TeamSyncLoop {
     const remote = await sync.listRemote();
     const state = this.loadState();
     let imported = 0;
+    let pending = 0;
     let failed = 0;
     for (const head of remote) {
       if (state[head.profileId]?.revision === head.revision) continue;
       try {
-        await sync.pullProfile(team.syncPassphrase, head.profileId, {
+        const out = await sync.pullProfile(team.syncPassphrase, head.profileId, {
           startNow: false,
         });
+        if (out.cookiesPending && !this.deps.bundles.isRunning(out.profileId)) {
+          // v0.15.0 (audit B2): the bundle still holds cookies/tabs but the
+          // engine isn't live, so nothing was actually imported. Hold the
+          // watermark back — advancing it here is how sync used to mark a
+          // profile "synced" while its cookies never arrived. Next tick
+          // retries; once the profile runs, the import finishes below.
+          pending++;
+          this.deps.log?.(
+            `team sync: ${head.profileId} cookies pending — profile not running, will retry`,
+          );
+          continue;
+        }
+        if (out.cookiesPending) {
+          // Engine is live: finish the import into the running session.
+          await sync.finishPull(team.syncPassphrase, out.rawBundle, out.profileId);
+        }
         // Watermark keys on the REMOTE profileId: a bundle restored onto a
         // fresh machine gets a NEW local profile id, so the import result's
         // id can never match the head we based the pull on.
@@ -103,7 +122,7 @@ export class TeamSyncLoop {
       }
     }
     this.saveState(state);
-    return { enabled: true, checked: remote.length, imported, failed };
+    return { enabled: true, checked: remote.length, imported, pending, failed };
   }
 
   start(): void {
