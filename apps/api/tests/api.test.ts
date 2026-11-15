@@ -32,6 +32,27 @@ describe("native API", () => {
     expect(updated.json().notes).toBe("warmed");
     expect(updated.json().tags).toEqual(["ticket-drop"]);
 
+    // v0.14.7: email is a first-class profile field (create + patch + clear).
+    const emailed = await app.inject({
+      method: "PATCH",
+      url: `/profiles/${profile.id}`,
+      payload: { email: "warmed@example.com" },
+    });
+    expect(emailed.statusCode).toBe(200);
+    expect(emailed.json().email).toBe("warmed@example.com");
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/profiles/${profile.id}`,
+      payload: { email: null },
+    });
+    expect(cleared.json().email).toBeNull();
+    const badEmail = await app.inject({
+      method: "PATCH",
+      url: `/profiles/${profile.id}`,
+      payload: { email: "nope" },
+    });
+    expect(badEmail.statusCode).toBe(400);
+
     const removed = await app.inject({ method: "DELETE", url: `/profiles/${profile.id}` });
     expect(removed.statusCode).toBe(204);
     const gone = await app.inject({ method: "GET", url: `/profiles/${profile.id}` });

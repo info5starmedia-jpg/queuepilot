@@ -15,7 +15,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Jancy feature | Status | Notes |
 | --- | --- | --- |
 | Profile providers (CSV + Google Sheets, refreshable, many) | 🟡 | Sheets provider ✅ (P1.5). CSV import ✅ but see columns below |
-| Required columns `Profile/Name/Email` | ❌ | Import supports `name` only; no email column |
+| Required columns `Profile/Name/Email` | ✅ | v0.14.7: `email` column in CSV import (validated; empty cell on re-import leaves it unchanged), `PATCH /profiles/:id` accepts `email` incl. explicit null-clear; profile create takes `email` |
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ❌ |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |

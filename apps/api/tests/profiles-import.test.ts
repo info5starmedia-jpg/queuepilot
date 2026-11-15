@@ -112,3 +112,48 @@ describe("POST /profiles/import", () => {
     expect(list.json().profiles.map((p: { name: string }) => p.name)).toContain("http-alice");
   });
 });
+
+describe("importProfilesCsv — email column (v0.14.7)", () => {
+  function services() {
+    const { profiles, proxies } = makeTestContext();
+    return { profiles, proxies };
+  }
+
+  const EMAIL_HEADER = "name,email,proxy,group";
+
+  it("creates a profile with the email set", () => {
+    const { profiles, proxies } = services();
+    const report = importProfilesCsv(
+      profiles,
+      proxies,
+      `${EMAIL_HEADER}\nalice,alice@example.com,,g1`,
+    );
+    expect(report.succeeded).toBe(1);
+    expect(profiles.list()[0]!.email).toBe("alice@example.com");
+  });
+
+  it("a bad email fails only that row", () => {
+    const { profiles, proxies } = services();
+    const report = importProfilesCsv(
+      profiles,
+      proxies,
+      `${EMAIL_HEADER}\ngood,good@example.com,,\nbad,not-an-email,,`,
+    );
+    expect(report.succeeded).toBe(1);
+    expect(report.errors).toHaveLength(1);
+    expect(report.errors[0]!.name).toBe("bad");
+    expect(report.errors[0]!.message).toMatch(/not a valid email/);
+    expect(profiles.list()).toHaveLength(1);
+  });
+
+  it("re-import updates the email; an empty cell leaves it unchanged", () => {
+    const { profiles, proxies } = services();
+    importProfilesCsv(profiles, proxies, `${EMAIL_HEADER}\nalice,old@example.com,`);
+    const updated = importProfilesCsv(profiles, proxies, `${EMAIL_HEADER}\nalice,new@example.com,`);
+    expect(updated.results[0]!.action).toBe("updated");
+    expect(profiles.list()[0]!.email).toBe("new@example.com");
+    // Empty email cell = "don't touch", never a silent clear.
+    importProfilesCsv(profiles, proxies, `${EMAIL_HEADER}\nalice,,`);
+    expect(profiles.list()[0]!.email).toBe("new@example.com");
+  });
+});

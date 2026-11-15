@@ -58,7 +58,7 @@ export class ProfileService {
       status: "idle",
       notes: input.notes ?? "",
       tags: input.tags ?? [],
-      email: null,
+      email: input.email ?? null,
       providerId: null,
       providerKey: null,
       extra: {},
@@ -87,6 +87,7 @@ export class ProfileService {
     const next: Profile = {
       ...p,
       name: input.name ?? p.name,
+      email: input.email === undefined ? p.email : input.email,
       group: input.group ?? p.group,
       proxyId: input.proxyId === undefined ? p.proxyId : input.proxyId,
       notes: input.notes ?? p.notes,

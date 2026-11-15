@@ -7,9 +7,11 @@ import type { ProxyService } from "../proxies/proxy.service.js";
  * P6.1 — bulk profile import from CSV.
  *
  * Columns (header row required, order fixed, extras ignored):
- *   name, proxy, group, tags, notes, platform, timezone, locale
+ *   name, email, proxy, group, tags, notes, platform, timezone, locale
  *
  * - name: required, unique key — re-import UPSERTS by name (update in place).
+ * - email: optional, validated as an email address; on re-import an empty
+ *   cell leaves the stored email unchanged.
  * - proxy: empty = direct. Accepted shapes:
  *     host:port
  *     host:port:user:pass
@@ -51,6 +53,7 @@ export interface ImportReport {
 
 const COLUMNS = [
   "name",
+  "email",
   "proxy",
   "group",
   "tags",
@@ -229,6 +232,18 @@ export function importProfilesCsv(
       const locale = col(r, "locale") || undefined;
       const group = col(r, "group") || undefined;
       const notes = col(r, "notes") || undefined;
+      // Jancy's required Email column: validated when present; an empty
+      // cell on re-import leaves the stored email untouched.
+      const emailRaw = col(r, "email");
+      let email: string | undefined;
+      if (emailRaw) {
+        const parsed = z.string().email().safeParse(emailRaw);
+        if (!parsed.success) {
+          fail(`email "${emailRaw}" is not a valid email address`);
+          continue;
+        }
+        email = parsed.data;
+      }
 
       // Resolve the proxy spec first so a bad proxy fails the row before
       // anything else is considered.
@@ -280,6 +295,7 @@ export function importProfilesCsv(
       let profile: Profile;
       if (prior) {
         profile = profiles.update(prior.id, {
+          email,
           group,
           proxyId,
           notes,
@@ -288,6 +304,7 @@ export function importProfilesCsv(
       } else {
         profile = profiles.create({
           name,
+          email,
           group,
           proxyId: proxyId ?? undefined,
           notes,

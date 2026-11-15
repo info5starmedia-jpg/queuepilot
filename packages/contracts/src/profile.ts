@@ -161,6 +161,8 @@ export type PersonaWellKnownField = (typeof PERSONA_WELL_KNOWN_FIELDS)[number];
 
 export const CreateProfileInputSchema = z.object({
   name: z.string().min(1).max(120),
+  /** Login/contact email (Jancy's required Email column). */
+  email: z.string().email().max(200).nullable().optional(),
   group: z.string().max(120).optional(),
   proxyId: z.string().uuid().nullable().optional(),
   notes: z.string().max(4000).optional(),
@@ -176,6 +178,8 @@ export type CreateProfileInput = z.input<typeof CreateProfileInputSchema>;
 export const UpdateProfileInputSchema = z
   .object({
     name: z.string().min(1).max(120).optional(),
+    /** null clears the email; omitted leaves it unchanged. */
+    email: z.string().email().max(200).nullable().optional(),
     group: z.string().max(120).optional(),
     proxyId: z.string().uuid().nullable().optional(),
     notes: z.string().max(4000).optional(),

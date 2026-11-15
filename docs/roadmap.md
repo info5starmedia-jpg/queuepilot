@@ -498,6 +498,15 @@ its sub-steps and goal in one place.
     - The §7 Jancy-parity autofill row is now fully ✅ (card + address +
       typing).
     - Tests: 4 unit + 5 API; 395/395 green.
+12. ✅ **CSV import email column** (2026-11-15, v0.14.7) — Jancy's required
+    `Profile/Name/Email` trio completed:
+    - Contracts: `email` joins `CreateProfileInputSchema` and
+      `UpdateProfileInputSchema` (validated email, nullable — explicit null
+      clears). ProfileService create/update carry it.
+    - CSV import: `email` column validated per row (bad email fails only
+      that row); on re-import an empty cell leaves the stored email
+      unchanged — never a silent clear.
+    - Tests: 3 import + 5 API assertions; Jancy §1 required-columns row ✅.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
