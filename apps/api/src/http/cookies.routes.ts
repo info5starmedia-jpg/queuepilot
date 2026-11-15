@@ -82,6 +82,48 @@ export function registerCookieRoutes(
     return reply.code(201).send({ set: true, partitionScoped: Boolean(body.partitionId) });
   });
 
+  /**
+   * Bulk load: set many cookies at once, optionally scoped to one session
+   * partition (through its open tabs' browser contexts — the partition's
+   * own store is what receives them). Per-cookie results; one bad cookie
+   * reports its error and the rest still load.
+   */
+  app.post("/profiles/:id/cookies/load", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const wsEndpoint = requireRunning(id);
+    const body = z
+      .object({
+        cookies: z
+          .array(SetCookieBodySchema.omit({ partitionId: true }))
+          .min(1)
+          .max(500),
+        partitionId: z.string().uuid().optional(),
+      })
+      .strict()
+      .parse(req.body ?? {});
+    const engineTabIds = partitionTabIds(id, body.partitionId);
+    const engineTabId = [...(engineTabIds ?? [])][0];
+
+    const results: { index: number; name: string; set: boolean; error?: string }[] = [];
+    for (const [index, cookie] of body.cookies.entries()) {
+      try {
+        await setCookie(wsEndpoint, cookie, { engineTabId });
+        results.push({ index, name: cookie.name, set: true });
+      } catch (err) {
+        results.push({
+          index,
+          name: cookie.name,
+          set: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    const set = results.filter((r) => r.set).length;
+    return reply
+      .code(201)
+      .send({ total: results.length, set, partitionScoped: Boolean(body.partitionId), results });
+  });
+
   app.post("/profiles/:id/cookies/clear", async (req) => {
     const { id } = req.params as { id: string };
     const wsEndpoint = requireRunning(id);

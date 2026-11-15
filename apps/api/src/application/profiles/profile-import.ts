@@ -8,7 +8,7 @@ import type { ProxyService } from "../proxies/proxy.service.js";
  *
  * Columns (header row required, order fixed, extras ignored):
  *   name, email, proxy, group, tags, notes, platform, timezone, locale,
- *   favorite, color
+ *   favorite, color, url (| separated start pages)
  *
  * - name: required, unique key — re-import UPSERTS by name (update in place).
  * - email: optional, validated as an email address; on re-import an empty
@@ -66,6 +66,7 @@ const COLUMNS = [
   "locale",
   "favorite",
   "color",
+  "url",
 ] as const;
 
 const PlatformEnum = z.enum(["windows", "macos", "linux"]);
@@ -288,6 +289,26 @@ export function importProfilesCsv(
           continue;
         }
         persona.tabColor = color;
+      }
+
+      // Jancy URL column: `|`-separated start pages, opened automatically at
+      // launch. Absent column/empty cell leaves the stored list; a bad URL
+      // fails only that row (validated before the dry-run check like color).
+      if (header.includes("url") && col(r, "url")) {
+        const urls = col(r, "url")
+          .split("|")
+          .map((u) => u.trim())
+          .filter(Boolean);
+        if (urls.length > 25) {
+          fail(`url column carries ${urls.length} start pages (max 25)`);
+          continue;
+        }
+        const bad = urls.find((u) => !z.string().url().safeParse(u).success);
+        if (bad) {
+          fail(`url "${bad}" is not a valid URL`);
+          continue;
+        }
+        persona.startUrls = urls;
       }
 
       const action = prior ? "updated" : "created";

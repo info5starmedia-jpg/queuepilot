@@ -16,7 +16,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | --- | --- | --- |
 | Profile providers (CSV + Google Sheets, refreshable, many) | 🟡 | Sheets provider ✅ (P1.5). CSV import ✅ but see columns below |
 | Required columns `Profile/Name/Email` | ✅ | v0.14.7: `email` column in CSV import (validated; empty cell on re-import leaves it unchanged), `PATCH /profiles/:id` accepts `email` incl. explicit null-clear; profile create takes `email` |
-| Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL start pages ❌; favorite ✅ v0.14.10 (persona bag, CSV `favorite` column, `?favorite=true` filter, console ★) |
+| Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL ✅ v0.14.12 (CSV `url` column, `\|`-separated start pages opened at launch); favorite ✅ v0.14.10 |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
 | Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ — index only moves via rotate |
@@ -57,7 +57,7 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | --- | --- | --- |
 | Isolated in-memory partitions + related tabs | ✅ | P1.5, more rigorous (launch-identity snapshot per run) |
 | Engine-side tab routing | ✅ | CDP contexts |
-| Tab bar / vertical Tab View, 7 sort modes | 🟡 | Console Tabs panel (v0.14.8): per-running-profile tab table w/ query, select-all, close; sort modes ❌ |
+| Tab bar / vertical Tab View, 7 sort modes | 🟡 | Console Tabs panel (v0.14.8): per-running-profile tab table w/ query, select-all, close; v0.14.12: sort modes ✅ (newest/oldest/url/domain/status/partition — the six orderings real tab records can honor; no page-title tracking in the API, vertical bar ❌) |
 | Mass select + "(all selected)" commands | ✅ | v0.14.8: `POST /profiles/:id/tabs/bulk-close` by `tabIds` OR Thinger `q` — per-tab results, idempotent closes; console select-all + Close selected |
 | Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | ❌ | bulk-close/bulk-open land (v0.14.8); the rest open |
 | Tab Thinger (formula query language over tabs) | ✅ | v0.14.8 minimal slice: `[!]field:pattern` tokens ANDed (`status`/`url`/`id`/`partition`/`related`/`engine`), `*` wildcard, bare token = url sugar, partition = prefix match; unknown fields refuse 400; `POST /profiles/:id/tabs/query` |
@@ -65,9 +65,9 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | Tab priority from page signals (queue position → band) | ❌ | Plugin-shaped (§6) |
 | Auto-reload per tab | ❌ | |
 | Named windows, max tabs/window, closed-tab restore | ❌ | |
-| Bulk-open unique URLs w/ matching proxies, staggered navigation | 🟡 | v0.14.8: `POST /profiles/:id/tabs/bulk-open` opens many URLs (optional shared `relatedTo` partition), per-url results; proxy matching + staggered navigation ❌ |
+| Bulk-open unique URLs w/ matching proxies, staggered navigation | 🟡 | v0.14.8: `POST /profiles/:id/tabs/bulk-open` opens many URLs (optional shared `relatedTo` partition), per-url results; v0.14.12: `staggerMs` ✅ (0–10 s between opens); proxy matching ❌ |
 | Tab strings (shareable tab definitions) | 🟡 | Session bundles v2 carry tabUrls — closest equivalent |
-| Load cookies into partitions | 🟡 | Bundle restore imports cookies at profile level; per-partition ❌ |
+| Load cookies into partitions | ✅ | v0.14.12: `POST /profiles/:id/cookies/load` bulk-loads cookies (max 500, per-cookie results) optionally scoped to one partition through its open tabs' contexts; single-cookie partition set/list/clear since v0.14.9 |
 
 ## 5. Cookies
 

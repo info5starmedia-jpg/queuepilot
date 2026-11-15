@@ -42,6 +42,8 @@ export const LifecycleEventSchema = z.object({
     "profile.updated",
     "tab.opened",
     "tab.closed",
+    /** A configured start page refused to open at launch (detail = url + error). */
+    "startpage.failed",
   ]),
   profileId: z.string().uuid(),
   runId: z.string().uuid().nullable(),

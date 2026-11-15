@@ -400,7 +400,7 @@ async function runTabsQuery() {
   try {
     data = await api(`/profiles/${profileId}/tabs/query`, {
       method: "POST",
-      body: JSON.stringify({ q: $("#tabs-query").value }),
+      body: JSON.stringify({ q: $("#tabs-query").value, sort: $("#tabs-sort").value || undefined }),
     });
   } catch (err) {
     tbody.innerHTML = "";

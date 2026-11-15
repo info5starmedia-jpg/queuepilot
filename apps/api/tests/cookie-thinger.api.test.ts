@@ -169,3 +169,68 @@ describe("POST /profiles/:id/cookies/clear", () => {
     await ctx.lifecycle.stop(p.id);
   });
 });
+
+describe("POST /profiles/:id/cookies/load (v0.14.12)", () => {
+  it("bulk-loads cookies into the default store with per-cookie results", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/load`,
+      payload: {
+        cookies: [
+          { name: "a", value: "1", domain: ".example.com" },
+          { name: "b", value: "2", domain: ".example.com", secure: true },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().set).toBe(2);
+    expect(res.json().partitionScoped).toBe(false);
+    expect(mock.callsFor("Network.setCookie")).toHaveLength(2);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("scopes the load to a partition through its open tab's context", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const tab = await ctx.lifecycle.openTab(p.id, { url: "https://shop.example" });
+    mock.pageTargets = [
+      { targetId: tab.engineTabId!, type: "page", browserContextId: "ctx-9" },
+    ];
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/load`,
+      payload: {
+        cookies: [{ name: "cart", value: "3", domain: ".shop.example" }],
+        partitionId: tab.partitionId,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().partitionScoped).toBe(true);
+    // The set went out on an attached page session, not browser-level —
+    // same evidence as the single-cookie partition path.
+    expect(mock.callsFor("Target.attachToTarget").length).toBeGreaterThan(0);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("409s when the named partition has no open tabs", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/load`,
+      payload: {
+        cookies: [{ name: "x", value: "1", domain: ".example.com" }],
+        partitionId: "99999999-9999-4999-8999-999999999999",
+      },
+    });
+    expect(res.statusCode).toBe(409);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+});

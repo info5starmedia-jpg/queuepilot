@@ -155,6 +155,11 @@ export const UpdatePersonaInputSchema = z
      * `@alias`, …) — resolved on demand by the resolve endpoint. Max 50 keys.
      */
     fields: z.record(z.string(), z.string().max(2000)).optional(),
+    /**
+     * Jancy URL column: pages opened automatically right after the profile
+     * launches. Max 25 start pages per profile.
+     */
+    startUrls: z.array(z.string().url().max(4000)).max(25).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" })
   .refine((v) => !v.fields || Object.keys(v.fields).length <= 50, {

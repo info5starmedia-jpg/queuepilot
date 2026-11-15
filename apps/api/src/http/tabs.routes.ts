@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { OpenTabInputSchema, type BrowserTab } from "@queuepilot/contracts";
 import type { BrowserLifecycleService } from "../application/lifecycle/browser.lifecycle.service.js";
-import { filterTabs } from "../application/tabs/tab-thinger.js";
+import { DomainError, ErrorCodes } from "@queuepilot/contracts";
+import { filterTabs, sortTabs, isTabSortMode, TAB_SORT_MODES } from "../application/tabs/tab-thinger.js";
 
 /**
  * Tab & partition routes (native API). Tabs belong to the profile's ACTIVE
@@ -23,7 +24,16 @@ export function registerTabRoutes(
 
   app.get("/profiles/:id/tabs", async (req) => {
     const { id } = req.params as { id: string };
-    return lifecycle.listTabs(id);
+    const { sort } = req.query as { sort?: string };
+    const listed = lifecycle.listTabs(id);
+    if (sort === undefined) return listed;
+    if (!isTabSortMode(sort)) {
+      throw new DomainError(
+        ErrorCodes.VALIDATION_FAILED,
+        `unknown tab sort "${sort}" — one of: ${TAB_SORT_MODES.join(", ")}`,
+      );
+    }
+    return { ...listed, tabs: sortTabs(listed.tabs, sort) };
   });
 
   app.post("/profiles/:id/tabs/:tabId/close", async (req) => {
@@ -39,8 +49,14 @@ export function registerTabRoutes(
    */
   app.post("/profiles/:id/tabs/query", async (req) => {
     const { id } = req.params as { id: string };
-    const { q } = z.object({ q: z.string().max(500).default("") }).parse(req.body ?? {});
-    return { tabs: filterTabs(lifecycle.listTabs(id).tabs, q) };
+    const { q, sort } = z
+      .object({
+        q: z.string().max(500).default(""),
+        sort: z.enum(TAB_SORT_MODES).optional(),
+      })
+      .parse(req.body ?? {});
+    const tabs = filterTabs(lifecycle.listTabs(id).tabs, q);
+    return { tabs: sort ? sortTabs(tabs, sort) : tabs };
   });
 
   /**
@@ -88,8 +104,10 @@ export function registerTabRoutes(
 
   /**
    * Bulk-open: open many URLs at once (optionally all related to one tab's
-   * partition). Opens sequentially in request order; one bad URL reports
-   * its error and the rest still open.
+   * partition). Opens sequentially in request order — with `staggerMs`, each
+   * open waits that long after the previous one settled, so a hundred-page
+   * burst doesn't land on the target as a single thundering herd. One bad
+   * URL reports its error and the rest still open.
    */
   app.post("/profiles/:id/tabs/bulk-open", async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -97,11 +115,15 @@ export function registerTabRoutes(
       .object({
         urls: z.array(z.string().url().max(4000)).min(1).max(100),
         relatedTo: z.string().uuid().nullish(),
+        staggerMs: z.number().int().min(0).max(10_000).default(0),
       })
       .parse(req.body ?? {});
 
     const results: { url: string; tab: BrowserTab | null; error?: string }[] = [];
-    for (const url of body.urls) {
+    for (const [i, url] of body.urls.entries()) {
+      if (i > 0 && body.staggerMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, body.staggerMs));
+      }
       try {
         const tab = await lifecycle.openTab(id, { url, relatedTo: body.relatedTo ?? null });
         results.push({ url, tab });

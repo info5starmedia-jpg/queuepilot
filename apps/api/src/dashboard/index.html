@@ -92,6 +92,15 @@
           <div class="import-controls">
             <select id="tabs-profile"><option value="">(running profiles…)</option></select>
             <input id="tabs-query" placeholder="tab query — empty = all tabs" maxlength="500" />
+            <select id="tabs-sort" title="sort order">
+              <option value="">(no sort)</option>
+              <option value="newest">newest</option>
+              <option value="oldest">oldest</option>
+              <option value="url">url</option>
+              <option value="domain">domain</option>
+              <option value="status">status</option>
+              <option value="partition">partition</option>
+            </select>
             <button id="tabs-run" class="secondary">Query</button>
             <label><input type="checkbox" id="tabs-select-all" /> all selected</label>
             <button id="tabs-close" class="danger">Close selected</button>

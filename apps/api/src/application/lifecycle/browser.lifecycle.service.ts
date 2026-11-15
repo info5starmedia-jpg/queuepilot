@@ -18,6 +18,7 @@ import {
 import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
+import { startUrlsOf } from "../profiles/start-pages.js";
 import type {
   ProfileRepository,
   FingerprintIdentityRepository,
@@ -104,7 +105,7 @@ export class BrowserLifecycleService {
   }
 
   async start(profileId: string, opts: StartOptions = {}): Promise<BrowserRun> {
-    return this.mutex.runExclusive(profileId, async () => {
+    const live = await this.mutex.runExclusive(profileId, async () => {
       const profile = this.requireProfile(profileId);
       if (this.runs.occupyingForProfile(profileId)) {
         throw new DomainError(
@@ -245,6 +246,26 @@ export class BrowserLifecycleService {
       });
       return live;
     });
+
+    // Jancy URL start pages: after the run is up (and OUTSIDE the launch
+    // lock — openTab takes the same mutex), open each configured page. A
+    // failed page never fails the launch; it reports one startpage.failed
+    // event per refusal so the console can surface it.
+    const startUrls = startUrlsOf(this.requireProfile(profileId).extra);
+    for (const url of startUrls) {
+      try {
+        await this.openTab(profileId, { url });
+      } catch (err) {
+        this.emit({
+          type: "startpage.failed",
+          profileId,
+          runId: live.id,
+          at: now(),
+          detail: `${url}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
+        });
+      }
+    }
+    return live;
   }
 
   async stop(profileId: string): Promise<BrowserRun | null> {

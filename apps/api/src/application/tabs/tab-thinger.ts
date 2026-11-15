@@ -111,3 +111,53 @@ export function filterTabs(tabs: BrowserTab[], query: string): BrowserTab[] {
   const pred = compileTabQuery(query);
   return tabs.filter(pred);
 }
+
+/**
+ * Tab sort modes — the console's 7-mode ambition narrowed to the six orderings
+ * real tab records can honor (no page-title tracking in the API). Pure
+ * function over a copy; unknown modes refuse rather than silently pass
+ * through.
+ */
+export const TAB_SORT_MODES = [
+  "newest",
+  "oldest",
+  "url",
+  "domain",
+  "status",
+  "partition",
+] as const;
+export type TabSortMode = (typeof TAB_SORT_MODES)[number];
+
+export function isTabSortMode(mode: string): mode is TabSortMode {
+  return (TAB_SORT_MODES as readonly string[]).includes(mode);
+}
+
+function domainOf(url: string | null): string {
+  if (!url) return "";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+/** Return a sorted COPY of the tabs; ties keep input order (stable). */
+export function sortTabs(tabs: BrowserTab[], mode: TabSortMode): BrowserTab[] {
+  const by = (key: (t: BrowserTab) => string): BrowserTab[] =>
+    [...tabs].sort((a, b) => key(a).localeCompare(key(b)) || tabs.indexOf(a) - tabs.indexOf(b));
+  switch (mode) {
+    case "newest":
+      return [...tabs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    case "oldest":
+      return [...tabs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    case "url":
+      return by((t) => (t.url ?? "").toLowerCase());
+    case "domain":
+      // Domain ties fall through to the full URL — deterministic order.
+      return by((t) => `${domainOf(t.url).toLowerCase()}${(t.url ?? "").toLowerCase()}`);
+    case "status":
+      return by((t) => t.status);
+    case "partition":
+      return by((t) => t.partitionId);
+  }
+}

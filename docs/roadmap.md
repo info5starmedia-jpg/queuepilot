@@ -581,6 +581,22 @@ its sub-steps and goal in one place.
       out of scope for the TS layer.
     - Tests: provider star (unit + API), CLI flag (live-server e2e),
       favorite/color import; 427/427 green.
+16. ✅ **Jancy-gap batch** (2026-11-15, v0.14.12) — four parity rows moved:
+    - **URL start pages** — CSV `url` column (`|`-separated, ≤25, bad URL
+      fails the row, absent column never clears) → `extra.startUrls`;
+      lifecycle opens each as a tab right after launch, OUTSIDE the launch
+      lock (openTab takes the same mutex); a failed page emits
+      `startpage.failed` on the SSE stream and never fails the launch.
+    - **Tab sort modes** — `sortTabs` (newest/oldest/url/domain/status/
+      partition; the six orderings real tab records honor) on
+      `GET /tabs?sort=` and the Thinger query; console gained a sort
+      dropdown. Unknown mode = 400.
+    - **Staggered bulk-open** — `staggerMs` (0–10 s) waits between opens so
+      a hundred-page burst doesn't thundering-herd the target.
+    - **Per-partition cookie load** — `POST /profiles/:id/cookies/load`
+      bulk-loads ≤500 cookies with per-cookie results, optionally scoped to
+      one partition through its open tabs' contexts.
+    - Tests: 34 across the three areas; parity-jancy §1/§4/§5 rows flipped.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
