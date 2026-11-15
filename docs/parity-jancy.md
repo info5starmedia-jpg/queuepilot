@@ -57,15 +57,15 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | --- | --- | --- |
 | Isolated in-memory partitions + related tabs | ✅ | P1.5, more rigorous (launch-identity snapshot per run) |
 | Engine-side tab routing | ✅ | CDP contexts |
-| Tab bar / vertical Tab View, 7 sort modes | ❌ | No console tab view |
-| Mass select + "(all selected)" commands | ❌ | |
-| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | ❌ | API has stop/openTab; no bulk ops |
-| Tab Thinger (formula query language over tabs) | ❌ | Adopt — small parser, huge payoff |
+| Tab bar / vertical Tab View, 7 sort modes | 🟡 | Console Tabs panel (v0.14.8): per-running-profile tab table w/ query, select-all, close; sort modes ❌ |
+| Mass select + "(all selected)" commands | ✅ | v0.14.8: `POST /profiles/:id/tabs/bulk-close` by `tabIds` OR Thinger `q` — per-tab results, idempotent closes; console select-all + Close selected |
+| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | ❌ | bulk-close/bulk-open land (v0.14.8); the rest open |
+| Tab Thinger (formula query language over tabs) | ✅ | v0.14.8 minimal slice: `[!]field:pattern` tokens ANDed (`status`/`url`/`id`/`partition`/`related`/`engine`), `*` wildcard, bare token = url sugar, partition = prefix match; unknown fields refuse 400; `POST /profiles/:id/tabs/query` |
 | Tab Studio (visual bulk editor) | ❌ | Later phase |
 | Tab priority from page signals (queue position → band) | ❌ | Plugin-shaped (§6) |
 | Auto-reload per tab | ❌ | |
 | Named windows, max tabs/window, closed-tab restore | ❌ | |
-| Bulk-open unique URLs w/ matching proxies, staggered navigation | ❌ | |
+| Bulk-open unique URLs w/ matching proxies, staggered navigation | 🟡 | v0.14.8: `POST /profiles/:id/tabs/bulk-open` opens many URLs (optional shared `relatedTo` partition), per-url results; proxy matching + staggered navigation ❌ |
 | Tab strings (shareable tab definitions) | 🟡 | Session bundles v2 carry tabUrls — closest equivalent |
 | Load cookies into partitions | 🟡 | Bundle restore imports cookies at profile level; per-partition ❌ |
 

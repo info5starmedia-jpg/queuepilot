@@ -291,6 +291,131 @@ $("#import-apply").addEventListener("click", async () => {
   }
 });
 
+/* ---------------- tabs (Tab Thinger + mass select) ---------------- */
+
+let lastTabs = []; // last query result, for the selection model
+
+async function refreshTabsProfiles() {
+  const sel = $("#tabs-profile");
+  const current = sel.value;
+  const { profiles } = await api("/profiles");
+  const running = profiles.filter((p) => p.status === "running");
+  sel.innerHTML =
+    `<option value="">(${running.length} running — pick one)</option>` +
+    running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  if (running.some((p) => p.id === current)) sel.value = current;
+}
+
+function selectedTabIds() {
+  return [...document.querySelectorAll("#tabs-table tbody input[data-tab]:checked")].map(
+    (c) => c.dataset.tab,
+  );
+}
+
+async function runTabsQuery() {
+  const profileId = $("#tabs-profile").value;
+  const tbody = $("#tabs-table tbody");
+  if (!profileId) {
+    tbody.innerHTML = "";
+    $("#tabs-summary").textContent = "start a profile to see its tabs";
+    lastTabs = [];
+    return;
+  }
+  let data;
+  try {
+    data = await api(`/profiles/${profileId}/tabs/query`, {
+      method: "POST",
+      body: JSON.stringify({ q: $("#tabs-query").value }),
+    });
+  } catch (err) {
+    tbody.innerHTML = "";
+    $("#tabs-summary").textContent = err.message;
+    lastTabs = [];
+    return;
+  }
+  lastTabs = data.tabs;
+  tbody.innerHTML = "";
+  for (const t of data.tabs) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input type="checkbox" data-tab="${esc(t.id)}" ${t.status === "closed" ? "disabled" : ""} /></td>
+      <td class="mono">${esc(t.url ?? "—")}</td>
+      <td><span class="badge badge-${esc(t.status)}">${esc(t.status)}</span></td>
+      <td class="mono">${esc(t.partitionId.slice(0, 8))}</td>
+      <td>${t.status === "open" ? `<button class="secondary" data-close="${esc(t.id)}">close</button>` : ""}</td>`;
+    tr.querySelector("[data-close]")?.addEventListener("click", async (ev) => {
+      ev.target.disabled = true;
+      await api(`/profiles/${profileId}/tabs/${t.id}/close`, { method: "POST" });
+      await runTabsQuery();
+    });
+    tbody.appendChild(tr);
+  }
+  const open = data.tabs.filter((t) => t.status === "open").length;
+  $("#tabs-summary").textContent = `${data.tabs.length} tabs (${open} open)`;
+}
+
+$("#tabs-run").addEventListener("click", runTabsQuery);
+$("#tabs-query").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runTabsQuery();
+});
+
+$("#tabs-select-all").addEventListener("change", (e) => {
+  document
+    .querySelectorAll("#tabs-table tbody input[data-tab]:not(:disabled)")
+    .forEach((c) => (c.checked = e.target.checked));
+});
+
+$("#tabs-close").addEventListener("click", async () => {
+  const profileId = $("#tabs-profile").value;
+  const tabIds = selectedTabIds();
+  if (!profileId || tabIds.length === 0) return;
+  try {
+    const r = await api(`/profiles/${profileId}/tabs/bulk-close`, {
+      method: "POST",
+      body: JSON.stringify({ tabIds }),
+    });
+    const failed = r.results.filter((x) => !x.closed).length;
+    pushEvent({
+      type: "info",
+      detail: `bulk-close: ${r.results.length - failed}/${r.results.length} closed`,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+  $("#tabs-select-all").checked = false;
+  await runTabsQuery();
+  await loadProfiles();
+});
+
+$("#tabs-open").addEventListener("click", async () => {
+  const profileId = $("#tabs-profile").value;
+  const urls = $("#tabs-open-urls")
+    .value.split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!profileId || urls.length === 0) return;
+  try {
+    const r = await api(`/profiles/${profileId}/tabs/bulk-open`, {
+      method: "POST",
+      body: JSON.stringify({ urls }),
+    });
+    const failed = r.results.filter((x) => x.tab === null).length;
+    pushEvent({
+      type: "info",
+      detail: `bulk-open: ${r.results.length - failed}/${r.results.length} opened`,
+      at: new Date().toISOString(),
+    });
+    $("#tabs-open-urls").value = "";
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+  await runTabsQuery();
+  await loadProfiles();
+});
+
+$("#tabs-profile").addEventListener("change", runTabsQuery);
+
 /* ---------------- live events (SSE) ---------------- */
 
 function pushEvent(e) {
@@ -321,8 +446,11 @@ function connectEvents() {
       if (e.detail === "connected") return;
       pushEvent(e);
       // Run/tab transitions change the grids; reload lazily.
-      if (e.type.startsWith("run.") || e.type.startsWith("tab."))
+      if (e.type.startsWith("run.") || e.type.startsWith("tab.")) {
         loadProfiles();
+        refreshTabsProfiles();
+        if ($("#tabs-profile").value) runTabsQuery();
+      }
     } catch {
       /* malformed event — ignore */
     }
@@ -335,5 +463,6 @@ refreshHealth();
 loadChecklist();
 loadProfiles();
 loadProxies();
+refreshTabsProfiles();
 connectEvents();
 setInterval(refreshHealth, 30_000);

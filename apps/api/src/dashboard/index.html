@@ -84,6 +84,40 @@
 
       <section>
         <div class="section-head">
+          <h2>Tabs</h2>
+          <span class="hint">Tab Thinger: <code>status:open url:*shop*</code> ·
+            bare word = url match · <code>!</code> negates · <code>*</code> wildcard</span>
+        </div>
+        <div id="tabs-panel">
+          <div class="import-controls">
+            <select id="tabs-profile"><option value="">(running profiles…)</option></select>
+            <input id="tabs-query" placeholder="tab query — empty = all tabs" maxlength="500" />
+            <button id="tabs-run" class="secondary">Query</button>
+            <label><input type="checkbox" id="tabs-select-all" /> all selected</label>
+            <button id="tabs-close" class="danger">Close selected</button>
+          </div>
+          <div class="import-controls">
+            <input id="tabs-open-urls" placeholder="bulk-open URLs, one per line" />
+            <button id="tabs-open" class="secondary">Open all</button>
+          </div>
+          <table id="tabs-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>url</th>
+                <th>status</th>
+                <th>partition</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div id="tabs-summary" class="hint"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
           <h2>Events</h2>
           <span class="hint">live via SSE</span>
         </div>

@@ -21,7 +21,9 @@ export function toHttpError(err: unknown): {
   }
   if (err instanceof DomainError) {
     const status =
-      err.code === ErrorCodes.PROFILE_NOT_FOUND ||
+      err.code === ErrorCodes.VALIDATION_FAILED
+        ? 400
+        : err.code === ErrorCodes.PROFILE_NOT_FOUND ||
       err.code === ErrorCodes.PROXY_NOT_FOUND ||
       err.code === ErrorCodes.RUN_NOT_FOUND ||
       err.code === ErrorCodes.TAB_NOT_FOUND ||

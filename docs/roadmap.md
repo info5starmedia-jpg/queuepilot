@@ -507,6 +507,22 @@ its sub-steps and goal in one place.
       that row); on re-import an empty cell leaves the stored email
       unchanged — never a silent clear.
     - Tests: 3 import + 5 API assertions; Jancy §1 required-columns row ✅.
+13. ✅ **Tab console depth** (2026-11-15, v0.14.8) — Tab Thinger + mass
+    select + tab view:
+    - `tab-thinger.ts`: `[!]field:pattern` tokens ANDed over fields
+      status/url/id/partition/related/engine; `*` wildcard; bare token =
+      url sugar; partition = id-prefix match; unknown field or empty
+      pattern → VALIDATION_FAILED (now mapped 400 by the error mapper —
+      was a 500 hole).
+    - Endpoints: `POST /profiles/:id/tabs/query`, `…/tabs/bulk-close`
+      (by tabIds OR query q; per-tab results, idempotent closes, one
+      failure never aborts the set), `…/tabs/bulk-open` (many URLs,
+      optional shared relatedTo partition, per-url results).
+    - Console Tabs panel: running-profile picker, query box, tab table
+      w/ checkboxes, "(all selected)", Close selected, bulk-open input;
+      SSE run./tab. events refresh it.
+    - Tests: 8 unit + 5 API; §4 rows updated (mass select ✅, Tab Thinger ✅,
+      tab view 🟡, bulk-open 🟡).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
