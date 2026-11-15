@@ -4,6 +4,8 @@ import type { JylRegistry } from "../application/jyl/jyl-registry.js";
 
 export interface JylDeps {
   jyl: JylRegistry;
+  /** Audit A-rec #3: throws unless scripting endpoints are opted in. */
+  assertScriptingEnabled: () => void;
 }
 
 const RunSchema = z.object({
@@ -14,13 +16,17 @@ const RunSchema = z.object({
 });
 
 export function registerJylRoutes(app: FastifyInstance, deps: JylDeps): void {
-  const { jyl } = deps;
+  const { jyl, assertScriptingEnabled } = deps;
 
   app.get("/jyl", async () => jyl.list());
   app.get("/jyl/logs", async () => ({ logs: jyl.recentLogs() }));
-  app.post("/jyl/rescan", async () => jyl.rescan());
+  app.post("/jyl/rescan", async () => {
+    assertScriptingEnabled(); // loads new module code from disk
+    return jyl.rescan();
+  });
 
   app.post("/jyl/run", async (req) => {
+    assertScriptingEnabled(); // runs operator scripts (automation)
     const body = RunSchema.parse(req.body);
     const ctx = { profileId: body.profileId };
     return body.kind === "command"
@@ -35,6 +41,7 @@ export function registerJylRoutes(app: FastifyInstance, deps: JylDeps): void {
     method: ["GET", "POST", "PUT", "DELETE"],
     url: "/jyl/endpoint/*",
     handler: async (req, reply) => {
+      assertScriptingEnabled(); // dispatches into module code
       const rest = (req.params as { "*": string })["*"] ?? "";
       const query = req.query as Record<string, string>;
       const body =

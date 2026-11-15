@@ -71,6 +71,13 @@ export const AutomationSettingsSchema = z.object({
   enabledPlugins: z.array(z.string().max(200)).max(100).default([]),
   /** Names of enabled JYL commands/macros. */
   enabledJyl: z.array(z.string().max(200)).max(200).default([]),
+  /**
+   * v0.15.0 (audit A-rec #3): explicit operator opt-in for the code-running
+   * HTTP endpoints — JYL run/endpoints, plugin/parser/resolver execution,
+   * alias writes. Default OFF: these run code and touch secrets, so a
+   * loopback caller must not reach them by default.
+   */
+  scriptingEndpoints: z.boolean().default(false),
 });
 export type AutomationSettings = z.infer<typeof AutomationSettingsSchema>;
 

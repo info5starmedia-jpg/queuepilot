@@ -810,10 +810,26 @@ for this build (deferred, revisit with real usage): RBAC/multi-user, recorder
       provider/extension containment rejections; 6 existing test files
       updated to the new honest path rules.
 
-Remaining v0.15.0 items: plugin/JYL endpoint gating, zip-bomb limits, PAN/CVV →
-SecretStore + `extra` redaction on profile reads. v0.15.1 daily-driver:
-cookie import/export formats, trash/restore, proxy validation, fingerprint
-editing, dashboard batch endpoints.
+27. ✅ **Audit P0 batch 3** (2026-11-15, v0.15.0) — code-execution surfaces:
+    - **A6 Zip-bomb limits** — `unzipTo` had zero bounds. Now: 64 MB archive
+      ceiling, 1,000-entry cap, 32 MB per-file inflated cap, 256 MB total
+      inflated cap, each a loud failure instead of a full disk. Folder-source
+      installs (`copyTree`) also drop symlinked entries instead of
+      dereferencing them into the profile dir.
+    - **A-rec #3 Scripting-endpoint gate** — the routes that run code or
+      touch secrets (`/jyl/run`, `/jyl/rescan`, `/jyl/endpoint/*`,
+      `/plugins/rescan`, `/parsers/rescan`, `/parsers/:name/run`,
+      `/resolvers/run`, alias PUT/DELETE) are refused with 403 until the
+      operator flips **Settings → Automation → Scripting endpoints**
+      (`automation.scriptingEndpoints`, default OFF — the explicit opt-in).
+      The bearer-token hook remains the auth layer on top. Read-only listing
+      routes stay open. Dashboard gained the toggle.
+    - Tests: 3 zip-bomb cases + 2 gate cases (403-by-default, opens after
+      opt-in, read-only routes unaffected).
+
+Remaining v0.15.0 items: PAN/CVV → SecretStore + `extra` redaction on profile
+reads. v0.15.1 daily-driver: cookie import/export formats, trash/restore,
+proxy validation, fingerprint editing, dashboard batch endpoints.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

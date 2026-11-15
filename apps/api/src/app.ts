@@ -10,6 +10,7 @@ import type {
   ProxyProviderService,
 } from "./application/providers/provider.service.js";
 import { toHttpError } from "./http/error-mapper.js";
+import { scriptingGate } from "./http/scripting-gate.js";
 import { registerProfileRoutes } from "./http/profiles.routes.js";
 import { registerProxyRoutes } from "./http/proxies.routes.js";
 import { registerRunRoutes } from "./http/runs.routes.js";
@@ -110,9 +111,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       parsers: deps.parsers,
       aliases: deps.aliases,
       profiles: deps.profiles,
+      assertScriptingEnabled: scriptingGate(deps.settingsStore),
     });
   }
-  if (deps.jyl) registerJylRoutes(app, { jyl: deps.jyl });
+  if (deps.jyl) {
+    registerJylRoutes(app, { jyl: deps.jyl, assertScriptingEnabled: scriptingGate(deps.settingsStore) });
+  }
   if (deps.extensions) registerExtensionRoutes(app, { extensions: deps.extensions });
   if (deps.aliases && deps.plugins) {
     registerSettingsRoutes(app, {

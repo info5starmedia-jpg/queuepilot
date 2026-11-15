@@ -18,6 +18,8 @@ export interface PluginDeps {
   parsers: ParserRegistry;
   aliases: AliasStore;
   profiles: ProfileService;
+  /** Audit A-rec #3: throws unless scripting endpoints are opted in. */
+  assertScriptingEnabled: () => void;
 }
 
 const RunResolverSchema = z.object({
@@ -40,11 +42,14 @@ const RunParserSchema = z.object({
 const AliasSchema = z.object({ secret: z.string().min(1).max(4000) });
 
 export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): void {
-  const { plugins, resolvers, parsers, aliases, profiles } = deps;
+  const { plugins, resolvers, parsers, aliases, profiles, assertScriptingEnabled } = deps;
 
   app.get("/plugins", async () => ({ plugins: plugins.list() }));
   app.get("/plugins/logs", async () => ({ logs: plugins.recentLogs() }));
-  app.post("/plugins/rescan", async () => plugins.rescan());
+  app.post("/plugins/rescan", async () => {
+    assertScriptingEnabled(); // loads new code from disk
+    return plugins.rescan();
+  });
   app.post("/plugins/:id/enable", async (req) => {
     const { id } = req.params as { id: string };
     const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
@@ -54,6 +59,7 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
 
   app.get("/resolvers", async () => ({ resolvers: resolvers.list() }));
   app.post("/resolvers/run", async (req) => {
+    assertScriptingEnabled(); // runs resolver code; may return secret values
     const body = RunResolverSchema.parse(req.body);
     const ctx = resolverContext(body.profileId, profiles);
     const value = await resolvers.resolve(body.spec, ctx, aliases);
@@ -61,8 +67,12 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
   });
 
   app.get("/parsers", async () => ({ parsers: parsers.list() }));
-  app.post("/parsers/rescan", async () => parsers.rescan());
+  app.post("/parsers/rescan", async () => {
+    assertScriptingEnabled(); // loads new code from disk
+    return parsers.rescan();
+  });
   app.post("/parsers/:name/run", async (req) => {
+    assertScriptingEnabled(); // runs parser code
     const { name } = req.params as { name: string };
     const body = RunParserSchema.parse(req.body ?? {});
     return parsers.run(name, body);
@@ -70,12 +80,14 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
 
   // Token aliases — secrets never leave the machine; routes only set/delete.
   app.put("/aliases/:alias", async (req) => {
+    assertScriptingEnabled(); // writes secrets
     const { alias } = req.params as { alias: string };
     const body = AliasSchema.parse(req.body);
     aliases.set(alias, body.secret);
     return { alias };
   });
   app.delete("/aliases/:alias", async (req) => {
+    assertScriptingEnabled();
     const { alias } = req.params as { alias: string };
     aliases.remove(alias);
     return { alias };

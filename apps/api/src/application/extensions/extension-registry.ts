@@ -217,8 +217,18 @@ export class ExtensionRegistry {
 function copyTree(src: string, dst: string): void {
   fs.cpSync(src, dst, {
     recursive: true,
-    // Finder folder-copies carry __MACOSX too; same rule as unzipTo.
-    filter: (s) => !s.split(/[\\/]/).includes("__MACOSX"),
+    // v0.15.0 (audit A-rec #2): never dereference a symlink inside an
+    // unpacked extension — it could drag arbitrary outside files into the
+    // profile dir. Symlinked entries are dropped; if the manifest was one,
+    // the root check below fails loudly.
+    filter: (s) => {
+      if (s.split(/[\\/]/).includes("__MACOSX")) return false;
+      try {
+        return !fs.lstatSync(s).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    },
   });
 }
 

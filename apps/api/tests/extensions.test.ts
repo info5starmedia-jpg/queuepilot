@@ -5,7 +5,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { ExtensionRegistry } from "../src/application/extensions/extension-registry.js";
 import { pinnedExtensionKey, extensionIdFromSpki } from "../src/application/extensions/extension-id.js";
-import { unzipTo, crxToZip } from "../src/application/extensions/zip.js";
+import { unzipTo, crxToZip, MAX_ZIP_INPUT_BYTES, MAX_ZIP_ENTRIES, MAX_ZIP_FILE_BYTES } from "../src/application/extensions/zip.js";
 import { MapSecretStore } from "./helpers.js";
 
 let dir: string;
@@ -132,6 +132,23 @@ describe("zip / crx", () => {
     const roundTrip = unzipTo(crxToZip(crx3(zip)), path.join(dir, "crx"));
     expect(roundTrip).toContain("manifest.json");
     expect(() => crxToZip(Buffer.from("not a crx"))).toThrow(/magic/);
+  });
+
+  it("rejects archives past the input ceiling (audit A6)", () => {
+    const bomb = Buffer.alloc(MAX_ZIP_INPUT_BYTES + 1);
+    expect(() => unzipTo(bomb, path.join(dir, "big"))).toThrow(/too large/);
+  });
+
+  it("rejects archives with too many entries (audit A6)", () => {
+    const entries: Record<string, string> = {};
+    for (let i = 0; i < MAX_ZIP_ENTRIES + 1; i++) entries[`f${i}.js`] = "x";
+    const zip = buildZip(entries);
+    expect(() => unzipTo(zip, path.join(dir, "many"))).toThrow(/too many entries/);
+  });
+
+  it("rejects one entry inflating past the per-file ceiling (audit A6)", () => {
+    const zip = buildZip({ "big.bin": Buffer.alloc(MAX_ZIP_FILE_BYTES + 1) });
+    expect(() => unzipTo(zip, path.join(dir, "filebomb"))).toThrow(/inflates/);
   });
 });
 

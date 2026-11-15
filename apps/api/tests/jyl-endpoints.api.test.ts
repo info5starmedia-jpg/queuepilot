@@ -11,6 +11,56 @@ import { makeTestContext, type TestContext } from "./helpers.js";
 let ctx: TestContext;
 beforeEach(() => {
   ctx = makeTestContext();
+  // These tests cover the scripting endpoints themselves — opt in.
+  // The gate's fail-closed default has its own test below.
+  ctx.settings.patch("automation", { scriptingEndpoints: true });
+});
+
+describe("scripting endpoint gate (audit A-rec #3, v0.15.0)", () => {
+  it("refuses /jyl/run with 403 until the operator opts in", async () => {
+    const locked = makeTestContext(); // default: scripting OFF
+    const res = await locked.app.inject({
+      method: "POST",
+      url: "/jyl/run",
+      payload: { kind: "command", name: "anything" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("FORBIDDEN");
+
+    locked.settings.patch("automation", { scriptingEndpoints: true });
+    const dir = path.join(locked.dataDir, "jyl");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "toolkit.mjs"),
+      `export const queuepilotJyl = { commands: [{ name: "hi", run: () => ({ ok: true }) }] };`,
+    );
+    await locked.app.inject({ method: "POST", url: "/jyl/rescan" });
+    const open = await locked.app.inject({
+      method: "POST",
+      url: "/jyl/run",
+      payload: { kind: "command", name: "hi" },
+    });
+    expect(open.statusCode).toBe(200);
+    expect(open.json()).toMatchObject({ ok: true });
+  });
+
+  it("refuses plugin/parser/resolver execution and alias writes when off", async () => {
+    const locked = makeTestContext();
+    for (const [method, url, payload] of [
+      ["POST", "/plugins/rescan", {}],
+      ["POST", "/parsers/rescan", {}],
+      ["POST", "/resolvers/run", { spec: "static:1" }],
+      ["PUT", "/aliases/x", { secret: "y" }],
+      ["DELETE", "/aliases/x", {}],
+    ] as const) {
+      const res = await locked.app.inject({ method, url, payload });
+      expect(res.statusCode, `${method} ${url}`).toBe(403);
+      expect(res.json().error.code, `${method} ${url}`).toBe("FORBIDDEN");
+    }
+    // Read-only routes stay reachable: listing is not execution.
+    const list = await locked.app.inject({ method: "GET", url: "/plugins" });
+    expect(list.statusCode).toBe(200);
+  });
 });
 
 function writeJylModule(name: string, body: string): void {
