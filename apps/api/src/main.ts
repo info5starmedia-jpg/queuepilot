@@ -47,6 +47,7 @@ import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
+import { SettingsService } from "./application/settings/settings.service.js";
 import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
@@ -186,6 +187,7 @@ export async function main(): Promise<void> {
     resolvers,
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),
+    settingsStore: new SettingsService(db),
   });
   await app.listen({ port: config.port, host: config.host });
   console.log(

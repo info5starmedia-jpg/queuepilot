@@ -263,3 +263,22 @@ td.mono {
   vertical-align: middle;
   border: 1px solid rgba(0, 0, 0, 0.25);
 }
+
+/* v0.14.13: Settings section */
+.settings-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.settings-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px 20px; }
+.settings-field { display: flex; flex-direction: column-reverse; gap: 4px; font-size: 13px; color: var(--text-dim, #8b949e); }
+.settings-field input[type="text"],
+.settings-field input[type="number"],
+.settings-field select,
+.settings-field textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.settings-field input[type="checkbox"] { width: auto; align-self: flex-start; }

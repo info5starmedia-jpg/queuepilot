@@ -34,6 +34,7 @@ import { ResolverRegistry, registerBuiltinResolvers } from "../src/application/r
 import { ParserRegistry } from "../src/application/parsers/parser-registry.js";
 import { secretAliasStore } from "../src/application/resolvers/token-aliases.js";
 import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
+import { SettingsService } from "../src/application/settings/settings.service.js";
 
 /** In-memory SheetReader: tests seed rows per sheetId, no network involved. */
 export class FakeSheets implements SheetReader {
@@ -67,6 +68,7 @@ export interface TestContext {
   plugins: PluginRegistry;
   resolvers: ResolverRegistry;
   jyl: JylRegistry;
+  settings: SettingsService;
   dataDir: string;
 }
 
@@ -119,6 +121,7 @@ export function makeTestContext(
   const parsers = new ParserRegistry(path.join(dataDir, "parsers"));
   const plugins = new PluginRegistry(path.join(dataDir, "plugins"), resolvers, parsers);
   const jyl = new JylRegistry(path.join(dataDir, "jyl"));
+  const settings = new SettingsService(db);
   const config: AppConfig = {
     port: 0,
     host: "127.0.0.1",
@@ -140,6 +143,7 @@ export function makeTestContext(
     parsers,
     aliases,
     jyl,
+    settingsStore: settings,
   });
   return {
     app,
@@ -157,6 +161,7 @@ export function makeTestContext(
     plugins,
     resolvers,
     jyl,
+    settings,
     dataDir,
   };
 }

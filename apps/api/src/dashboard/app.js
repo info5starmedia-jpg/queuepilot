@@ -491,6 +491,140 @@ $("#tabs-open").addEventListener("click", async () => {
 
 $("#tabs-profile").addEventListener("change", runTabsQuery);
 
+/* ---------------- settings (console Settings section) ---------------- */
+
+/* Field descriptors per section — mirror packages/contracts/src/settings.ts.
+   The API validates everything it receives; these drive the form only. */
+const SETTINGS_FIELDS = {
+  general: [
+    { key: "theme", label: "Theme", type: "select", options: [["jancy", "Jancy (dark, classic)"], ["light", "Light (planned)"]] },
+    { key: "density", label: "Table density", type: "select", options: [["comfortable", "Comfortable"], ["pro", "Pro (dense)"]] },
+    { key: "language", label: "Language", type: "select", options: [["en", "English"], ["es", "Español"]] },
+    { key: "startOnBoot", label: "Start QueuePilot with Windows", type: "checkbox" },
+  ],
+  engine: [
+    { key: "channel", label: "Engine update channel", type: "select", options: [["stable", "Stable"], ["beta", "Beta"]] },
+    { key: "downloadConsent", label: "Allow engine binary downloads", type: "checkbox" },
+  ],
+  launch: [
+    { key: "batchStaggerMs", label: "Batch start delay (ms)", type: "number", min: 0, max: 60000 },
+    { key: "maxConcurrent", label: "Max concurrent profiles (0 = built-in cap)", type: "number", min: 0, max: 500 },
+    { key: "openStartPages", label: "Open start pages at launch", type: "checkbox" },
+  ],
+  team: [
+    { key: "serverUrl", label: "Team server URL", type: "text", placeholder: "https://… (empty = off)" },
+    { key: "token", label: "Team server token", type: "text", placeholder: "bearer token (empty = off)" },
+    { key: "syncGroups", label: "Sync groups (comma-separated)", type: "text", placeholder: "e.g. ads, shop" },
+  ],
+  integrations: [
+    { key: "googleAccount", label: "Google account", type: "text", placeholder: "display name (empty = none)" },
+    { key: "providersNote", label: "Providers note", type: "textarea", placeholder: "where credentials live — never store secrets here" },
+  ],
+  automation: [
+    { key: "enabledPlugins", label: "Enabled plugins (comma-separated)", type: "text", placeholder: "plugin file names" },
+    { key: "enabledJyl", label: "Enabled JYL commands (comma-separated)", type: "text", placeholder: "command names" },
+  ],
+};
+const SETTINGS_SECTIONS = Object.keys(SETTINGS_FIELDS);
+let settingsData = null;
+let settingsSection = "general";
+
+function settingsToForm(section, doc) {
+  const out = {};
+  for (const f of SETTINGS_FIELDS[section]) {
+    if (f.type === "checkbox") out[f.key] = doc[f.key] === true;
+    else if (Array.isArray(doc[f.key])) out[f.key] = doc[f.key].join(", ");
+    else out[f.key] = doc[f.key] ?? "";
+  }
+  return out;
+}
+
+function settingsFromField(f, raw) {
+  if (f.type === "checkbox") return raw;
+  if (f.type === "number") return Number(raw);
+  if (f.key === "syncGroups" || f.key === "enabledPlugins" || f.key === "enabledJyl")
+    return String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+  if (f.key === "serverUrl" || f.key === "token" || f.key === "googleAccount")
+    return String(raw).trim() === "" ? null : String(raw).trim();
+  return raw;
+}
+
+async function loadSettings() {
+  try {
+    settingsData = await api("/settings/sections");
+  } catch (err) {
+    $("#settings-status").textContent = `settings unavailable: ${err.message}`;
+    return;
+  }
+  renderSettings();
+}
+
+function renderSettingsNav() {
+  const nav = $("#settings-nav");
+  nav.innerHTML = "";
+  for (const s of SETTINGS_SECTIONS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = s;
+    b.className = s === settingsSection ? "" : "secondary";
+    b.addEventListener("click", () => {
+      settingsSection = s;
+      renderSettings();
+    });
+    nav.appendChild(b);
+  }
+}
+
+function renderSettings() {
+  if (!settingsData) return;
+  renderSettingsNav();
+  const form = $("#settings-form");
+  const doc = settingsData[settingsSection];
+  const values = settingsToForm(settingsSection, doc);
+  form.innerHTML = "";
+  for (const f of SETTINGS_FIELDS[settingsSection]) {
+    const label = document.createElement("label");
+    label.className = "settings-field";
+    const id = `set-${settingsSection}-${f.key}`;
+    let control;
+    if (f.type === "select") {
+      control = `<select id="${id}">${f.options.map(([v, t]) => `<option value="${esc(v)}" ${values[f.key] === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+    } else if (f.type === "checkbox") {
+      control = `<input type="checkbox" id="${id}" ${values[f.key] ? "checked" : ""} />`;
+    } else if (f.type === "textarea") {
+      control = `<textarea id="${id}" rows="3" placeholder="${esc(f.placeholder ?? "")}">${esc(values[f.key])}</textarea>`;
+    } else {
+      control = `<input type="${f.type}" id="${id}" value="${esc(values[f.key])}" ${f.min !== undefined ? `min="${f.min}"` : ""} ${f.max !== undefined ? `max="${f.max}"` : ""} placeholder="${esc(f.placeholder ?? "")}" />`;
+    }
+    label.innerHTML = `${control}<span>${esc(f.label)}</span>`;
+    form.appendChild(label);
+  }
+  $("#settings-status").textContent = "";
+}
+
+async function persistSetting(key, field) {
+  const el = $(`#set-${settingsSection}-${key}`);
+  const raw = field.type === "checkbox" ? el.checked : el.value;
+  const value = settingsFromField(field, raw);
+  try {
+    const updated = await api(`/settings/sections/${settingsSection}`, {
+      method: "PATCH",
+      body: JSON.stringify({ [key]: value }),
+    });
+    settingsData[settingsSection] = updated;
+    $("#settings-status").textContent = `${settingsSection}.${key} saved`;
+  } catch (err) {
+    $("#settings-status").textContent = `save failed: ${err.message}`;
+    renderSettings(); // revert to last known-good values
+  }
+}
+
+$("#settings-form").addEventListener("change", (e) => {
+  const key = e.target.id?.replace(`set-${settingsSection}-`, "");
+  const field = SETTINGS_FIELDS[settingsSection].find((f) => f.key === key);
+  if (field) persistSetting(key, field);
+});
+
 /* ---------------- live events (SSE) ---------------- */
 
 function pushEvent(e) {
@@ -540,5 +674,6 @@ loadProfiles();
 loadProxies();
 loadProxyProviders();
 refreshTabsProfiles();
+loadSettings();
 connectEvents();
 setInterval(refreshHealth, 30_000);

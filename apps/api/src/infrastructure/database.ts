@@ -179,6 +179,18 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE proxy_providers ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    id: "006-settings",
+    up: `
+      -- v0.14.13: operator settings store (console Settings section).
+      -- One row per section; value is the section's JSON document.
+      CREATE TABLE settings (
+        section TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

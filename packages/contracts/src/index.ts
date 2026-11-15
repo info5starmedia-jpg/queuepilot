@@ -7,6 +7,7 @@ export * from "./adspower.js";
 export * from "./providers.js";
 export * from "./tabs.js";
 export * from "./attestation.js";
+export * from "./settings.js";
 
 /**
  * Domain error codes shared across the API, the UI and automation clients.

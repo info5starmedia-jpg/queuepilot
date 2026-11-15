@@ -34,7 +34,8 @@ import type { ExtensionRegistry } from "./application/extensions/extension-regis
 import type { TotpService } from "./application/profiles/totp.service.js";
 import { registerExtensionRoutes } from "./http/extensions.routes.js";
 import { SettingsBundleService } from "./application/settings/settings-bundle.service.js";
-import { registerSettingsRoutes } from "./http/settings.routes.js";
+import { registerSettingsRoutes, registerSettingsSectionRoutes } from "./http/settings.routes.js";
+import type { SettingsService } from "./application/settings/settings.service.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -53,6 +54,7 @@ export interface AppDeps {
   jyl?: JylRegistry;
   extensions?: ExtensionRegistry;
   totp?: TotpService;
+  settingsStore?: SettingsService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -109,6 +111,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         deps.proxyProviders,
       ),
     });
+  }
+  if (deps.settingsStore) {
+    registerSettingsSectionRoutes(app, { store: deps.settingsStore });
   }
 
   return app;

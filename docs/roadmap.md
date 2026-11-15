@@ -597,6 +597,30 @@ its sub-steps and goal in one place.
       bulk-loads ≤500 cookies with per-cookie results, optionally scoped to
       one partition through its open tabs' contexts.
     - Tests: 34 across the three areas; parity-jancy §1/§4/§5 rows flipped.
+17. ✅ **Settings** (2026-11-15, v0.14.13) — the console Settings section
+    (A1 from the workspace brainstorm; Jancy classic style, see
+    docs/ui-design.md):
+    - **Store** — `settings` table (migration 006, one JSON document per
+      section); shapes + defaults owned by `packages/contracts/src/settings.ts`
+      (six sections: general / engine / launch / team / integrations /
+      automation); `SettingsService` merges stored-over-defaults shallowly
+      and re-validates, so a corrupted row degrades to defaults instead of
+      bricking the console.
+    - **API** — `GET /settings/sections` (all), `GET/PATCH
+      /settings/sections/:section`; PATCH validates with per-section partial
+      zod schemas, unknown section or invalid value = 400 VALIDATION_FAILED.
+      Mounted under `/settings/sections/` so the section param route can
+      never shadow the static `/settings/export` | `/settings/import` bundle
+      routes (verified by test).
+    - **Console** — Settings section after Events: subsection nav
+      (general/engine/launch/team/integrations/automation) rendering
+      schema-driven selects/checkboxes/inputs; every change PATCHes
+      immediately ("saved automatically on change"), failed saves revert the
+      form and post to the event stream.
+    - **Deliberately out of scope** — the light theme CSS (schema only; the
+      jancy dark theme IS the shipped look), startOnBoot wiring (schema only).
+    - Tests: 10 (service defaults/merge/persistence-across-restart/rejections
+      + HTTP incl. bundle-route coexistence); 456/456 green.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
