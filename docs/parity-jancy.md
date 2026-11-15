@@ -20,7 +20,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
 | Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ — index only moves via rotate |
-| Tab color per profile | ❌ | |
+| Tab color per profile | ✅ | v0.14.10: `tabColor` (#rgb/#rrggbb, validated) rides the persona bag — CSV `color` column, PATCH persona, console color dot per profile. Engine-side tab tinting deliberately out of the TS layer |
 | Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | ❌ | Console is grid + actions only |
 
 ## 2. Resolvers & parsers (the 2FA layer)
