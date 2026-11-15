@@ -79,6 +79,11 @@ export class ProfileService {
     return this.profiles.list(filter);
   }
 
+  /** Folder-tab aggregates (v0.14.16): every group + total/running counts. */
+  groups(): { group: string; total: number; running: number }[] {
+    return this.profiles.groups();
+  }
+
   update(id: string, input: UpdateProfileInput): Profile {
     const p = this.get(id);
     if (input.proxyId && !this.proxies.get(input.proxyId)) {

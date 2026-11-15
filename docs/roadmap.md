@@ -655,6 +655,20 @@ its sub-steps and goal in one place.
       window-state hooks.
     - Tests: 8 (rect math x3, bounds, batch-tile, restore-after-restart,
       no-remembered row, validation).
+20. ✅ **Folder/group tabs** (2026-11-15, v0.14.16) — GoLogin-style
+    navigation above the profiles grid, the "future nav" slot from
+    docs/ui-design.md:
+    - **API** — `GET /profile-groups`: one SQL aggregate (total + running
+      per group; the running count feeds the tab badges). `GET /profiles
+      ?group=` filter already existed and is unchanged.
+    - **Console** — "All" tab plus one tab per group, each showing
+      `total · running▶`; all profiles are fetched once and filtered
+      client-side so tab switches are instant; SSE reloads refresh tabs +
+      grid together; batch selection (A2) survives tab switches and works
+      per-tab.
+    - Gotcha worth remembering: `group` is a reserved word in SQLite —
+      the aggregate aliases `grp AS "group"` (quoted).
+    - Tests: 3 (aggregate counts incl. running, empty list, group filter).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

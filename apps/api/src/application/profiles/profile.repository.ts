@@ -74,6 +74,20 @@ export class ProfileRepository {
     return (this.db.prepare(sql).all(...args) as ProfileRow[]).map(toProfile);
   }
 
+  /** Folder-tab aggregates: every group with its total + running counts. */
+  groups(): { group: string; total: number; running: number }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT grp AS "group",
+                  COUNT(*) AS total,
+                  SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
+           FROM profiles GROUP BY grp ORDER BY grp ASC`,
+        )
+        .all() as { group: string; total: number; running: number }[]
+    );
+  }
+
   update(p: Profile): void {
     this.db
       .prepare(

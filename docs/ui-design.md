@@ -17,9 +17,9 @@ Key points:
 - **Rejected alternatives:** big card grid (Option B — too sparse for
   hundreds of profiles) and card-first hybrid (Option C). Profile cards stay
   only as the per-profile action surface.
-- **Future navigation:** folder/group tabs above the profiles table (the
-  GoLogin pattern). Not built yet — track as its own task before adding more
-  sections.
+- **Navigation:** folder/group tabs above the profiles table (the GoLogin
+  pattern) — built in v0.14.16: "All" + one tab per group with
+  total/running badges; client-side filtering for instant switches.
 - **Light theme:** schema-only for now (`general.theme: "jancy" | "light"` in
   `packages/contracts/src/settings.ts`). Persisting the choice works end to
   end; the light CSS variable override is deliberately unbuilt until asked.
@@ -50,3 +50,5 @@ tabs) and any headless mode are **out of scope** — owner ruled both out on
 3. ✅ A3 — Window tiling: cascade/grid presets over running windows
    (`POST /profiles/batch-tile`), single-window bounds, and restore of the
    per-profile geometry remembered in the persona layer (v0.14.15).
+4. ✅ Folder/group tabs above the profiles grid — "All" + per-group tabs
+   with total/running badges, client-side filtering (v0.14.16).

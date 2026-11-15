@@ -48,6 +48,9 @@ export function registerProfileRoutes(
     return { profiles };
   });
 
+  // Folder-tab aggregates for the console's group tabs (v0.14.16).
+  app.get("/profile-groups", async () => ({ groups: service.groups() }));
+
   app.post("/profiles", async (req, reply) => {
     const input = CreateProfileInputSchema.parse(req.body);
     const profile = service.create(input);

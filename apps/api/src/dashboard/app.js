@@ -148,11 +148,55 @@ async function startSelected() {
   await loadProfiles();
 }
 
+/* v0.14.16 folder tabs — "All" plus one tab per group (GoLogin pattern).
+   All profiles are fetched once and filtered client-side so switching tabs
+   is instant; SSE reloads refresh both the tabs and the grid. */
+let allProfiles = [];
+let activeGroup = "all";
+
+function renderProfileTabs(groups) {
+  const bar = $("#profile-tabs");
+  const total = groups.reduce((n, g) => n + g.total, 0);
+  const running = groups.reduce((n, g) => n + g.running, 0);
+  const tabs = [
+    { key: "all", label: "All", total, running },
+    ...groups.map((g) => ({ key: g.group, label: g.group, total: g.total, running: g.running })),
+  ];
+  bar.innerHTML = "";
+  for (const t of tabs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "folder-tab" + (t.key === activeGroup ? " active" : "");
+    b.innerHTML = `${esc(t.label)} <span class="folder-count">${t.total}${t.running ? ` · ${t.running}▶` : ""}</span>`;
+    b.addEventListener("click", () => {
+      activeGroup = t.key;
+      renderProfileTabs(groups);
+      renderProfileGrid();
+    });
+    bar.appendChild(b);
+  }
+}
+
+function visibleProfiles() {
+  return activeGroup === "all"
+    ? allProfiles
+    : allProfiles.filter((p) => p.group === activeGroup);
+}
+
 async function loadProfiles() {
-  const { profiles } = await api("/profiles");
+  const [{ profiles }, groupData] = await Promise.all([
+    api("/profiles"),
+    api("/profile-groups").catch(() => ({ groups: [] })),
+  ]);
+  allProfiles = profiles;
+  renderProfileTabs(groupData.groups ?? []);
+  renderProfileGrid();
+}
+
+function renderProfileGrid() {
   const grid = $("#profiles");
   grid.innerHTML = "";
-  for (const p of profiles) {
+  for (const p of visibleProfiles()) {
     const card = document.createElement("div");
     card.className = "card";
     card.dataset.id = p.id;

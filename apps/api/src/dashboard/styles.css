@@ -297,3 +297,17 @@ td.mono {
   border-radius: 8px;
 }
 .batch-check { margin-right: 2px; }
+
+/* v0.14.16: folder tabs above the profiles grid */
+.folder-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.folder-tab {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.folder-tab.active { border-color: var(--accent); color: var(--accent); }
+.folder-count { color: var(--text-dim, #8b949e); margin-left: 4px; font-size: 12px; }
