@@ -523,6 +523,19 @@ its sub-steps and goal in one place.
       SSE run./tab. events refresh it.
     - Tests: 8 unit + 5 API; §4 rows updated (mass select ✅, Tab Thinger ✅,
       tab view 🟡, bulk-open 🟡).
+14. ✅ **Cookie Thinger** (2026-11-15, v0.14.9) — programmable cookie
+    surgery over CDP:
+    - `GET /profiles/:id/cookies?domain=&name=&partitionId=` — list with
+      `*` wildcard filters (case-insensitive, leading-dot tolerant);
+      partition scope resolved via the partition's open tabs →
+      `Target.getTargets` browserContextId → `Network.getCookies`.
+    - `POST …/cookies` — set one cookie; partition-scoped sets go through
+      an attached live page so they land in the partition's store.
+    - `POST …/cookies/clear` — mass delete by filter; a filter-less
+      whole-jar wipe is refused (400).
+    - MockCdpServer grew Network.* hooks (getAllCookies/getCookies/
+      setCookie/deleteCookies).
+    - Tests: 8 API; §5 rows flipped ✅ (mass clearing + Cookie Thinger).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

@@ -25,10 +25,18 @@ export class MockCdpServer {
   /** Test hook: what the next Runtime.evaluate returns (returnByValue). */
   evaluateResult: unknown = { filled: [], missing: [] };
   /** Test hook: page targets Target.getTargets reports. */
-  pageTargets: { targetId: string; type: string }[] = [
+  pageTargets: { targetId: string; type: string; browserContextId?: string }[] = [
     { targetId: "page-1", type: "page" },
   ];
   supportsContexts = true;
+  /** Test hook: cookies Network.getAllCookies reports. */
+  allCookies: Record<string, unknown>[] = [];
+  /** Test hook: cookies Network.getCookies {browserContextId} reports. */
+  contextCookies = new Map<string, Record<string, unknown>[]>();
+  /** Network.setCookie calls received (params, in order). */
+  readonly setCookieCalls: Record<string, unknown>[] = [];
+  /** Network.deleteCookies calls received (params, in order). */
+  readonly deleteCookieCalls: Record<string, unknown>[] = [];
   private server: http.Server;
   private readonly sockets = new Set<net.Socket>();
   private nextContext = 0;
@@ -170,6 +178,19 @@ export class MockCdpServer {
       case "Target.closeTarget":
         return { id, result: { success: true } };
       case "Target.disposeBrowserContext":
+        return { id, result: {} };
+      case "Network.getAllCookies":
+        return { id, result: { cookies: this.allCookies } };
+      case "Network.getCookies": {
+        const ctx = params.browserContextId as string | undefined;
+        const cookies = ctx ? (this.contextCookies.get(ctx) ?? []) : this.allCookies;
+        return { id, result: { cookies } };
+      }
+      case "Network.setCookie":
+        this.setCookieCalls.push(params);
+        return { id, result: { success: true } };
+      case "Network.deleteCookies":
+        this.deleteCookieCalls.push(params);
         return { id, result: {} };
       default:
         return { id, error: { code: -32601, message: `${method} not found` } };

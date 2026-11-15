@@ -17,6 +17,7 @@ import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
+import { registerCookieRoutes } from "./http/cookies.routes.js";
 import { registerGoogleRoutes } from "./http/google.routes.js";
 import { registerDashboardRoutes } from "./http/dashboard.routes.js";
 import { registerBundleRoutes } from "./http/bundle.routes.js";
@@ -84,6 +85,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
+  registerCookieRoutes(app, deps.lifecycle);
   registerGoogleRoutes(app, deps.google);
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);

@@ -73,8 +73,8 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Per-tab / mass cookie clearing | ❌ | Engine-side only |
-| Cookie Thinger (programmable cookie surgery) | ❌ | Adopt — unique power feature |
+| Per-tab / mass cookie clearing | ✅ | v0.14.9: `POST /profiles/:id/cookies/clear` — domain/name wildcard filter, whole-run or partition-scoped (deletes through a live page in the partition); refuses a filter-less whole-jar wipe |
+| Cookie Thinger (programmable cookie surgery) | ✅ | v0.14.9: `GET /profiles/:id/cookies` (wildcard filters, partition scoping via `Network.getCookies{browserContextId}`), `POST …/cookies` set (partition-aware), `POST …/cookies/clear` mass delete with per-cookie results |
 
 ## 6. Scripting & plugins
 
