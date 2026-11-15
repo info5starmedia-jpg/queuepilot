@@ -311,3 +311,68 @@ td.mono {
 }
 .folder-tab.active { border-color: var(--accent); color: var(--accent); }
 .folder-count { color: var(--text-dim, #8b949e); margin-left: 4px; font-size: 12px; }
+
+/* v0.14.20: profile panel — slide-over editor */
+.profile-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 92vw);
+  background: var(--panel);
+  border-left: 1px solid var(--accent);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 40;
+}
+.profile-panel .panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.profile-panel h3 { margin: 0; font-size: 16px; }
+.profile-panel fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.profile-panel legend { padding: 0 6px; color: var(--accent); font-size: 13px; }
+.profile-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim, #8b949e);
+}
+.profile-panel label.check { color: var(--text); }
+.profile-panel label input:not([type="checkbox"]):not([type="color"]),
+.profile-panel label textarea,
+.profile-panel label select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.profile-panel label textarea { resize: vertical; }
+.profile-panel label input[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: none;
+}
+.profile-panel .panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

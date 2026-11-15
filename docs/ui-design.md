@@ -55,3 +55,6 @@ tabs) and any headless mode are **out of scope** — owner ruled both out on
 5. ✅ Daily-driver batch (v0.14.19) — profile search box (client-side
    name/email/group filter), "Stop selected" on the batch bar, and a
    "Clone" button per card (fresh fingerprint, persona/proxy copied).
+6. ✅ Profile panel (v0.14.20) — slide-over editor per profile (identity
+   + persona columns + proxy + delete), opened from an "Edit" button on
+   each card.

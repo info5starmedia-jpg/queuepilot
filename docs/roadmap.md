@@ -732,11 +732,35 @@ its sub-steps and goal in one place.
     - Tests: 8 (clone persona/fresh-identity/provider-reset, explicit
       name, 404; batch-stop running/idle-idempotent/ghost-row/400;
       server-side query filter).
+24. ✅ **Profile panel + console resuscitation** (2026-11-15, v0.14.20) —
+    the profile editor UX, built on the vanilla console per ADR-0005
+    (React rewrite stays deferred until the console outgrows it):
+    - **Slide-over panel** — "Edit" on every profile card opens a
+      right-side editor: identity (name / group / email / tags / notes /
+      launch proxy) and persona (phone / dob / address line 1 / SMS
+      numbers / start pages / tab color / favorite). Saves compose
+      `PATCH /profiles/:id` + `PATCH /profiles/:id/persona`; the address
+      object is merged (line 1 follows the input, other fields preserved).
+      A "Delete profile" danger button (confirm-gated) finally exposes
+      the long-existing DELETE endpoint in the UI.
+    - **Console resuscitation** — `renderProfileGrid` had used `await`
+      since v0.14.16 without being `async`: a module-wide SyntaxError
+      that silently killed the ENTIRE dashboard script (grid, batch bar,
+      settings — everything after it in the file). Fixed by making the
+      function async. New `dashboard-syntax.test.ts` regression guard
+      parses every dashboard .js at test time so this class of bug can
+      never ship again.
+    - Tests: 4 (app.js parse guard + settings/proxies parse, panel GET
+      exposes every edited persona field, PATCH null-clears email+proxy
+      in one call).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
-See P7 Jancy-gap item 5 above for sub-steps and goal. Remaining v0.14 items:
-profile panel UX (React console per ADR-0005); WPM typing simulation.
+See P7 Jancy-gap item 5 above for sub-steps and goal. The v0.14 list is
+now complete: WPM typing shipped in item 11, and the profile panel UX
+shipped in item 24 on the vanilla console (ADR-0005's React rewrite
+remains optional and deferred — revisit only if the console outgrows
+vanilla).
 
 ## P5.6 — Perf & startup
 

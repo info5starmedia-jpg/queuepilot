@@ -136,3 +136,65 @@ describe("GET /profiles?query= (server-side search backing the console box)", ()
     expect(names).toEqual(["Shopper One"]);
   });
 });
+
+describe("profile panel contract (v0.14.20)", () => {
+  it("GET /profiles/:id exposes every persona field the panel edits", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "panel", generateFingerprint: true });
+    await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/persona`,
+      payload: {
+        phone: "+1 416 555 0100",
+        dob: "1990-04-12",
+        smsNumbers: [{ number: "+1 416 555 0199" }],
+        startUrls: ["https://example.com"],
+        tabColor: "#ff8800",
+        favorite: true,
+        address: { line1: "100 Queen St W", city: "Toronto" },
+      },
+    });
+    const res = await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.extra.phone).toBe("+1 416 555 0100");
+    expect(body.extra.dob).toBe("1990-04-12");
+    expect(body.extra.smsNumbers).toEqual([
+      { label: "", number: "+1 416 555 0199", countryCode: null },
+    ]);
+    expect(body.extra.startUrls).toEqual(["https://example.com"]);
+    expect(body.extra.tabColor).toBe("#ff8800");
+    expect(body.extra.favorite).toBe(true);
+    expect(body.extra.address.line1).toBe("100 Queen St W");
+    expect(body.extra.address.city).toBe("Toronto");
+  });
+
+  it("PATCH /profiles/:id clears email and proxy with null in one call", async () => {
+    const ctx = makeTestContext();
+    const proxy = ctx.proxies.create({
+      name: "panel-proxy",
+      type: "http",
+      host: "127.0.0.1",
+      port: 8080,
+      username: null,
+      password: null,
+    });
+    const p = ctx.profiles.create({
+      name: "panel-clear",
+      email: "old@example.com",
+      proxyId: proxy.id,
+      generateFingerprint: true,
+    });
+    const res = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}`,
+      payload: { email: null, proxyId: null },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.email).toBeNull();
+    expect(body.proxyId).toBeNull();
+    expect(ctx.profiles.get(p.id).email).toBeNull();
+    expect(ctx.profiles.get(p.id).proxyId).toBeNull();
+  });
+});

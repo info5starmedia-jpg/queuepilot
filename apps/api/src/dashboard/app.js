@@ -234,7 +234,7 @@ async function loadProfiles() {
   renderProfileGrid();
 }
 
-function renderProfileGrid() {
+async function renderProfileGrid() {
   const grid = $("#profiles");
   grid.innerHTML = "";
   for (const p of visibleProfiles()) {
@@ -263,6 +263,7 @@ function renderProfileGrid() {
       <div><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select for batch" ${batchSelection.has(p.id) ? "checked" : ""} /> <span class="name">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
       <div class="meta">${esc(p.group)}${p.email ? " · " + esc(p.email) : ""}${tabsInfo ? " · " + tabsInfo : ""}</div>
       <div class="actions">
+        <button class="secondary" data-act="edit" title="open profile editor">Edit</button>
         <button class="secondary" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</button>
         ${
           p.status === "running"
@@ -283,6 +284,10 @@ function renderProfileGrid() {
 
 async function onProfileAction(id, act, profile) {
   try {
+    if (act === "edit") {
+      await openProfilePanel(id);
+      return;
+    }
     if (act === "start")
       await api(`/profiles/${id}/start`, { method: "POST", body: "{}" });
     if (act === "stop") await api(`/profiles/${id}/stop`, { method: "POST" });
@@ -312,6 +317,160 @@ async function onProfileAction(id, act, profile) {
   }
   await loadProfiles();
 }
+
+/* ---------------- v0.14.20 profile panel ----------------
+   Slide-over editor for one profile: identity fields + the Jancy persona
+   columns (phone/dob/address/SMS/start pages/tab color/favorite), proxy
+   assignment, and delete. Reads GET /profiles/:id, saves PATCH
+   /profiles/:id + PATCH /profiles/:id/persona. */
+
+let panelProfileId = null;
+let panelExtra = {};
+let panelTabColor = null;
+
+async function openProfilePanel(id) {
+  try {
+    const [p, proxyData] = await Promise.all([
+      api(`/profiles/${id}`),
+      api("/proxies").catch(() => ({ proxies: [] })),
+    ]);
+    panelProfileId = p.id;
+    panelExtra = p.extra ?? {};
+    panelTabColor = typeof panelExtra.tabColor === "string" ? panelExtra.tabColor : null;
+
+    $("#panel-title").textContent = p.name;
+    $("#pf-name").value = p.name;
+    $("#pf-group").value = p.group ?? "";
+    $("#pf-email").value = p.email ?? "";
+    $("#pf-tags").value = (p.tags ?? []).join(", ");
+    $("#pf-notes").value = p.notes ?? "";
+
+    const proxies = proxyData.proxies ?? [];
+    const sel = $("#pf-proxy");
+    sel.innerHTML =
+      `<option value="">(none)</option>` +
+      proxies
+        .map(
+          (x) =>
+            `<option value="${esc(x.id)}">${esc(x.name)} (${esc(x.host)}:${esc(x.port)})</option>`,
+        )
+        .join("");
+    sel.value = p.proxyId ?? "";
+
+    $("#pf-phone").value = panelExtra.phone ?? "";
+    $("#pf-dob").value = panelExtra.dob ?? "";
+    $("#pf-address1").value = panelExtra.address?.line1 ?? "";
+    $("#pf-sms").value = (panelExtra.smsNumbers ?? [])
+      .map((n) => (typeof n === "object" && n !== null ? (n.number ?? "") : String(n)))
+      .filter(Boolean)
+      .join("\n");
+    $("#pf-starturls").value = (panelExtra.startUrls ?? []).join("\n");
+    $("#pf-favorite").checked = panelExtra.favorite === true;
+    $("#pf-tabcolor").value = /^#[0-9a-fA-F]{6}$/.test(panelTabColor ?? "")
+      ? panelTabColor
+      : "#4a9eff";
+    $("#panel-status").textContent = "";
+    $("#profile-panel").hidden = false;
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+}
+
+function closeProfilePanel() {
+  panelProfileId = null;
+  panelExtra = {};
+  panelTabColor = null;
+  $("#profile-panel").hidden = true;
+}
+
+$("#panel-close")?.addEventListener("click", closeProfilePanel);
+
+$("#pf-clearcolor")?.addEventListener("click", () => {
+  panelTabColor = null;
+  $("#panel-status").textContent = "tab color cleared — save to apply";
+});
+
+$("#panel-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!panelProfileId) return;
+  const id = panelProfileId;
+  const tags = $("#pf-tags")
+    .value.split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 24);
+  const email = $("#pf-email").value.trim();
+  const sms = $("#pf-sms")
+    .value.split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  const startUrls = $("#pf-starturls")
+    .value.split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 25);
+  const phone = $("#pf-phone").value.trim();
+  const dob = $("#pf-dob").value.trim();
+  const address1 = $("#pf-address1").value.trim();
+  const colorInput = $("#pf-tabcolor").value;
+  // Color travels only if it changed from the loaded state or was cleared.
+  const tabColor = panelTabColor === null ? null : /^#[0-9a-fA-F]{6}$/.test(colorInput) ? colorInput : null;
+
+  try {
+    await api(`/profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: $("#pf-name").value.trim(),
+        group: $("#pf-group").value.trim() || "default",
+        email: email === "" ? null : email,
+        notes: $("#pf-notes").value,
+        tags,
+        proxyId: $("#pf-proxy").value || null,
+      }),
+    });
+    await api(`/profiles/${id}/persona`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        favorite: $("#pf-favorite").checked,
+        smsNumbers: sms,
+        startUrls,
+        phone: phone === "" ? null : phone,
+        dob: dob === "" ? null : dob,
+        tabColor,
+        // preserve the rest of the address object; line1 follows the input
+        address: { ...(panelExtra.address ?? {}), line1: address1 === "" ? null : address1 },
+      }),
+    });
+    $("#panel-status").textContent = "saved";
+    pushEvent({
+      type: "info",
+      detail: `profile "${$("#pf-name").value.trim()}" saved`,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    $("#panel-status").textContent = err.message;
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+  await loadProfiles();
+});
+
+$("#pf-delete")?.addEventListener("click", async () => {
+  if (!panelProfileId) return;
+  const id = panelProfileId;
+  const name = $("#pf-name").value.trim();
+  if (!window.confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/profiles/${id}`, { method: "DELETE" });
+    batchSelection.delete(id);
+    updateBatchBar();
+    closeProfilePanel();
+    pushEvent({ type: "info", detail: `profile "${name}" deleted`, at: new Date().toISOString() });
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+  await loadProfiles();
+});
 
 $("#create-profile").addEventListener("submit", async (e) => {  e.preventDefault();
   const name = $("#new-name").value.trim();

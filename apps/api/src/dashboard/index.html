@@ -159,6 +159,43 @@
       </section>
     </main>
 
+    <!-- v0.14.20 profile panel: slide-over editor for one profile.
+         Opened from the "Edit" button on a card (or clicking the name). -->
+    <div id="profile-panel" class="profile-panel" hidden>
+      <div class="panel-head">
+        <h3 id="panel-title">Profile</h3>
+        <button id="panel-close" class="secondary" title="close">✕</button>
+      </div>
+      <form id="panel-form">
+        <fieldset>
+          <legend>Identity</legend>
+          <label>name <input id="pf-name" required maxlength="120" /></label>
+          <label>group <input id="pf-group" maxlength="120" /></label>
+          <label>email <input id="pf-email" type="email" maxlength="200" /></label>
+          <label>tags <input id="pf-tags" placeholder="comma, separated" maxlength="500" /></label>
+          <label>notes <textarea id="pf-notes" rows="3" maxlength="4000"></textarea></label>
+          <label>launch proxy
+            <select id="pf-proxy"><option value="">(none)</option></select>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Persona</legend>
+          <label>phone <input id="pf-phone" maxlength="40" /></label>
+          <label>dob <input id="pf-dob" maxlength="40" placeholder="YYYY-MM-DD" /></label>
+          <label>address line 1 <input id="pf-address1" maxlength="200" /></label>
+          <label>SMS numbers <textarea id="pf-sms" rows="2" placeholder="one per line"></textarea></label>
+          <label>start pages <textarea id="pf-starturls" rows="2" placeholder="one URL per line, opened at launch"></textarea></label>
+          <label>tab color <input id="pf-tabcolor" type="color" /> <button type="button" id="pf-clearcolor" class="secondary">clear</button></label>
+          <label class="check"><input id="pf-favorite" type="checkbox" /> favorite</label>
+        </fieldset>
+        <div class="panel-actions">
+          <button type="submit">Save</button>
+          <button type="button" id="pf-delete" class="danger">Delete profile</button>
+          <span id="panel-status" class="hint"></span>
+        </div>
+      </form>
+    </div>
+
     <script type="module" src="/dashboard/app.js"></script>
   </body>
 </html>
