@@ -32,6 +32,9 @@ export function unzipTo(zip: Buffer, targetDir: string): string[] {
 
     // Directories and anything outside the package root are skipped.
     if (name.endsWith("/")) continue;
+    // Finder zips carry a __MACOSX metadata twin of every entry; it has no
+    // business in an extension install (Fury issue-28 behavior).
+    if (name.startsWith("__MACOSX/") || name.includes("/__MACOSX/")) continue;
     const rel = safeJoin(targetDir, name);
     if (rel === null) continue; // zip-slip attempt — never written
 

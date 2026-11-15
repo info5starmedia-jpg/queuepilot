@@ -102,6 +102,11 @@ export class ExtensionRegistry {
           sourcePath.toLowerCase().endsWith(".crx") ? crxToZip(buf) : buf;
         unzipTo(zip, staging);
       }
+      // Packages frequently nest everything one folder deep ("ext-1.2.3/
+      // manifest.json"); lift the contents so the root check below sees the
+      // manifest (Fury issue-28 behavior). Ambiguous or deeper nesting is
+      // left alone — the root check then fails loudly, never guesses.
+      resolveManifestRoot(staging);
       const manifestPath = path.join(staging, "manifest.json");
       if (!fs.existsSync(manifestPath)) {
         throw new Error("extension package has no manifest.json at its root");
@@ -203,5 +208,30 @@ export class ExtensionRegistry {
 
 /** Recursive copy (fs.cpSync is available on Node 18+, used with explicit filter). */
 function copyTree(src: string, dst: string): void {
-  fs.cpSync(src, dst, { recursive: true });
+  fs.cpSync(src, dst, {
+    recursive: true,
+    // Finder folder-copies carry __MACOSX too; same rule as unzipTo.
+    filter: (s) => !s.split(/[\\/]/).includes("__MACOSX"),
+  });
+}
+
+/**
+ * If the package nests everything under a single root folder, lift its
+ * contents into `staging` so manifest.json lands at the top. Only lifts when
+ * EXACTLY ONE non-junk subdirectory exists and it holds the manifest —
+ * anything else is left for the caller's root check to reject loudly.
+ */
+function resolveManifestRoot(staging: string): void {
+  if (fs.existsSync(path.join(staging, "manifest.json"))) return;
+  const subs = fs
+    .readdirSync(staging, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name !== "__MACOSX")
+    .map((e) => e.name);
+  if (subs.length !== 1) return;
+  const inner = path.join(staging, subs[0]!);
+  if (!fs.existsSync(path.join(inner, "manifest.json"))) return;
+  for (const entry of fs.readdirSync(inner)) {
+    fs.renameSync(path.join(inner, entry), path.join(staging, entry));
+  }
+  fs.rmdirSync(inner);
 }

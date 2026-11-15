@@ -449,6 +449,21 @@ its sub-steps and goal in one place.
    - Tests: MockCdpServer grew attach/detach/getTargets/Runtime.evaluate
      hooks; FakeBrowserRuntime got a `nextWsEndpoint` override. 366/366
      green. Remaining: address/identity autofill, WPM typing simulation.
+9. ✅ **Upstream rescan + adoption** (2026-11-14 evening) — Fury 0.5.2–0.5.5
+   and AliasMode commits since the morning scan, full verdicts in
+   `docs/upstream-scan-2026-11-14.md`:
+   - Bookmark sets: machine-side known-id record — unknown markers
+     (colleague's bundle sets) survive, emptied config cleans managed
+     folders (Fury `70d26114`).
+   - Extensions: one-folder-down manifest lifting + `__MACOSX` drop in zips
+     and folder copies (Fury `98f5167d` / issue 28).
+   - Launch refusals: `cdp_readiness` stage — bootstrap PID ≠ answering
+     DevTools endpoint; named, cleaned up, unit-tested (AliasMode PR #219
+     taxonomy completed).
+   - Verified already-had: fresh egress check per proxied launch feeding
+     WebRTC config; provider refresh never races a launch.
+   - Queued: engine C++ patches 0052/0123/0071 for the next rebuild (P8);
+     team-server recovery-key design recorded for P7.7.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

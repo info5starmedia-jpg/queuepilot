@@ -7,7 +7,9 @@ import {
   FuryCoreRuntime,
   personaConfig,
   resolveFuryBinary,
+  waitForCdpReady,
 } from "../src/application/runtime/fury-core.runtime.js";
+import http from "node:http";
 
 /**
  * Fury core runtime — the persona mapping is the load-bearing piece (it is
@@ -168,5 +170,49 @@ describe("resolveFuryBinary", () => {
       }),
     );
     expect(resolveFuryBinary(dir)).toBeNull();
+  });
+});
+
+describe("waitForCdpReady", () => {
+  function mockServer(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void): Promise<{ port: number; close: () => Promise<void> }> {
+    return new Promise((resolve) => {
+      const server = http.createServer(handler);
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        const port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve({ port, close: () => new Promise((r) => server.close(() => r())) });
+      });
+    });
+  }
+
+  it("resolves as soon as /json/version answers", async () => {
+    let hits = 0;
+    const srv = await mockServer((req, res) => {
+      if (req.url === "/json/version") {
+        hits++;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ Browser: "fury/1.0" }));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    try {
+      await waitForCdpReady(srv.port, 5_000);
+      expect(hits).toBeGreaterThan(0);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("retries through connection refusals, then times out with a named error", async () => {
+    // Nothing listens on this port: every poll is a refusal.
+    const probe = http.createServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    const addr = probe.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await new Promise<void>((r) => probe.close(() => r()));
+    const started = Date.now();
+    await expect(waitForCdpReady(port, 1_000)).rejects.toThrow(/did not answer within/);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
   });
 });

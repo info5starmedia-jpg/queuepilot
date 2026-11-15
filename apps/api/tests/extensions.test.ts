@@ -183,6 +183,50 @@ describe("ExtensionRegistry", () => {
     expect(() => reg.install("p1", bad)).toThrow(/manifest/);
   });
 
+  it("lifts a single nested root folder so a nested manifest installs (Fury issue-28)", () => {
+    const zipPath = path.join(dir, "nested.zip");
+    fs.writeFileSync(
+      zipPath,
+      buildZip({
+        "NestedExt-1.0.0/manifest.json": JSON.stringify({ manifest_version: 3, name: "NestedExt", version: "1.0.0" }),
+        "NestedExt-1.0.0/content.js": "// nested",
+      }),
+    );
+    const reg = make();
+    const entry = reg.install("p1", zipPath);
+    expect(entry.name).toBe("NestedExt");
+    expect(
+      fs.existsSync(path.join(profileDir("p1"), "Default", "Extensions", entry.id, "1.0.0", "content.js")),
+    ).toBe(true);
+  });
+
+  it("drops __MACOSX junk from zips and folder copies", () => {
+    const zipPath = path.join(dir, "mac.zip");
+    fs.writeFileSync(
+      zipPath,
+      buildZip({
+        "manifest.json": JSON.stringify({ manifest_version: 3, name: "MacExt", version: "1.0.0" }),
+        "__MACOSX/._manifest.json": "junk",
+        "icons/__MACOSX/._icon.png": "junk",
+      }),
+    );
+    const reg = make();
+    const entry = reg.install("p1", zipPath);
+    const installDir = path.join(profileDir("p1"), "Default", "Extensions", entry.id, "1.0.0");
+    expect(fs.existsSync(path.join(installDir, "manifest.json"))).toBe(true);
+    expect(JSON.stringify(fs.readdirSync(installDir, { recursive: true }))).not.toContain("__MACOSX");
+
+    // folder sources with __MACOSX are filtered the same way
+    const srcDir = path.join(dir, "src-mac");
+    fs.mkdirSync(path.join(srcDir, "__MACOSX"), { recursive: true });
+    fs.writeFileSync(path.join(srcDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "MacFolder", version: "1.0.0" }));
+    fs.writeFileSync(path.join(srcDir, "__MACOSX", "._manifest.json"), "junk");
+    const entry2 = reg.install("p1", srcDir);
+    const installDir2 = path.join(profileDir("p1"), "Default", "Extensions", entry2.id, "1.0.0");
+    expect(fs.existsSync(path.join(installDir2, "manifest.json"))).toBe(true);
+    expect(JSON.stringify(fs.readdirSync(installDir2, { recursive: true }))).not.toContain("__MACOSX");
+  });
+
   it("copyFrom copies the install dir WITHOUT the source profile's storage", () => {
     const src = path.join(dir, "src-ext");
     fs.mkdirSync(src, { recursive: true });

@@ -201,6 +201,22 @@ export class FuryCoreRuntime implements BrowserRuntime {
             `engine_start: ${err instanceof Error ? err.message : String(err)}`,
           );
     }
+    // CDP readiness (AliasMode discipline): the bootstrap PID proves the
+    // process started, not that the DevTools endpoint answers. A launch whose
+    // endpoint never comes up is refused and NAMED now — "cdp_readiness" —
+    // instead of a profile that looks running but answers nothing.
+    try {
+      await waitForCdpReady(debugPort, 15_000);
+    } catch (err) {
+      child.removeAllListeners("exit");
+      child.kill();
+      fs.rmSync(bootstrapScript, { force: true });
+      if (relay) await relay.close().catch(() => {});
+      throw new DomainError(
+        ErrorCodes.ENGINE_LAUNCH_FAILED,
+        `cdp_readiness: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return new FurySession(child, enginePid, debugPort, relay, fitArea, egress);
   }
 }
@@ -423,8 +439,36 @@ function spawnFuryWithConfig(
 }
 
 /** First stdout line from the bootstrap is "QPID:<engine pid>". */
-function readEnginePid(child: ChildProcess): Promise<number> {
-  return new Promise((resolve, reject) => {
+/**
+ * Poll the DevTools endpoint until it answers. Named separately so a launch
+ * failure can say "cdp_readiness" (AliasMode's named-refusal discipline) and
+ * so tests can drive it against a real loopback server.
+ */
+export async function waitForCdpReady(
+  debugPort: number,
+  timeoutMs = 15_000,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "no response";
+  for (;;) {
+    try {
+      const res = await fetchImpl(`http://127.0.0.1:${debugPort}/json/version`);
+      if (res.ok) return;
+      lastError = `HTTP ${res.status}`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `DevTools endpoint did not answer within ${timeoutMs}ms (${lastError})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+function readEnginePid(child: ChildProcess): Promise<number> {  return new Promise((resolve, reject) => {
     let buf = "";
     const timer = setTimeout(
       () => reject(new Error("fury bootstrap did not report an engine PID")),

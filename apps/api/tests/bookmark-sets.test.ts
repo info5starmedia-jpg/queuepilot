@@ -107,6 +107,40 @@ describe("applyBookmarkSets", () => {
     expect(bar[1]).toMatchObject({ name: "Mine", url: "https://mine.example/" });
   });
 
+  it("markers this machine does not manage (a bundle's set) survive re-launch", () => {
+    applyBookmarkSets(dir, normalizeBookmarkSets(SETS));
+    const bmPath = path.join(dir, "Default", "Bookmarks");
+    const doc = JSON.parse(fs.readFileSync(bmPath, "utf8"));
+    doc.roots.bookmark_bar.children.push({
+      type: "folder",
+      id: "9",
+      name: "Colleague set",
+      children: [{ type: "url", id: "10", name: "X", url: "https://x.example/" }],
+      meta_info: { qp_set_id: "colleague-machine-set" },
+    });
+    fs.writeFileSync(bmPath, JSON.stringify(doc));
+
+    // Re-launch with only our own sets: the unknown marker must NOT be wiped.
+    applyBookmarkSets(dir, normalizeBookmarkSets(SETS));
+    const bar = readBookmarks().roots.bookmark_bar.children;
+    const names = bar.map((n) => n.name);
+    expect(names.filter((n) => n === "Colleague set")).toHaveLength(1);
+    // ...and our sets still replaced cleanly at the front.
+    expect(names.slice(0, 2)).toEqual(["Work", "Fun"]);
+  });
+
+  it("an emptied set list cleans previously-managed folders (operator cleared them)", () => {
+    applyBookmarkSets(dir, normalizeBookmarkSets(SETS));
+    applyBookmarkSets(dir, []);
+    const bar = readBookmarks().roots.bookmark_bar.children;
+    expect(bar).toEqual([]);
+  });
+
+  it("empty config on a machine that never applied sets is a true no-op (no file created)", () => {
+    applyBookmarkSets(dir, []);
+    expect(fs.existsSync(path.join(dir, "Default", "Bookmarks"))).toBe(false);
+  });
+
   it("recovers from a malformed existing Bookmarks file", () => {
     fs.mkdirSync(path.join(dir, "Default"), { recursive: true });
     fs.writeFileSync(path.join(dir, "Default", "Bookmarks"), "{not json");

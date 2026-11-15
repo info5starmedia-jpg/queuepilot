@@ -13,7 +13,12 @@ import { DomainError, ErrorCodes } from "@queuepilot/contracts";
  *    with `meta_info.qp_set_id` so we can find it again.
  *  - Re-launch replaces our folders (same set id) — never duplicates.
  *  - Browser-made bookmarks are never touched: anything without our
- *    marker survives verbatim, in order.
+ *    marker survives verbatim, in order. Markers we have NEVER seen on this
+ *    machine (a colleague's set that arrived in a bundle) also survive —
+ *    only set ids this machine has applied at some point are cleaned when
+ *    they drop out of the config. The known-id record lives in
+ *    `<machineStateDir>/bookmark-set-ids.json` (default: the profile's own
+ *    `.queuepilot/`, which session bundles do not restore).
  *  - The "checksum" field is dropped; Chromium regenerates it.
  *
  * Sets come from `profile.extra.bookmarkSets`:
@@ -117,6 +122,30 @@ export function normalizeBookmarkSets(raw: unknown): BookmarkSet[] {
 
 let nextNodeId = 100_000;
 
+const KNOWN_IDS_FILE = "bookmark-set-ids.json";
+
+/** Every set id this machine has ever applied — the "do we know it" record. */
+function loadKnownSetIds(machineStateDir: string): Set<string> {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(machineStateDir, KNOWN_IDS_FILE), "utf8"),
+    ) as unknown;
+    return new Set(
+      Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function saveKnownSetIds(machineStateDir: string, ids: Set<string>): void {
+  fs.mkdirSync(machineStateDir, { recursive: true });
+  const file = path.join(machineStateDir, KNOWN_IDS_FILE);
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify([...ids], null, 2), "utf8");
+  fs.renameSync(tmp, file);
+}
+
 function folderNode(set: BookmarkSet): BookmarkNode {
   return {
     type: "folder",
@@ -138,11 +167,21 @@ function folderNode(set: BookmarkSet): BookmarkNode {
 
 /**
  * Merge `sets` into `<profileDataDir>/Default/Bookmarks`. No-op when the
- * set list is empty. Existing managed folders with the same id are replaced;
- * unmanaged content is preserved byte-for-byte in structure.
+ * set list is empty. Existing folders are replaced when their set id is one
+ * this machine has applied before (recorded in `bookmark-set-ids.json`) or
+ * manages now; unknown markers and unmarked content survive verbatim.
  */
-export function applyBookmarkSets(profileDataDir: string, sets: BookmarkSet[]): void {
-  if (sets.length === 0) return;
+export function applyBookmarkSets(
+  profileDataDir: string,
+  sets: BookmarkSet[],
+  machineStateDir: string = path.join(profileDataDir, ".queuepilot"),
+): void {
+  const knownIds = loadKnownSetIds(machineStateDir);
+  const managedIds = new Set(sets.map((s) => s.id));
+  // Empty config is a no-op only when this machine never applied a set —
+  // otherwise it means the operator cleared them and managed folders must
+  // follow. Never creates the Bookmarks file out of nothing, though.
+  if (sets.length === 0 && knownIds.size === 0) return;
   const defaultDir = path.join(profileDataDir, "Default");
   fs.mkdirSync(defaultDir, { recursive: true });
   const bookmarksPath = path.join(defaultDir, "Bookmarks");
@@ -167,12 +206,17 @@ export function applyBookmarkSets(profileDataDir: string, sets: BookmarkSet[]): 
   const roots = doc.roots!;
   const bar = (roots.bookmark_bar ??= { children: [] });
   const children = bar.children ?? [];
-  // Drop every folder we manage (anything carrying our marker — a set that
-  // is no longer configured must disappear too), keep everything else
-  // verbatim: browser-made bookmarks are never touched.
-  const kept = children.filter((n) => n?.meta_info?.[META_KEY] === undefined);
+  // Drop folders this machine manages — current config OR applied before, so
+  // a changed, unassigned or deleted set follows. Markers never seen here
+  // (a colleague's set that came in a bundle) survive, and browser-made
+  // bookmarks certainly aren't.
+  const kept = children.filter((n) => {
+    const marker = n?.meta_info?.[META_KEY];
+    return marker === undefined || (!managedIds.has(marker) && !knownIds.has(marker));
+  });
   // Listed order is the bar order: the first set lands at the very front.
   bar.children = [...sets.map(folderNode), ...kept];
+  saveKnownSetIds(machineStateDir, new Set([...knownIds, ...managedIds]));
 
   // Chromium regenerates the checksum; a stale one is worse than none.
   delete doc.checksum;
