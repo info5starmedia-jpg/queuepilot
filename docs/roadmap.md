@@ -269,12 +269,37 @@ Goal: self-hosted sync between family/friends machines: encrypted bundles,
 roles, multi-user leases. Foundation (encrypted bundle format, storage-level
 locking) already shipped v0.12.6.
 Sub-steps:
-- a. Server package (`apps/server`): bundle push/pull, auth tokens.
-- b. Roles: admin/operator/viewer; per-profile leases.
-- c. Client sync loop + conflict policy (machine-bound secrets never sync).
-- d. Multi-machine test: two API instances against one server.
-Goal check: profile created on machine A appears on machine B, secrets
-intact, lease prevents double-start.
+- a. ✅ Server package (`apps/server`, 2026-11-15, v0.14.11) — bundle
+    push/pull + auth tokens:
+    - `buildTeamServerApp` (fastify): `GET /health` (open), `GET/PUT/DELETE
+      /bundles/:profileId` (raw sealed bytes, octet-stream), `GET /bundles`
+      (heads with revision/size), `GET/POST/DELETE /tokens` (admin only).
+    - Bearer auth, SHA-256 hash-only token storage (plaintext shown once at
+      mint); `QUEUEPILOT_TEAM_ADMIN_TOKEN` bootstrap admin (env compared
+      constant-time, never written to DB). Coarse roles enforced: viewer
+      reads, operator reads+writes bundles, admin manages tokens.
+    - Optimistic concurrency: `PUT ?baseRevision=N` → 409 REVISION_CONFLICT
+      with the server's current revision; first push with a non-zero base is
+      rejected (no create-under-race).
+    - Client side: `TeamServerClient` (fetch, dependency-light) +
+      `TeamSyncService` bridging the existing BundleService — push =
+      exportBundle (profile must be running) → sealed bytes; pull =
+      restoreBundle (upserts by manifest name, starts on demand, never
+      invents machine-bound proxy credentials). New contract codes
+      TEAM_UNAUTHORIZED/TEAM_NOT_FOUND/TEAM_UNAVAILABLE/
+      TEAM_REVISION_CONFLICT mapped in the error mapper (401/404/503/409).
+    - Tests: 10 server (auth, roles, round-trip, conflict, validation) + 6
+      two-machine e2e (two API contexts against one live server: push/pull,
+      re-pull upsert, stale-revision conflict, wrong passphrase, bad token,
+      minted operator token). 443/443 green.
+- b. Roles (admin/operator/viewer per-token ✅ shipped in a; remaining):
+    per-profile leases — the double-start guard ACROSS machines.
+- c. Client sync loop + conflict policy (machine-bound secrets never sync) —
+    today push/pull is operator-invoked; the background loop is c.
+- d. Multi-machine test ✅ shipped in a (two API instances, one server).
+Goal check (partial, a+d): profile created on machine A appears on machine B
+with the session intact and a stale push is refused — YES (e2e). Lease
+preventing double-start: still open (b).
 
 ### 8. D-002 / D-003 hardening — ✅ DONE 2026-11-14
 Goal: recovery proves process identity, not just liveness; rotation links

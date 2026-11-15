@@ -36,6 +36,11 @@ export const ErrorCodes = {
   BUNDLE_INVALID: "BUNDLE_INVALID",
   CONFLICT: "CONFLICT",
   NO_FILL_TARGET: "NO_FILL_TARGET",
+  /** Team server (P7.7) — remote sync failures keep their own code space. */
+  TEAM_UNAUTHORIZED: "TEAM_UNAUTHORIZED",
+  TEAM_NOT_FOUND: "TEAM_NOT_FOUND",
+  TEAM_UNAVAILABLE: "TEAM_UNAVAILABLE",
+  TEAM_REVISION_CONFLICT: "TEAM_REVISION_CONFLICT",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 

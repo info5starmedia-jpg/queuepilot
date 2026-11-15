@@ -27,16 +27,21 @@ export function toHttpError(err: unknown): {
       err.code === ErrorCodes.PROXY_NOT_FOUND ||
       err.code === ErrorCodes.RUN_NOT_FOUND ||
       err.code === ErrorCodes.TAB_NOT_FOUND ||
-      err.code === ErrorCodes.PROVIDER_NOT_FOUND
+      err.code === ErrorCodes.PROVIDER_NOT_FOUND ||
+      err.code === ErrorCodes.TEAM_NOT_FOUND
         ? 404
         : err.code === ErrorCodes.PROFILE_ALREADY_RUNNING ||
             err.code === ErrorCodes.PROFILE_NOT_RUNNING ||
             err.code === ErrorCodes.CONFLICT ||
+            err.code === ErrorCodes.TEAM_REVISION_CONFLICT ||
             err.code === ErrorCodes.NO_FILL_TARGET
           ? 409
-          : err.code === ErrorCodes.ENGINE_UNAVAILABLE
+          : err.code === ErrorCodes.ENGINE_UNAVAILABLE ||
+              err.code === ErrorCodes.TEAM_UNAVAILABLE
             ? 503
-            : err.code === ErrorCodes.TABS_UNSUPPORTED ||
+            : err.code === ErrorCodes.TEAM_UNAUTHORIZED
+              ? 401
+              : err.code === ErrorCodes.TABS_UNSUPPORTED ||
                 err.code === ErrorCodes.ATTESTATION_UNSUPPORTED
               ? 501
               : err.code === ErrorCodes.GOOGLE_NOT_CONFIGURED ||

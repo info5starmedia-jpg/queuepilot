@@ -15,6 +15,7 @@
   "dependencies": {
     "@queuepilot/client": "*",
     "@queuepilot/contracts": "*",
+    "@queuepilot/server": "*",
     "better-sqlite3": "^13.0.3",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"

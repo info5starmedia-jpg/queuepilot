@@ -1,0 +1,28 @@
+{
+  "name": "@queuepilot/server",
+  "version": "0.13.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts",
+    "./config": "./src/config.ts",
+    "./store": "./src/store.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
