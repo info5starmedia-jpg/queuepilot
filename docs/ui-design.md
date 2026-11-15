@@ -47,5 +47,6 @@ tabs) and any headless mode are **out of scope** — owner ruled both out on
 2. ✅ A2 — Batch-start controller: profile checkboxes + sticky action bar +
    `POST /profiles/batch-start {ids, staggerMs}`; the stagger delay comes
    from Settings → Launch, so A1+A2 compose (v0.14.14).
-3. A3 — Window tiling: position/size presets for the launched profile
-   windows (cascade, grid, remembered per-profile geometry).
+3. ✅ A3 — Window tiling: cascade/grid presets over running windows
+   (`POST /profiles/batch-tile`), single-window bounds, and restore of the
+   per-profile geometry remembered in the persona layer (v0.14.15).

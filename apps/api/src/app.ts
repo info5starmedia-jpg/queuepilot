@@ -36,6 +36,8 @@ import { registerExtensionRoutes } from "./http/extensions.routes.js";
 import { SettingsBundleService } from "./application/settings/settings-bundle.service.js";
 import { registerSettingsRoutes, registerSettingsSectionRoutes } from "./http/settings.routes.js";
 import type { SettingsService } from "./application/settings/settings.service.js";
+import { WindowTilingService } from "./application/windows/window-tiling.service.js";
+import { registerWindowRoutes } from "./http/windows.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -82,6 +84,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp);
   registerProxyRoutes(app, deps.proxies);
   registerRunRoutes(app, deps.lifecycle, deps.profiles);
+  registerWindowRoutes(app, new WindowTilingService(deps.lifecycle, deps.profiles));
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);

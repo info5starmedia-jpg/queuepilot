@@ -253,6 +253,32 @@ $("#profiles").addEventListener("change", (e) => {
 });
 
 $("#batch-start")?.addEventListener("click", startSelected);
+
+async function tileSelected(preset) {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  try {
+    const r = await api("/profiles/batch-tile", {
+      method: "POST",
+      body: JSON.stringify({ ids, preset }),
+    });
+    const failed = r.results.filter((x) => x.status === "failed").length;
+    pushEvent({
+      type: "info",
+      detail: `tile ${preset}: ${r.results.length - failed}/${r.results.length} placed${failed ? `, ${failed} failed` : ""}`,
+      at: new Date().toISOString(),
+    });
+    for (const x of r.results.filter((x) => x.status === "failed")) {
+      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
+    }
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+}
+
+$("#tile-cascade")?.addEventListener("click", () => tileSelected("cascade"));
+$("#tile-grid")?.addEventListener("click", () => tileSelected("grid"));
+
 $("#batch-clear")?.addEventListener("click", () => {
   batchSelection.clear();
   updateBatchBar();

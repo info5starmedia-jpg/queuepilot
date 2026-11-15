@@ -101,6 +101,15 @@ export const PersonaCreditCardSchema = z.object({
 });
 export type PersonaCreditCard = z.infer<typeof PersonaCreditCardSchema>;
 
+/** Last-applied outer window geometry (A3 tiling "remember" feature). */
+export const PersonaWindowBoundsSchema = z.object({
+  left: z.number().int().min(-10000).max(10000),
+  top: z.number().int().min(-10000).max(10000),
+  width: z.number().int().min(200).max(10000),
+  height: z.number().int().min(200).max(10000),
+});
+export type PersonaWindowBounds = z.infer<typeof PersonaWindowBoundsSchema>;
+
 export const PersonaFieldsSchema = z.object({
   address: PersonaAddressSchema.nullable().default(null),
   dob: z.string().max(40).nullable().default(null),
@@ -125,6 +134,8 @@ export const PersonaFieldsSchema = z.object({
     .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
     .nullable()
     .default(null),
+  /** Last-applied window geometry (tiling presets remember it per profile). */
+  windowBounds: PersonaWindowBoundsSchema.nullable().default(null),
 });
 export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
 
@@ -160,6 +171,8 @@ export const UpdatePersonaInputSchema = z
      * launches. Max 25 start pages per profile.
      */
     startUrls: z.array(z.string().url().max(4000)).max(25).optional(),
+    /** Remembered window geometry (A3 tiling); null clears. */
+    windowBounds: PersonaWindowBoundsSchema.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" })
   .refine((v) => !v.fields || Object.keys(v.fields).length <= 50, {

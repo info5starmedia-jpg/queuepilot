@@ -37,6 +37,10 @@ export class MockCdpServer {
   readonly setCookieCalls: Record<string, unknown>[] = [];
   /** Network.deleteCookies calls received (params, in order). */
   readonly deleteCookieCalls: Record<string, unknown>[] = [];
+  /** Browser window state: windowId -> bounds (A3 window tiling tests). */
+  windowBounds = new Map<number, Record<string, unknown>>();
+  /** Browser.setWindowBounds calls received (params, in order). */
+  readonly setWindowBoundsCalls: Record<string, unknown>[] = [];
   private server: http.Server;
   private readonly sockets = new Set<net.Socket>();
   private nextContext = 0;
@@ -192,6 +196,25 @@ export class MockCdpServer {
       case "Network.deleteCookies":
         this.deleteCookieCalls.push(params);
         return { id, result: {} };
+      case "Browser.getWindowForTarget": {
+        // Every page target maps to one browser window (id 1 unless the test
+        // seeded windowBounds with another id).
+        const windowId = this.windowBounds.size > 0 ? [...this.windowBounds.keys()][0]! : 1;
+        const bounds = this.windowBounds.get(windowId) ?? {
+          left: 0,
+          top: 0,
+          width: 1280,
+          height: 800,
+          windowState: "normal",
+        };
+        return { id, result: { windowId, bounds } };
+      }
+      case "Browser.setWindowBounds": {
+        this.setWindowBoundsCalls.push(params);
+        const windowId = params.windowId as number;
+        this.windowBounds.set(windowId, params.bounds as Record<string, unknown>);
+        return { id, result: {} };
+      }
       default:
         return { id, error: { code: -32601, message: `${method} not found` } };
     }

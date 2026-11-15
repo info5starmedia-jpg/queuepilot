@@ -23,6 +23,7 @@ describe("personaFieldsOf", () => {
       proxies: [],
       favorite: false,
       tabColor: null,
+      windowBounds: null,
     });
     expect(personaFieldsOf({})).toEqual(personaFieldsOf(null));
   });

@@ -34,6 +34,7 @@ export function personaFieldsOf(
     creditCards: bag.creditCards,
     favorite: bag.favorite,
     tabColor: bag.tabColor,
+    windowBounds: bag.windowBounds,
   });
   if (parsed.success) return parsed.data;
   // Malformed bag: ship defaults rather than crash. The raw bag is preserved

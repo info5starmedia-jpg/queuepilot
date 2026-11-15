@@ -634,6 +634,27 @@ its sub-steps and goal in one place.
       (`batchStaggerMs`), so A1 and A2 compose without extra UI.
     - Tests: 5 (all-start, failure isolation, already-running row, stagger
       timing, input validation).
+19. ✅ **Window tiling** (2026-11-15, v0.14.15) — A3: placement presets over
+    the running engine windows, layered ON TOP of the stealth invariant (the
+    window-fit watcher still guarantees no window exceeds the claimed
+    screen; tiling only decides where windows sit):
+    - **Presets** — `cascade` (equal windows stair-stepping 32/24 px,
+      clamped to the work area) and `grid` (square-ish cells, fewest
+      columns); pure functions `cascadeRects`/`gridRects` unit-tested.
+    - **API** — `POST /profiles/:id/window/bounds` (single window),
+      `POST /profiles/batch-tile {ids, preset, area?}` (per-profile result
+      rows; not-running fails its row, never aborts the batch),
+      `POST /profiles/batch-window-restore` (re-applies remembered geometry
+      after a restart).
+    - **Remembered geometry** — every applied rect persists to the typed
+      persona layer (`windowBounds`, new PersonaWindowBoundsSchema); the
+      console's Tile buttons therefore survive restarts via restore.
+    - **Console** — "Tile cascade" / "Tile grid" buttons on the batch bar
+      from A2; the two features compose (select → start → tile).
+    - MockCdpServer grew Browser.getWindowForTarget / setWindowBounds +
+      window-state hooks.
+    - Tests: 8 (rect math x3, bounds, batch-tile, restore-after-restart,
+      no-remembered row, validation).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
