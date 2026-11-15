@@ -84,6 +84,40 @@ export class ProfileService {
     return this.profiles.groups();
   }
 
+  /**
+   * Rename a group (v0.14.17 console group actions). Refuses to merge into an
+   * existing group (409 CONFLICT) — a rename that silently swallows another
+   * folder would be data loss by another name.
+   */
+  renameGroup(from: string, to: string): { renamed: number } {
+    if (!from.trim() || !to.trim()) {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, "group names must be non-empty");
+    }
+    if (from === to) return { renamed: 0 };
+    if (this.profiles.groupExists(to)) {
+      throw new DomainError(
+        ErrorCodes.CONFLICT,
+        `group "${to}" already exists — move profiles into it instead`,
+      );
+    }
+    const renamed = this.profiles.renameGroup(from, to);
+    if (renamed === 0) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_FOUND, `group "${from}" not found`);
+    }
+    return { renamed };
+  }
+
+  /** Move profiles into an existing group (v0.14.17). Returns rows moved. */
+  moveToGroup(ids: string[], group: string): { moved: number } {
+    let moved = 0;
+    for (const id of ids) {
+      const p = this.get(id); // 404s on unknown ids — a move is all-or-nothing per id
+      this.profiles.update({ ...p, group });
+      moved++;
+    }
+    return { moved };
+  }
+
   update(id: string, input: UpdateProfileInput): Profile {
     const p = this.get(id);
     if (input.proxyId && !this.proxies.get(input.proxyId)) {

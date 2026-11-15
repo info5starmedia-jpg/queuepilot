@@ -108,6 +108,24 @@ export class ProfileRepository {
     return row ? toProfile(row) : null;
   }
 
+  /**
+   * Rename a group across every profile (v0.14.17 console group actions).
+   * Returns how many profiles moved; 0 means the source group doesn't exist.
+   */
+  renameGroup(from: string, to: string): number {
+    return this.db.prepare("UPDATE profiles SET grp = ?, updated_at = ? WHERE grp = ?").run(
+      to,
+      new Date().toISOString(),
+      from,
+    ).changes;
+  }
+
+  /** True when any profile already carries this group name. */
+  groupExists(name: string): boolean {
+    const row = this.db.prepare("SELECT 1 AS x FROM profiles WHERE grp = ? LIMIT 1").get(name);
+    return row !== undefined;
+  }
+
   /** Detach all profiles from a provider (used when the provider is deleted). */
   detachProvider(providerId: string): void {
     this.db

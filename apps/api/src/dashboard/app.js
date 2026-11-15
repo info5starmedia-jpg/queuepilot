@@ -173,7 +173,36 @@ function renderProfileTabs(groups) {
       renderProfileTabs(groups);
       renderProfileGrid();
     });
+    if (t.key !== "all") {
+      const edit = document.createElement("span");
+      edit.className = "tab-edit";
+      edit.title = "rename group";
+      edit.textContent = " ✎";
+      edit.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const to = window.prompt(`Rename group "${t.label}" to:`, t.label);
+        if (!to || to.trim() === "" || to.trim() === t.label) return;
+        try {
+          await api("/profile-groups/rename", {
+            method: "POST",
+            body: JSON.stringify({ from: t.label, to: to.trim() }),
+          });
+          if (activeGroup === t.label) activeGroup = to.trim();
+          await loadProfiles();
+        } catch (err) {
+          pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+        }
+      });
+      b.appendChild(edit);
+    }
     bar.appendChild(b);
+  }
+  // populate the batch-bar move dropdown with the current groups
+  const moveSel = $("#batch-move-group");
+  if (moveSel) {
+    moveSel.innerHTML =
+      groups.map((g) => `<option value="${esc(g.group)}">${esc(g.group)}</option>`).join("") +
+      `<option value="__new__">+ new group…</option>`;
   }
 }
 
@@ -322,6 +351,33 @@ async function tileSelected(preset) {
 
 $("#tile-cascade")?.addEventListener("click", () => tileSelected("cascade"));
 $("#tile-grid")?.addEventListener("click", () => tileSelected("grid"));
+
+$("#batch-move")?.addEventListener("click", async () => {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  let group = $("#batch-move-group").value;
+  if (group === "__new__") {
+    const name = window.prompt("New group name:", "");
+    if (!name || name.trim() === "") return;
+    group = name.trim();
+  }
+  try {
+    const r = await api("/profiles/batch-move", {
+      method: "POST",
+      body: JSON.stringify({ ids, group }),
+    });
+    pushEvent({
+      type: "info",
+      detail: `moved ${r.moved} profile${r.moved === 1 ? "" : "s"} to "${group}"`,
+      at: new Date().toISOString(),
+    });
+    batchSelection.clear();
+    updateBatchBar();
+    await loadProfiles();
+  } catch (err) {
+    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+  }
+});
 
 $("#batch-clear")?.addEventListener("click", () => {
   batchSelection.clear();

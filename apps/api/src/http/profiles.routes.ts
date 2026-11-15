@@ -18,6 +18,16 @@ const ImportBodySchema = z.object({
   upsert: z.boolean().default(true),
 });
 
+const RenameGroupSchema = z.object({
+  from: z.string().min(1).max(120),
+  to: z.string().min(1).max(120),
+});
+
+const BatchMoveSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  group: z.string().min(1).max(120),
+});
+
 export function registerProfileRoutes(
   app: FastifyInstance,
   service: ProfileService,
@@ -50,6 +60,19 @@ export function registerProfileRoutes(
 
   // Folder-tab aggregates for the console's group tabs (v0.14.16).
   app.get("/profile-groups", async () => ({ groups: service.groups() }));
+
+  // Rename a folder tab (v0.14.17). Moving a single profile between groups
+  // is the existing PATCH /profiles/:id {group}.
+  app.post("/profile-groups/rename", async (req) => {
+    const body = RenameGroupSchema.parse(req.body ?? {});
+    return service.renameGroup(body.from, body.to);
+  });
+
+  // Move many profiles into one group (v0.14.17 batch bar).
+  app.post("/profiles/batch-move", async (req) => {
+    const body = BatchMoveSchema.parse(req.body ?? {});
+    return service.moveToGroup(body.ids, body.group);
+  });
 
   app.post("/profiles", async (req, reply) => {
     const input = CreateProfileInputSchema.parse(req.body);

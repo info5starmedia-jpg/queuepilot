@@ -669,6 +669,18 @@ its sub-steps and goal in one place.
     - Gotcha worth remembering: `group` is a reserved word in SQLite —
       the aggregate aliases `grp AS "group"` (quoted).
     - Tests: 3 (aggregate counts incl. running, empty list, group filter).
+21. ✅ **Group management actions** (2026-11-15, v0.14.17) — groups are no
+    longer create/import-time-only:
+    - **Rename** — `POST /profile-groups/rename {from, to}`: one SQL UPDATE
+      across the group; refuses to merge into an existing group (409
+      CONFLICT — a silent swallow would be data loss by another name);
+      unknown source = 404. Console: ✎ on each folder tab.
+    - **Move** — `POST /profiles/batch-move {ids, group}` (one round trip
+      for the batch bar; single-profile move stays `PATCH /profiles/:id
+      {group}`). Moving into a brand-new name creates the tab. Console:
+      group dropdown (+ "new group…" prompt) on the A2 batch bar; move
+      composes with select → start → tile.
+    - Tests: 5 (rename happy/merge-refused/404, batch-move, partial move).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
