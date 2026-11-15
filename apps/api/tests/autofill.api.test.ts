@@ -158,3 +158,164 @@ describe("POST /profiles/:id/autofill/card", () => {
     expect(res.json().error.code).toBe("VALIDATION_FAILED");
   });
 });
+
+/**
+ * v0.14.5 address/identity autofill: POST /profiles/:id/autofill/address
+ * pushes the profile's name plus the persona's phone/DOB/address into the
+ * page (inputs AND state selects) over CDP. Values travel INTO the page
+ * only; the response names filled fields, never values.
+ */
+
+const PERSONA = {
+  address: {
+    line1: "1 Main St",
+    line2: null,
+    city: "Toronto",
+    state: "ON",
+    zip: "M5V 1J1",
+  },
+  phone: "+1 416 555 0100",
+  dob: "01/02/1990",
+};
+
+async function bootWithPersona() {
+  runtime = new FakeBrowserRuntime();
+  mock = new MockCdpServer();
+  const { wsUrl } = await mock.start();
+  runtime.nextWsEndpoint = wsUrl;
+  ctx = makeTestContext(runtime);
+  const p = ctx.profiles.create({ name: "Jo Doe", generateFingerprint: true });
+  const patched = await ctx.app.inject({
+    method: "PATCH",
+    url: `/profiles/${p.id}/persona`,
+    payload: PERSONA,
+  });
+  expect(patched.statusCode).toBe(200);
+  return p;
+}
+
+describe("POST /profiles/:id/autofill/address", () => {
+  it("fills the page and reports which fields were set", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = {
+      filled: ["firstName", "lastName", "phone", "dob", "address1", "city", "state", "zip"],
+      missing: ["email", "address2"],
+    };
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      profileId: p.id,
+      targetId: "page-1",
+      filled: ["firstName", "lastName", "phone", "dob", "address1", "city", "state", "zip"],
+      missing: ["email", "address2"],
+    });
+
+    // The page received the fill script with identity values inlined, the
+    // state-select path was part of it, and the response carried no values.
+    expect(mock.evaluations).toHaveLength(1);
+    expect(mock.evaluations[0]).toContain("1 Main St");
+    expect(mock.evaluations[0]).toContain("querySelectorAll(\"select\")");
+    expect(JSON.stringify(res.json())).not.toContain("1 Main St");
+    expect(JSON.stringify(res.json())).not.toContain("416 555");
+
+    expect(mock.callsFor("Target.attachToTarget")).toHaveLength(1);
+    expect(mock.callsFor("Target.detachFromTarget")).toHaveLength(1);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("honours an explicit targetId", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = { filled: ["firstName"], missing: [] };
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: { targetId: "checkout-tab-7" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().targetId).toBe("checkout-tab-7");
+    expect(mock.callsFor("Target.getTargets")).toHaveLength(0);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("derives first/last name from the profile name", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.evaluateResult = { filled: [], missing: [] };
+
+    await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: {},
+    });
+    expect(mock.evaluations).toHaveLength(1);
+    expect(mock.evaluations[0]).toContain('"firstName":"Jo"');
+    expect(mock.evaluations[0]).toContain('"lastName":"Doe"');
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("409s when the profile is not running", async () => {
+    const p = await bootWithPersona();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("PROFILE_NOT_RUNNING");
+  });
+
+  it("409s when the persona has no address/identity data (values never touched)", async () => {
+    runtime = new FakeBrowserRuntime();
+    mock = new MockCdpServer();
+    const { wsUrl } = await mock.start();
+    runtime.nextWsEndpoint = wsUrl;
+    ctx = makeTestContext(runtime);
+    const p = ctx.profiles.create({ name: "Jo Doe", generateFingerprint: true });
+    await ctx.lifecycle.start(p.id);
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("CONFLICT");
+    expect(mock.evaluations).toHaveLength(0);
+
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("409s when there is no page to fill", async () => {
+    const p = await bootWithPersona();
+    await ctx.lifecycle.start(p.id);
+    mock.pageTargets = [{ targetId: "service-1", type: "service_worker" }];
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/autofill/address`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("NO_FILL_TARGET");
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("404s for an unknown profile", async () => {
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/profiles/00000000-0000-4000-8000-000000000000/autofill/address",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

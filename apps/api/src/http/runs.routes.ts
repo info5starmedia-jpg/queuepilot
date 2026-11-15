@@ -39,6 +39,23 @@ export function registerRunRoutes(
       .parse(req.body ?? {});
     return autofill.fillCard(id, body.set, body.targetId);
   });
+
+  /**
+   * Address/identity autofill: pushes the profile's name/email plus the
+   * persona's phone/DOB/address into the page's inputs (and state selects)
+   * over CDP. The response names which fields were filled — values never
+   * leave the machine in either direction. 409 when the persona carries no
+   * address/identity data at all.
+   */
+  app.post("/profiles/:id/autofill/address", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        targetId: z.string().min(1).max(200).optional(),
+      })
+      .parse(req.body ?? {});
+    return autofill.fillAddress(id, body.targetId);
+  });
   app.post("/profiles/:id/start", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = StartRunBodySchema.parse(req.body ?? {});

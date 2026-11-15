@@ -62,12 +62,16 @@ check degrades to "no WebRTC override", never a stale address.
   edits while running are drift, by design. No code change; noted so the
   mistake stays unmade.
 - **In-app AI agent** (runner, chat page, credits/wallet, MCP catalog,
-  `d7383aa8`…`99358bcf`) — **out of scope**. A hosted-credits product
-  direction; QueuePilot is local-first with no accounts and no wallet, and
-  the mission is the Jancy workflow layer, not an AI agent. The durable idea
-  worth keeping: "replace a crashed tool host, and answer tool calls cut by
-  an app exit" is good process-hygiene thinking for any long-running worker —
-  revisit when QueuePilot gets background jobs.
+  `d7383aa8`…`99358bcf`) — **out of scope for now; WATCHLIST**. A
+  hosted-credits product direction; QueuePilot is local-first with no
+  accounts and no wallet, and the mission is the Jancy workflow layer, not an
+  AI agent. **Standing note (owner-approved 2026-11-14): if AliasMode
+  materially advances this AI feature, or we gain more info on its design, we
+  re-open and explore adding it — in its local-model / no-credits form
+  (agent loop over our own API + JYL, no wallet machinery).** The durable
+  idea worth keeping today: "replace a crashed tool host, and answer tool
+  calls cut by an app exit" is good process-hygiene thinking for any
+  long-running worker — revisit when QueuePilot gets background jobs.
 - Firefox tab-crash / updater fixes — not applicable (Chromium-only
   runtimes, no auto-updater).
 

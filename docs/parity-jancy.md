@@ -99,7 +99,7 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | Settings bundles (.jnc export/import) | ✅ | `GET /settings/export` + `POST /settings/import` — secrets-free JSON (P7.10) |
 | Preference sets | ❌ |
 | Network logger (net-export) | ❌ |
-| Autofill + simulated typing (WPM) | 🟡 | Card autofill ✅ v0.14: `POST /profiles/:id/autofill/card` — hint-based field detection, native-setter + input/change events (React-safe), expiry format adaptation, values never leave the machine. Address/identity autofill + WPM typing simulation ❌ |
+| Autofill + simulated typing (WPM) | 🟡 | Card autofill ✅ v0.14.4: `POST /profiles/:id/autofill/card` — hint-based field detection, native-setter + input/change events (React-safe), expiry format adaptation, values never leave the machine. Address/identity autofill ✅ v0.14.5: `POST /profiles/:id/autofill/address` — name split from profile, persona phone/DOB/address, state matched in `<select>` options (value or text, abbrev or full), 409 when no identity data. WPM typing simulation ❌ |
 | Purchase coordination (Namath) | ➖ |
 
 ## Where QueuePilot exceeds Jancy (keep)
@@ -121,7 +121,8 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
    URL start pages, favorite; CSV columns to match.
 4. **Tab console depth** (§4): tab view, mass select, Tab Thinger.
 5. **Cookie Thinger** (§5) + per-partition cookie ops.
-6. **Autofill with typing simulation** (§7).
+6. **Autofill typing simulation** (§7) — card + address/identity autofill
+   shipped (v0.14.4/v0.14.5); WPM typing simulation remains.
 7. Power-user surface (palette, keybinds, format strings) — last.
 
 Rule unchanged: every adopted feature ships with its claim/verify proof.

@@ -3,6 +3,11 @@ import {
   buildCardFillExpression,
   parseCardFillResult,
 } from "../src/application/autofill/card-autofill.js";
+import {
+  buildAddressFillExpression,
+  parseAddressFillResult,
+  type AddressFillInput,
+} from "../src/application/autofill/address-autofill.js";
 import type { PersonaCreditCard } from "@queuepilot/contracts";
 
 const CARD: PersonaCreditCard = {
@@ -57,6 +62,78 @@ describe("parseCardFillResult", () => {
     expect(parseCardFillResult("x")).toBeNull();
     expect(parseCardFillResult({ filled: "nope", missing: [] })).toBeNull();
     expect(parseCardFillResult({ filled: [1, "a"], missing: [] })).toEqual({
+      filled: ["a"],
+      missing: [],
+    });
+  });
+});
+
+const ADDRESS_INPUT: AddressFillInput = {
+  firstName: "Jo",
+  lastName: "Doe",
+  email: "jo@example.com",
+  phone: "+1 416 555 0100",
+  dob: "01/02/1990",
+  line1: "1 Main St",
+  line2: null,
+  city: "Toronto",
+  state: "ON",
+  zip: "M5V 1J1",
+};
+
+describe("buildAddressFillExpression", () => {
+  it("inlines the identity exactly once as JSON", () => {
+    const expr = buildAddressFillExpression(ADDRESS_INPUT);
+    expect(expr).toContain(JSON.stringify(ADDRESS_INPUT));
+    expect(expr.trim().startsWith("(() =>")).toBe(true);
+    expect(expr.trim().endsWith("})()")).toBe(true);
+  });
+
+  it("JSON-inlining is injection-safe (quotes/braces in values)", () => {
+    const nasty = { ...ADDRESS_INPUT, line1: '1"}); alert(1); ({"' };
+    const expr = buildAddressFillExpression(nasty);
+    expect(expr).toContain(JSON.stringify(nasty.line1));
+  });
+
+  it("targets identity and address hints incl. the state select path", () => {
+    const expr = buildAddressFillExpression(ADDRESS_INPUT);
+    for (const hint of [
+      "first.?name",
+      "last.?name",
+      "email",
+      "phone|mobile|tel",
+      "address.?1|addr1|street",
+      "address.?2|addr2|suite",
+      "city|town",
+      "province|region",
+      "zip|postal",
+      "querySelectorAll(\"select\")",
+      "dob|birth",
+    ]) {
+      expect(expr).toContain(hint);
+    }
+  });
+
+  it("skips null fields without emitting them as fillable", () => {
+    const expr = buildAddressFillExpression({ ...ADDRESS_INPUT, line2: null, dob: null });
+    expect(expr).toContain(JSON.stringify(null));
+    // line2/dob stay in the data blob but the script null-checks before filling.
+    expect(expr).toContain('value === null || value === undefined || value === ""');
+  });
+});
+
+describe("parseAddressFillResult", () => {
+  it("accepts a well-formed report", () => {
+    expect(
+      parseAddressFillResult({ filled: ["firstName", "city"], missing: ["state"] }),
+    ).toEqual({ filled: ["firstName", "city"], missing: ["state"] });
+  });
+
+  it("rejects garbage", () => {
+    expect(parseAddressFillResult(null)).toBeNull();
+    expect(parseAddressFillResult("x")).toBeNull();
+    expect(parseAddressFillResult({ filled: "nope", missing: [] })).toBeNull();
+    expect(parseAddressFillResult({ filled: [1, "a"], missing: [] })).toEqual({
       filled: ["a"],
       missing: [],
     });

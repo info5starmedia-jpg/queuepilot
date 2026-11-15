@@ -448,7 +448,8 @@ its sub-steps and goal in one place.
      never values; `NO_FILL_TARGET` added (409) when no page is open.
    - Tests: MockCdpServer grew attach/detach/getTargets/Runtime.evaluate
      hooks; FakeBrowserRuntime got a `nextWsEndpoint` override. 366/366
-     green. Remaining: address/identity autofill, WPM typing simulation.
+     green. Remaining: address/identity autofill (item 10), WPM typing
+     simulation.
 9. ✅ **Upstream rescan + adoption** (2026-11-14 evening) — Fury 0.5.2–0.5.5
    and AliasMode commits since the morning scan, full verdicts in
    `docs/upstream-scan-2026-11-14.md`:
@@ -464,12 +465,30 @@ its sub-steps and goal in one place.
      WebRTC config; provider refresh never races a launch.
    - Queued: engine C++ patches 0052/0123/0071 for the next rebuild (P8);
      team-server recovery-key design recorded for P7.7.
+10. ✅ **Address/identity autofill** (2026-11-14, v0.14.5) — `POST
+    /profiles/:id/autofill/address` pushes the profile's name/email plus the
+    persona's phone/DOB/address into the page over CDP:
+    - One `Runtime.evaluate` per fill: hint-based detection
+      (name/id/placeholder/aria-label/autocomplete) for first/last name,
+      email, phone, DOB, address 1/2, city, zip — AND `<select>` elements
+      for state/province/region (option matched by value or text,
+      case-insensitive, abbreviation or full name, min length 2).
+      Same native-setter + bubbling input/change discipline as card fill.
+    - Identity assembly: profile name splits at the first space into
+      first/last; email comes from the profile; phone/DOB/address from the
+      persona bag. 409 CONFLICT when none of address/phone/email exists (a
+      bare name is not an identity fill); values travel INTO the page only,
+      the response names filled/missing fields, never values.
+    - The CDP plumbing (connect → pick page target → attach → evaluate →
+      detach) is shared with card autofill via one `evaluateOnPage` helper.
+    - Tests: 6 unit (expression/parse) + 7 API (fill, targetId, name split,
+      not-running 409, nothing-to-fill 409, no-page 409, 404).
+      386/386 green. Remaining on §7: WPM typing simulation.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
 See P7 Jancy-gap item 5 above for sub-steps and goal. Remaining v0.14 items:
-credit-card typed layer + autofill wiring; per-profile proxy-list cycling;
-profile panel UX (React console per ADR-0005).
+profile panel UX (React console per ADR-0005); WPM typing simulation.
 
 ## P5.6 — Perf & startup
 
