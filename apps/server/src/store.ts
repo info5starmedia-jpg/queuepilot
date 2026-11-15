@@ -29,6 +29,22 @@ export interface BundleHead {
   size: number;
 }
 
+/**
+ * One per-profile launch lease (P7.7b). The holder is `hostname:pid` of the
+ * API process that started the profile; the lease prevents a SECOND machine
+ * from starting the same profile while the first one's browser is up.
+ * Leases are coordination, not durable locks: they carry an expiry, the
+ * holder renews while the profile runs, and a crashed holder's lease decays
+ * on its own.
+ */
+export interface LeaseRecord {
+  profileId: string;
+  holder: string;
+  machine: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
 interface TokenRow {
   id: string;
   name: string;
@@ -44,6 +60,24 @@ interface BundleRow {
   revision: number;
   updated_by: string;
   updated_at: string;
+}
+
+interface LeaseRow {
+  profile_id: string;
+  holder: string;
+  machine: string;
+  acquired_at: string;
+  expires_at: string;
+}
+
+function toLease(r: LeaseRow): LeaseRecord {
+  return {
+    profileId: r.profile_id,
+    holder: r.holder,
+    machine: r.machine,
+    acquiredAt: r.acquired_at,
+    expiresAt: r.expires_at,
+  };
 }
 
 export class TeamServerStore {
@@ -68,6 +102,13 @@ export class TeamServerStore {
         role TEXT NOT NULL CHECK (role IN ('admin','operator','viewer')),
         created_at TEXT NOT NULL,
         last_used_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS leases (
+        profile_id TEXT PRIMARY KEY,
+        holder TEXT NOT NULL,
+        machine TEXT NOT NULL,
+        acquired_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
       );
     `);
   }
@@ -211,6 +252,82 @@ export class TeamServerStore {
 
   deleteBundle(profileId: string): boolean {
     return this.db.prepare("DELETE FROM bundles WHERE profile_id = ?").run(profileId).changes > 0;
+  }
+
+  // ---- per-profile launch leases (P7.7b) ----
+
+  /**
+   * Acquire the launch lease for a profile. Fails (LEASE_HELD) when a
+   * DIFFERENT holder holds a lease that has not expired; an expired lease is
+   * taken over unconditionally — that is the crashed-holder cleanup path.
+   */
+  acquireLease(
+    profileId: string,
+    holder: string,
+    machine: string,
+    ttlMs: number,
+  ): { acquired: true; expiresAt: string } | { acquired: false; heldBy: string; expiresAt: string } {
+    const now = Date.now();
+    const expiresAt = new Date(now + ttlMs).toISOString();
+    const tx = this.db.transaction(() => {
+      const row = this.getLeaseRow(profileId);
+      if (row && Date.parse(row.expires_at) > now && row.holder !== holder) {
+        return { acquired: false as const, heldBy: row.holder, expiresAt: row.expires_at };
+      }
+      this.db
+        .prepare(
+          `INSERT INTO leases (profile_id, holder, machine, acquired_at, expires_at) VALUES (?,?,?,?,?)
+           ON CONFLICT(profile_id) DO UPDATE SET
+             holder = excluded.holder, machine = excluded.machine,
+             acquired_at = excluded.acquired_at, expires_at = excluded.expires_at`,
+        )
+        .run(profileId, holder, machine, new Date(now).toISOString(), expiresAt);
+      return { acquired: true as const, expiresAt };
+    });
+    return tx();
+  }
+
+  /** Renew a lease the same holder owns; false when unowned or taken over. */
+  renewLease(profileId: string, holder: string, ttlMs: number): string | null {
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    const r = this.db
+      .prepare("UPDATE leases SET expires_at = ? WHERE profile_id = ? AND holder = ?")
+      .run(expiresAt, profileId, holder);
+    return r.changes > 0 ? expiresAt : null;
+  }
+
+  /** Release only when the caller is the holder (a stranger's release is a no-op). */
+  releaseLease(profileId: string, holder: string): boolean {
+    return this.db
+      .prepare("DELETE FROM leases WHERE profile_id = ? AND holder = ?")
+      .run(profileId, holder).changes > 0;
+  }
+
+  /** The live lease, or null when none/unexpired-absent. Expired rows are reaped on read. */
+  getLease(profileId: string): LeaseRecord | null {
+    const row = this.getLeaseRow(profileId);
+    if (!row) return null;
+    if (Date.parse(row.expires_at) <= Date.now()) {
+      this.db.prepare("DELETE FROM leases WHERE profile_id = ?").run(profileId);
+      return null;
+    }
+    return toLease(row);
+  }
+
+  /** Every live lease (expired rows reaped first), for the ops dashboard. */
+  listLeases(): LeaseRecord[] {
+    this.db.prepare("DELETE FROM leases WHERE expires_at <= ?").run(new Date().toISOString());
+    return (
+      this.db
+        .prepare("SELECT * FROM leases ORDER BY profile_id")
+        .all() as LeaseRow[]
+    ).map(toLease);
+  }
+
+  private getLeaseRow(profileId: string): LeaseRow | undefined {
+    return this.db.prepare("SELECT * FROM leases WHERE profile_id = ?").get(profileId) as
+      | LeaseRow
+      | undefined;
   }
 
   private getRow(profileId: string): BundleRow | undefined {

@@ -34,6 +34,7 @@ export function toHttpError(err: unknown): {
             err.code === ErrorCodes.PROFILE_NOT_RUNNING ||
             err.code === ErrorCodes.CONFLICT ||
             err.code === ErrorCodes.TEAM_REVISION_CONFLICT ||
+            err.code === ErrorCodes.TEAM_LEASE_HELD ||
             err.code === ErrorCodes.NO_FILL_TARGET
           ? 409
           : err.code === ErrorCodes.ENGINE_UNAVAILABLE ||

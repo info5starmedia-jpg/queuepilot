@@ -168,6 +168,77 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return { deleted: req.params.profileId };
   });
 
+  // ---- per-profile launch leases (P7.7b): the cross-machine double-start guard ----
+
+  app.get("/leases", async () => ({ leases: store.listLeases() }));
+
+  app.get<{ Params: { profileId: string } }>("/leases/:profileId", async (req, reply) => {
+    const lease = store.getLease(req.params.profileId);
+    if (!lease) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "no live lease for this profile" } });
+    }
+    return lease;
+  });
+
+  app.post("/leases/acquire", async (req, reply) => {
+    if (!requireRole(req, reply, ["admin", "operator"])) return;
+    const body = (req.body ?? {}) as { profileId?: unknown; holder?: unknown; machine?: unknown; ttlMs?: unknown };
+    const profileId = typeof body.profileId === "string" ? body.profileId : null;
+    const holder = typeof body.holder === "string" ? body.holder : null;
+    const machine = typeof body.machine === "string" && body.machine ? body.machine : "unknown";
+    const ttlMs = typeof body.ttlMs === "number" && Number.isInteger(body.ttlMs)
+      ? Math.min(Math.max(body.ttlMs, 5_000), 3_600_000)
+      : 60_000;
+    if (!profileId || !/^[\w.-]{1,128}$/.test(profileId) || !holder) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder, machine?, ttlMs?}" },
+      });
+    }
+    const result = store.acquireLease(profileId, holder, machine, ttlMs);
+    if (!result.acquired) {
+      return reply.code(409).send({
+        error: {
+          code: "LEASE_HELD",
+          message: `profile is held by ${result.heldBy} until ${result.expiresAt}`,
+          heldBy: result.heldBy,
+          expiresAt: result.expiresAt,
+        },
+      });
+    }
+    return reply.code(201).send({ profileId, holder, expiresAt: result.expiresAt });
+  });
+
+  app.post("/leases/renew", async (req, reply) => {
+    if (!requireRole(req, reply, ["admin", "operator"])) return;
+    const body = (req.body ?? {}) as { profileId?: unknown; holder?: unknown; ttlMs?: unknown };
+    if (typeof body.profileId !== "string" || typeof body.holder !== "string") {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder, ttlMs?}" },
+      });
+    }
+    const ttlMs = typeof body.ttlMs === "number" && Number.isInteger(body.ttlMs)
+      ? Math.min(Math.max(body.ttlMs, 5_000), 3_600_000)
+      : 60_000;
+    const expiresAt = store.renewLease(body.profileId, body.holder, ttlMs);
+    if (!expiresAt) {
+      return reply.code(409).send({
+        error: { code: "LEASE_LOST", message: "lease is gone or held by someone else" },
+      });
+    }
+    return { profileId: body.profileId, holder: body.holder, expiresAt };
+  });
+
+  app.post("/leases/release", async (req, reply) => {
+    if (!requireRole(req, reply, ["admin", "operator"])) return;
+    const body = (req.body ?? {}) as { profileId?: unknown; holder?: unknown };
+    if (typeof body.profileId !== "string" || typeof body.holder !== "string") {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder}" },
+      });
+    }
+    return { released: store.releaseLease(body.profileId, body.holder) };
+  });
+
   return { app, store, close: () => app.close() };
 }
 

@@ -697,6 +697,7 @@ const SETTINGS_FIELDS = {
   team: [
     { key: "serverUrl", label: "Team server URL", type: "text", placeholder: "https://… (empty = off)" },
     { key: "token", label: "Team server token", type: "text", placeholder: "bearer token (empty = off)" },
+    { key: "syncPassphrase", label: "Sync passphrase (enables background pull sync)", type: "text", placeholder: "empty = manual push/pull only" },
     { key: "syncGroups", label: "Sync groups (comma-separated)", type: "text", placeholder: "e.g. ads, shop" },
   ],
   integrations: [
@@ -727,7 +728,7 @@ function settingsFromField(f, raw) {
   if (f.type === "number") return Number(raw);
   if (f.key === "syncGroups" || f.key === "enabledPlugins" || f.key === "enabledJyl")
     return String(raw).split(",").map((s) => s.trim()).filter(Boolean);
-  if (f.key === "serverUrl" || f.key === "token" || f.key === "googleAccount")
+  if (f.key === "serverUrl" || f.key === "token" || f.key === "googleAccount" || f.key === "syncPassphrase")
     return String(raw).trim() === "" ? null : String(raw).trim();
   return raw;
 }

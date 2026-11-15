@@ -100,6 +100,15 @@ export class BrowserLifecycleService {
     private readonly runtime: BrowserRuntime,
     private readonly dataDir: string,
     private readonly snapshots?: LaunchIdentityService,
+    /**
+     * Optional cross-machine launch guard (P7.7b): acquire() runs before the
+     * launch is admitted and may throw (LEASE_HELD / server down); release()
+     * runs on explicit stop. Absent = single-machine deployments, untouched.
+     */
+    private readonly leaseGuard?: {
+      acquire(profileId: string): Promise<void>;
+      release(profileId: string): Promise<void>;
+    },
   ) {
     this.events.setMaxListeners(0);
   }
@@ -114,7 +123,53 @@ export class BrowserLifecycleService {
         );
       }
 
-      const identity = profile.identityId
+      // Cross-machine double-start guard (P7.7b): BEFORE any run row is
+      // written, so a refused start leaves no trace behind. Fail closed —
+      // an unreachable team server refuses the launch rather than skipping
+      // the guard.
+      if (this.leaseGuard) await this.leaseGuard.acquire(profileId);
+      try {
+        return await this.launchInner(profile, opts);
+      } finally {
+        // launchInner() rethrows on failure; the row/state cleanup happens in
+        // its catch, but the lease is OURS to give back either way. A live
+        // session (now in this.sessions) keeps its lease until stop().
+        if (!this.sessions.has(profileId)) {
+          await this.leaseGuard?.release(profileId).catch(() => {});
+        }
+      }
+    });
+
+    // Jancy URL start pages: after the run is up (and OUTSIDE the launch
+    // lock — openTab takes the same mutex), open each configured page. A
+    // failed page never fails the launch; it reports one startpage.failed
+    // event per refusal so the console can surface it.
+    const startUrls = startUrlsOf(this.requireProfile(profileId).extra);
+    for (const url of startUrls) {
+      try {
+        await this.openTab(profileId, { url });
+      } catch (err) {
+        this.emit({
+          type: "startpage.failed",
+          profileId,
+          runId: live.id,
+          at: now(),
+          detail: `${url}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
+        });
+      }
+    }
+    return live;
+  }
+
+  /**
+   * Everything after the guards: proxy resolution, run row, spawn, session
+   * bookkeeping. Lives in its own method so start()'s lease guard can wrap it
+   * in a try/finally (release the lease on a failed launch, keep it on
+   * success until stop()).
+   */
+  private async launchInner(profile: Profile, opts: StartOptions): Promise<BrowserRun> {
+    const profileId = profile.id;
+    const identity = profile.identityId
         ? this.identities.get(profile.identityId)
         : null;
       // A temp proxy wins over the profile's attached proxy for THIS launch
@@ -245,27 +300,6 @@ export class BrowserLifecycleService {
         detail: this.runtime.kind,
       });
       return live;
-    });
-
-    // Jancy URL start pages: after the run is up (and OUTSIDE the launch
-    // lock — openTab takes the same mutex), open each configured page. A
-    // failed page never fails the launch; it reports one startpage.failed
-    // event per refusal so the console can surface it.
-    const startUrls = startUrlsOf(this.requireProfile(profileId).extra);
-    for (const url of startUrls) {
-      try {
-        await this.openTab(profileId, { url });
-      } catch (err) {
-        this.emit({
-          type: "startpage.failed",
-          profileId,
-          runId: live.id,
-          at: now(),
-          detail: `${url}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
-        });
-      }
-    }
-    return live;
   }
 
   async stop(profileId: string): Promise<BrowserRun | null> {
@@ -287,6 +321,7 @@ export class BrowserLifecycleService {
       this.runs.update(stopped);
       this.markProfile(profile, "idle");
       this.tabRegistry.clearRun(run.id); // tabs die with the run
+      await this.leaseGuard?.release(profileId).catch(() => {}); // TTL reaps a lost release
       try {
         await session?.stop();
       } catch {

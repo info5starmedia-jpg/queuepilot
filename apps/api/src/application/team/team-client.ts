@@ -51,13 +51,13 @@ export class TeamServerClient {
   private async req(
     method: string,
     path: string,
-    opts: { body?: Buffer; query?: Record<string, string | number> } = {},
+    opts: { body?: Buffer; query?: Record<string, string | number>; asJson?: boolean } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token}` };
     const init: RequestInit = { method, headers };
     if (opts.body) {
-      headers["content-type"] = "application/octet-stream";
-      init.body = opts.body;
+      headers["content-type"] = opts.asJson ? "application/json" : "application/octet-stream";
+      init.body = opts.asJson ? opts.body.toString("utf8") : opts.body;
     }
     const res = await fetch(this.url(path, opts.query), init);
     if (!res.ok) {
@@ -116,5 +116,41 @@ export class TeamServerClient {
 
   async deleteBundle(profileId: string): Promise<void> {
     await this.req("DELETE", `/bundles/${encodeURIComponent(profileId)}`);
+  }
+
+  // ---- launch leases (P7.7b) ----
+
+  /** Throws TeamServerError(409, LEASE_HELD) when another machine holds it. */
+  async acquireLease(
+    profileId: string,
+    holder: string,
+    machine: string,
+    ttlMs?: number,
+  ): Promise<{ expiresAt: string }> {
+    const res = await this.req("POST", "/leases/acquire", {
+      body: Buffer.from(JSON.stringify({ profileId, holder, machine, ttlMs })),
+      asJson: true,
+    });
+    return (await res.json()) as { expiresAt: string };
+  }
+
+  async renewLease(
+    profileId: string,
+    holder: string,
+    ttlMs?: number,
+  ): Promise<{ expiresAt: string }> {
+    const res = await this.req("POST", "/leases/renew", {
+      body: Buffer.from(JSON.stringify({ profileId, holder, ttlMs })),
+      asJson: true,
+    });
+    return (await res.json()) as { expiresAt: string };
+  }
+
+  async releaseLease(profileId: string, holder: string): Promise<boolean> {
+    const res = await this.req("POST", "/leases/release", {
+      body: Buffer.from(JSON.stringify({ profileId, holder })),
+      asJson: true,
+    });
+    return ((await res.json()) as { released: boolean }).released;
   }
 }

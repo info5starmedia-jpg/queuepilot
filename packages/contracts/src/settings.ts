@@ -49,6 +49,12 @@ export const TeamSettingsSchema = z.object({
   token: z.string().max(500).nullable().default(null),
   /** Groups whose profiles are offered for one-click bundle sync. */
   syncGroups: z.array(z.string().max(120)).max(50).default([]),
+  /**
+   * Passphrase for the background sync loop (P7.7c) — seals bundles it pulls.
+   * Stored here, plaintext, same honesty as `token`: team mode already
+   * treats this machine as inside the trust boundary.
+   */
+  syncPassphrase: z.string().max(200).nullable().default(null),
 });
 export type TeamSettings = z.infer<typeof TeamSettingsSchema>;
 

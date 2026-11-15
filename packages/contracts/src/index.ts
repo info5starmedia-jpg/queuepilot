@@ -42,6 +42,8 @@ export const ErrorCodes = {
   TEAM_NOT_FOUND: "TEAM_NOT_FOUND",
   TEAM_UNAVAILABLE: "TEAM_UNAVAILABLE",
   TEAM_REVISION_CONFLICT: "TEAM_REVISION_CONFLICT",
+  /** P7.7b — another machine holds the launch lease for this profile. */
+  TEAM_LEASE_HELD: "TEAM_LEASE_HELD",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 

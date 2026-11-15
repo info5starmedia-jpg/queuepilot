@@ -48,6 +48,8 @@ import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
+import { TeamLeaseGuard } from "./application/team/team-lease-guard.js";
+import { TeamSyncLoop } from "./application/team/team-sync-loop.js";
 import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
@@ -146,6 +148,8 @@ export async function main(): Promise<void> {
 
   const engineHealth = new EngineHealthService(runtime, config.dataDir);
 
+  const settingsService = new SettingsService(db);
+
   const lifecycle = new BrowserLifecycleService(
     profileRepo,
     identityRepo,
@@ -154,6 +158,9 @@ export async function main(): Promise<void> {
     runtime,
     config.dataDir,
     new LaunchIdentityService(config.dataDir),
+    // P7.7b: when Settings → Team is configured, every launch takes a
+    // cross-machine lease first (fail closed); unconfigured = no-op.
+    new TeamLeaseGuard(settingsService),
   );
 
   // Reconcile runs left occupying by a previous (possibly crashed) process
@@ -187,9 +194,12 @@ export async function main(): Promise<void> {
     resolvers,
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),
-    settingsStore: new SettingsService(db),
+    settingsStore: settingsService,
   });
   await app.listen({ port: config.port, host: config.host });
+  // P7.7c: background pull sync — enabled only when Settings → Team carries
+  // serverUrl + token + syncPassphrase; otherwise every tick is a no-op.
+  new TeamSyncLoop({ bundles, settings: settingsService, dataDir: config.dataDir }).start();
   console.log(
     `[queuepilot] API listening on http://${config.host}:${config.port} (runtime: ${runtime.kind})`,
   );

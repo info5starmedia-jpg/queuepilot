@@ -292,10 +292,10 @@ Sub-steps:
       two-machine e2e (two API contexts against one live server: push/pull,
       re-pull upsert, stale-revision conflict, wrong passphrase, bad token,
       minted operator token). 443/443 green.
-- b. Roles (admin/operator/viewer per-token ✅ shipped in a; remaining):
-    per-profile leases — the double-start guard ACROSS machines.
-- c. Client sync loop + conflict policy (machine-bound secrets never sync) —
-    today push/pull is operator-invoked; the background loop is c.
+- b. ✅ per-profile leases — the double-start guard ACROSS machines
+    (2026-11-15, v0.14.18; see roadmap item 22).
+- c. ✅ Client sync loop + conflict policy (machine-bound secrets never
+    sync) — TeamSyncLoop, pull-dominant v1 (2026-11-15, v0.14.18; item 22).
 - d. Multi-machine test ✅ shipped in a (two API instances, one server).
 Goal check (partial, a+d): profile created on machine A appears on machine B
 with the session intact and a stale push is refused — YES (e2e). Lease
@@ -681,6 +681,33 @@ its sub-steps and goal in one place.
       group dropdown (+ "new group…" prompt) on the A2 batch bar; move
       composes with select → start → tile.
     - Tests: 5 (rename happy/merge-refused/404, batch-move, partial move).
+22. ✅ **Team leases + background sync** (2026-11-15, v0.14.18) — P7.7b+c,
+    the last two team-mode rows:
+    - **Launch leases** — the cross-machine double-start guard. Server:
+      `leases` table + `POST /leases/acquire|renew|release`, `GET /leases[/
+      :profileId]`; 409 LEASE_HELD names the holder; expired leases are
+      taken over unconditionally (crashed-holder cleanup via TTL, default
+      60 s); a stranger's release is a no-op. Client: `TeamLeaseGuard`
+      reads Settings → Team every call (unconfigured = no-op) and FAILS
+      CLOSED — an unreachable server refuses the launch rather than
+      skipping the guard. BrowserLifecycleService gained an optional
+      guard hook: acquire before any run row is written, release on stop
+      and on failed launch (lease never leaks). New contract code
+      TEAM_LEASE_HELD → 409.
+    - **Background sync loop** — `TeamSyncLoop` ticks every 60 s (when
+      serverUrl+token+syncPassphrase are all set), pulls any bundle whose
+      server revision beats the local watermark, and advances the
+      watermark only after a successful import. Pull-dominant by design:
+      pushes stay operator-invoked (auto-export would re-seal live cookie
+      jars on a timer — a push side needs dirty-tracking, its own future
+      design). Watermark keyed on the REMOTE profileId (a restored bundle
+      gets a new local id); state in dataDir/team-sync-state.json,
+      written atomically; a failed pull never advances the watermark, so
+      the next tick retries.
+    - Tests: 8 server lease (lifecycle, TTL takeover, role gating) + 3
+      lifecycle guard (denied/held-then-released/failed-launch) + 4 sync
+      loop (tick+skip, unconfigured no-op, bad-passphrase retry,
+      restart-safe watermark).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
