@@ -8,6 +8,7 @@ import {
   ErrorCodes,
   InstalledEngineSchema,
   type FingerprintIdentity,
+  type FingerprintIdentityWithOverrides,
   type ObservedFingerprint,
 } from "@queuepilot/contracts";
 import type {
@@ -255,12 +256,20 @@ export function startUrlsOf(profile: {
  * mean "use the real value" — we only declare what our identity model owns.
  * Noise seeds derive deterministically from the identity seed so a profile's
  * canvas/audio/rects are stable across machines and restarts.
+ *
+ * v0.16.0: engine-level pins ride the same contract — the fury patchset
+ * reads navigator.userAgent (0011), fonts/fontsHidden (0050-0052) and
+ * gpu.webglParams.UNMASKED_* (0031) straight from this config, so a pinned
+ * UA/font-list/WebGL pair reaches the C++ layer verbatim.
  */
 export function personaConfig(
-  identity: FingerprintIdentity | null,
+  identity: FingerprintIdentityWithOverrides | null,
 ): Record<string, unknown> {
   if (!identity) return { schema_version: 1 };
   const seed = identity.seed % 2_147_483_647;
+  const webglParams: Record<string, string> = {};
+  if (identity.webglVendor) webglParams.UNMASKED_VENDOR_WEBGL = identity.webglVendor;
+  if (identity.webglRenderer) webglParams.UNMASKED_RENDERER_WEBGL = identity.webglRenderer;
   return {
     schema_version: 1,
     navigator: {
@@ -272,6 +281,8 @@ export function personaConfig(
           : identity.platform === "macos"
             ? "MacIntel"
             : "Linux x86_64",
+      // Pin-only keys: absent unless the operator pinned them.
+      ...(identity.userAgent ? { userAgent: identity.userAgent } : {}),
     },
     screen: {
       width: identity.screenWidth,
@@ -314,6 +325,11 @@ export function personaConfig(
     // never the machine's real IP. The M150 switch is read nowhere in
     // //chrome; only the preference (which this config sets) works.
     webrtc: { ipHandlingPolicy: "disable_non_proxied_udp" },
+    // v0.16.0 engine-level pins (absent unless pinned — the engine then
+    // keeps its real/derived values, per the absent-keys contract).
+    ...(Object.keys(webglParams).length > 0 ? { "gpu.webglParams": webglParams } : {}),
+    ...(identity.fonts ? { fonts: identity.fonts } : {}),
+    ...(identity.fontsHidden ? { fontsHidden: identity.fontsHidden } : {}),
   };
 }
 

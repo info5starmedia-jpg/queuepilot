@@ -29,10 +29,29 @@ export const FingerprintIdentitySchema = z.object({
  * Operator-pinned fields (v0.15.1, Jancy "edit fingerprint" gap). A partial
  * bag: whatever is present OVERRIDES the seed-derived value on read; the
  * seed itself is never pinned (it is the identity anchor regenerate relies
- * on). UA / WebGL / fonts are NOT here on purpose — the fury persona schema
- * derives them from platform + seed at the engine; pinning them needs an
- * engine-side knob, not a lie in storage.
+ * on).
+ *
+ * v0.16.0 adds the engine-level pins: the fury patchset reads
+ * `navigator.userAgent`, `fonts`/`fontsHidden`, and
+ * `gpu.webglParams.UNMASKED_{VENDOR,RENDERER}_WEBGL` straight from the
+ * persona config (engine/patches/0011, 0050-0052, 0031), so these are real
+ * knobs, not storage lies. They apply on the fury-core runtime; other
+ * runtimes ignore pins they have no engine-side reader for.
  */
+/** Engine-level pin fields shared by the overrides bag and the merged read. */
+const EnginePinFields = {
+  /** Full UA string the engine reports (fury reads navigator.userAgent). */
+  userAgent: z.string().min(10).max(500).optional(),
+  /** Font families the engine exposes (fury reads `fonts`). */
+  fonts: z.array(z.string().min(1).max(120)).max(100).optional(),
+  /** Font families the engine hides (fury reads `fontsHidden`). */
+  fontsHidden: z.array(z.string().min(1).max(120)).max(100).optional(),
+  /** WEBGL_debug_renderer_info vendor (fury gpu.webglParams). */
+  webglVendor: z.string().min(2).max(200).optional(),
+  /** WEBGL_debug_renderer_info renderer (fury gpu.webglParams). */
+  webglRenderer: z.string().min(2).max(300).optional(),
+};
+
 export const FingerprintIdentityOverridesSchema = FingerprintIdentitySchema.pick({
   platform: true,
   screenWidth: true,
@@ -41,10 +60,15 @@ export const FingerprintIdentityOverridesSchema = FingerprintIdentitySchema.pick
   deviceMemoryGb: true,
   timezone: true,
   locale: true,
-}).partial().strict();
+})
+  .extend(EnginePinFields)
+  .partial()
+  .strict();
 export type FingerprintIdentityOverrides = z.infer<typeof FingerprintIdentityOverridesSchema>;
 
-export const FingerprintIdentityWithOverridesSchema = FingerprintIdentitySchema.extend({
+export const FingerprintIdentityWithOverridesSchema = FingerprintIdentitySchema.extend(
+  EnginePinFields,
+).extend({
   /** Pins currently in effect; absent = fully seed-derived. */
   overrides: FingerprintIdentityOverridesSchema.nullable().optional(),
 });

@@ -1,5 +1,10 @@
 import type { Db } from "../../infrastructure/database.js";
-import type { Profile, FingerprintIdentity, FingerprintIdentityOverrides } from "@queuepilot/contracts";
+import type {
+  Profile,
+  FingerprintIdentity,
+  FingerprintIdentityOverrides,
+  FingerprintIdentityWithOverrides,
+} from "@queuepilot/contracts";
 
 /** Row shapes as stored; repositories own the SQL <-> contract mapping. */
 interface ProfileRow {
@@ -204,7 +209,7 @@ export class FingerprintIdentityRepository {
    * attestation — goes through here, so a pin applies uniformly from the
    * next launch; the seed-derived row underneath is never mutated.
    */
-  get(id: string): (FingerprintIdentity & { overrides?: FingerprintIdentityOverrides | null }) | null {
+  get(id: string): FingerprintIdentityWithOverrides | null {
     const r = this.db.prepare("SELECT * FROM fingerprint_identities WHERE id = ?").get(id) as
       | IdentityRow
       | undefined;
@@ -228,6 +233,8 @@ export class FingerprintIdentityRepository {
       overrides = {};
     }
     const pinned = Object.keys(overrides).length > 0;
+    // The spread carries engine-level pins (userAgent/fonts/webgl*) onto the
+    // returned object — personaConfig reads them straight off the identity.
     return { ...base, ...overrides, overrides: pinned ? overrides : null };
   }
 

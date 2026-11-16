@@ -133,4 +133,54 @@ describe("fingerprint identity overrides", () => {
     });
     expect(res.statusCode).toBe(409);
   });
+
+  it("engine-level pins (UA / fonts / WebGL) round-trip through the API", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "engine-pins", generateFingerprint: true });
+    const res = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: {
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+        fonts: ["Arial", "Calibri"],
+        fontsHidden: ["Wingdings"],
+        webglVendor: "Google Inc. (NVIDIA)",
+        webglRenderer: "ANGLE (NVIDIA GeForce RTX 3060)",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const identity = res.json().identity;
+    expect(identity.userAgent).toContain("Chrome/157");
+    expect(identity.fonts).toEqual(["Arial", "Calibri"]);
+    expect(identity.fontsHidden).toEqual(["Wingdings"]);
+    expect(identity.webglVendor).toBe("Google Inc. (NVIDIA)");
+    expect(identity.webglRenderer).toContain("RTX 3060");
+    // And they are visible as pins.
+    expect(identity.overrides.userAgent).toContain("Chrome/157");
+  });
+
+  it("engine pins validate: bad UA shape and oversized font lists are 400", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "bad-pins", generateFingerprint: true });
+    const shortUa = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { userAgent: "tiny" },
+    });
+    expect(shortUa.statusCode).toBe(400);
+    const manyFonts = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { fonts: Array.from({ length: 101 }, (_, i) => `Font${i}`) },
+    });
+    expect(manyFonts.statusCode).toBe(400);
+    // Strict: unknown pin keys still refused.
+    const unknown = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { canvasNoise: 7 },
+    });
+    expect(unknown.statusCode).toBe(400);
+  });
 });
