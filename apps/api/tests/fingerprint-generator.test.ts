@@ -58,3 +58,41 @@ describe("generateIdentity host-display clamp", () => {
     }
   });
 });
+
+describe("generateIdentity host-memory clamp", () => {
+  // V8's heap limit reveals real RAM to page JS, so a persona claiming more
+  // memory than the host ships is flagged by consistency checkers (measured:
+  // AliasMode "deviceMemory 4 · heap 4.09 GiB" warning on a 32 GB host,
+  // 2026-11-16). When the caller passes host RAM, the claim must fit under it.
+  it("never claims more memory than the host has", () => {
+    // 4 GB host: the only honest claim is 4.
+    for (let seed = 1; seed < 500; seed += 7) {
+      expect(
+        generateIdentity("windows", "UTC", "en-US", seed, null, 4).deviceMemoryGb,
+      ).toBe(4);
+    }
+    // Non-Windows pool reaches 32; an 8 GB host must never draw 16/32.
+    for (let seed = 1; seed < 500; seed += 7) {
+      expect(
+        generateIdentity("macos", "UTC", "en-US", seed, null, 8).deviceMemoryGb,
+      ).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("an 8 GB host still samples the full fitting range", () => {
+    const seen = new Set<number>();
+    for (let seed = 1; seed < 2000; seed++) {
+      seen.add(generateIdentity("windows", "UTC", "en-US", seed, null, 8).deviceMemoryGb);
+    }
+    expect(seen.has(4)).toBe(true);
+    expect(seen.has(8)).toBe(true);
+    expect([...seen].every((m) => m <= 8)).toBe(true);
+  });
+
+  it("stays deterministic for a given seed + host memory", () => {
+    const a = generateIdentity("windows", "UTC", "en-US", 4242, null, 16);
+    const b = generateIdentity("windows", "UTC", "en-US", 4242, null, 16);
+    expect(a.deviceMemoryGb).toBe(b.deviceMemoryGb);
+    expect(a.hardwareConcurrency).toBe(b.hardwareConcurrency);
+  });
+});

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import os from "node:os";
 
 /**
  * The host machine's primary display size, for identity generation's
@@ -33,4 +34,17 @@ export function hostPrimaryDisplay(): { width: number; height: number } | null {
     cached = null;
   }
   return cached;
+}
+
+/**
+ * The host machine's real physical RAM in GB (floor), for identity
+ * generation's memory-coherence clamp: V8's heap limit reveals real RAM to
+ * page JS, so a persona claiming more memory than the host ships is a
+ * detectable incoherence. Node-only (os.totalmem), all platforms.
+ */
+let cachedMem: number | undefined;
+
+export function hostMemoryGb(): number {
+  if (cachedMem === undefined) cachedMem = Math.floor(os.totalmem() / 2 ** 30);
+  return cachedMem;
 }

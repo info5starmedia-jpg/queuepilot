@@ -12,7 +12,7 @@ import {
 import type { ProfileRepository, FingerprintIdentityRepository } from "./profile.repository.js";
 import { rotationLinkOf, withRotationLink } from "./rotation-link.js";
 import { generateIdentity } from "./fingerprint-generator.js";
-import { hostPrimaryDisplay } from "./host-display.js";
+import { hostMemoryGb, hostPrimaryDisplay } from "./host-display.js";
 import {
   currentSms,
   mergePersonaFields,
@@ -56,6 +56,7 @@ export class ProfileService {
         input.locale ?? "en-US",
         undefined,
         hostPrimaryDisplay(),
+        hostMemoryGb(),
       );
       this.identities.create(identity);
       identityId = identity.id;
@@ -146,6 +147,7 @@ export class ProfileService {
       current?.locale ?? "en-US",
       undefined,
       hostPrimaryDisplay(),
+      hostMemoryGb(),
     );
     this.identities.create(identity);
     const now = new Date().toISOString();
@@ -203,6 +205,7 @@ export class ProfileService {
       current?.locale ?? "en-US",
       undefined,
       hostPrimaryDisplay(),
+      hostMemoryGb(),
     );
     this.identities.create(identity);
     const next: Profile = { ...p, identityId: identity.id, updatedAt: new Date().toISOString() };

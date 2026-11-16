@@ -5,7 +5,7 @@ import type { Profile } from "@queuepilot/contracts";
 import { FuryCoreRuntime, resolveFuryBinary } from "../src/application/runtime/fury-core.runtime.js";
 import type { BrowserSession } from "../src/application/runtime/browser-runtime.js";
 import { generateIdentity } from "../src/application/profiles/fingerprint-generator.js";
-import { hostPrimaryDisplay } from "../src/application/profiles/host-display.js";
+import { hostMemoryGb, hostPrimaryDisplay } from "../src/application/profiles/host-display.js";
 import { withPage } from "../src/application/runtime/cdp/cdp-page.js";
 
 /**
@@ -109,7 +109,7 @@ export async function runExternalCheck(
       : (() => {
           throw new Error("external-check currently supports --engine fury");
         })();
-  const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay());
+  const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay(), hostMemoryGb());
   const profile: Profile = {
     id: "00000000-0000-4000-8000-000000000000",
     name: "extcheck-probe",

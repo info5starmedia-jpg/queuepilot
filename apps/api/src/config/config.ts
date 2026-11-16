@@ -14,8 +14,14 @@ const ConfigSchema = z.object({
   port: z.coerce.number().int().min(1).max(65535).default(50325),
   host: z.string().default("127.0.0.1"),
   dataDir: z.string().default(path.join(os.homedir(), ".queuepilot")),
-  /** "fake" runs the deterministic in-memory engine (tests, CI, demos). */
-  runtime: z.enum(["camoufox", "fury", "fake"]).default("camoufox"),
+  /**
+   * "fake" runs the deterministic in-memory engine (tests, CI, demos).
+   * Default "fury": our own BSD Chromium core passed the full detection
+   * battery (CreepJS/sannysoft/AliasMode, docs/reports/detection-check-
+   * 2026-11-16.md), so the engine we ship is the engine that serves launches.
+   * camoufox stays selectable for A/B fallback (SPECTRA_RUNTIME=camoufox).
+   */
+  runtime: z.enum(["camoufox", "fury", "fake"]).default("fury"),
   /** Optional bearer token. Unset = loopback-only trust (still binds 127.0.0.1). */
   apiToken: z.string().min(8).optional(),
   /** Google Cloud OAuth client (Sheets API) for Google Sheets providers. */

@@ -24,7 +24,7 @@ import type {
   FingerprintIdentityRepository,
 } from "../profiles/profile.repository.js";
 import { generateIdentity } from "../profiles/fingerprint-generator.js";
-import { hostPrimaryDisplay } from "../profiles/host-display.js";
+import { hostMemoryGb, hostPrimaryDisplay } from "../profiles/host-display.js";
 import type {
   ProxyRepository,
   StoredProxy,
@@ -155,7 +155,7 @@ export class ProfileProviderService {
         updated++;
         this.storeTotpSeed(existing.identityId, row);
       } else {
-        const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay());
+        const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay(), hostMemoryGb());
         this.identities.create(identity);
         const id = randomUUID();
         this.profiles.create({

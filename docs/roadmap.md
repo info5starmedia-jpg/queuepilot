@@ -100,8 +100,15 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   sannysoft staggered, snapshots the attestation verdict + engine/proxy
   identity beside them, writes a `docs/reports/detection-check-*.md` report
   the operator signs off). One manual run per engine bump remains — it needs
-  eyes on the checker pages, on a fury-core machine. Then: the
-  default-engine decision.
+  eyes on the checker pages, on a fury-core machine.
+  **External checker pass: DONE 2026-11-16** — live run on the operator's
+  desktop (desktop takeover, results read over CDP): sannysoft 26/26 green,
+  CreepJS 0% headless / 0% stealth / no lies, AliasMode TLS 0 problems,
+  AliasMode fingerprint 0 problems / 23 passed
+  (`docs/reports/detection-check-2026-11-16.md`).
+  **Default-engine decision: MADE 2026-11-16 — fury is the default runtime.**
+  It passed every attestation + detection probe; camoufox stays selectable
+  via `SPECTRA_RUNTIME=camoufox` for A/B fallback.
 - **P0 (found in P4 audit 2026-11-10, FIXED v0.12.0): the fury runtime used
   to silently drop `proxyUrl`.** Now every configured proxy is fronted by an
   auth-injecting loopback relay, unsupported schemes refuse loudly
@@ -180,10 +187,14 @@ verification owed before calling the ENGINE done.
   per-launch pool resolution, `proxySource: "rotation"` snapshots, loud
   refusal when no resolver is wired. See v0.16 item 7.
 - **D-004**: RESOLVED (ADR-0006): dual engine — Fury's prebuilt BSD Chromium
-  core as a second runtime (kind `fury`) via our checksummed installer,
-  camoufox stays default until attestation + detection probes say otherwise.
+  core as a second runtime (kind `fury`) via our checksummed installer.
   Spike plan in ADR-0006 (P4a). Claim-based detection suite done (P4b,
-  v0.11.0); external checker pass (CreepJS/sannysoft) still owed, manual.
+  v0.11.0); external checker pass DONE 2026-11-16 (detection-check report
+  above). **fury is the default runtime as of 2026-11-16**; camoufox remains
+  selectable for A/B fallback. Remaining detection polish (warnings, not
+  failures): deviceMemory↔heap coherence FIXED same day via the host-memory
+  clamp in identity generation (`hostMemoryGb()`); canvas-noise cross-context
+  presentation is the one open engine-side item.
 
 ## P7 — Post-engine batch (parity audit PASSED 2026-11-14 — this batch is now unblocked)
 
@@ -966,6 +977,24 @@ persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
    provider). 5 new tests; 586 API + 20 server green; monorepo typecheck
    clean again (also fixed four older typecheck regressions from items 2/5a
    that the test-only gates had missed).
+8. ✅ **Default engine = fury + host-memory clamp** (this commit) — three
+   outcomes from the 2026-11-16 external battery (report:
+   `docs/reports/detection-check-2026-11-16.md`):
+   - (a) `config.runtime` default flipped `camoufox` → `fury`. Fury is our
+     fully-owned engine and passed the whole battery; camoufox remains
+     available via `SPECTRA_RUNTIME=camoufox`.
+   - (b) D-004 / AliasMode external checker: **passed** (0 problems, 23
+     checks green) after pinning the test profile timezone. deviceMemory
+     warning **FIXED** — `generateIdentity` now takes the host's physical
+     RAM (`hostMemoryGb()` in `host-display.ts`) and clamps the deviceMemory
+     pool to buckets ≤ host RAM, so the claimed value can never be
+     contradicted by the V8 heap limit page JS can read. All 6 generation
+     call sites wired. Caveat recorded: team-synced profiles moving across
+     machines with different RAM could mismatch again (same class as the
+     screen clamp).
+   - (c) One open engine item remains: **canvas cross-context noise** — all
+     6 contexts hash identically, but the checker notes redraw variance;
+     the per-draw vs per-content noise question is engine-side work.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

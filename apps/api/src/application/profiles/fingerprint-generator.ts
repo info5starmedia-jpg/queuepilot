@@ -52,6 +52,7 @@ export function generateIdentity(
   locale = "en-US",
   seed: number = randomInt(1, 2 ** 31 - 1),
   hostDisplay: { width: number; height: number } | null = null,
+  hostMemGb: number | null = null,
 ): FingerprintIdentity {
   // A claimed screen larger than the host's real display is not just a lie —
   // it is a physically unrealizable one: the launch sizes the window to the
@@ -68,7 +69,20 @@ export function generateIdentity(
     screens = fitting.length > 0 ? fitting : [[hostDisplay.width, hostDisplay.height]];
   }
   const [w, h] = pick(screens, seed, 0x9e3779b9);
-  const mem = pick(platform === "windows" ? MEMORY_WINDOWS : MEMORY, seed, 0x85ebca6b);
+  // Memory has the same host-coherence rule as the screen, for a different
+  // reason: V8 derives the JS heap limit from REAL physical RAM and page JS
+  // can read it. A persona claiming less memory than the heap limit reveals
+  // is a lie-with-a-truthful-witness — AliasMode's fingerprint check flags it
+  // ("deviceMemory 4 · heap 4.09 GiB"), measured on our own build 2026-11-16.
+  // So when the caller knows the host's RAM, the claim must fit under it.
+  // Default (no host info): the weighted market table, unchanged.
+  const memPool = platform === "windows" ? MEMORY_WINDOWS : MEMORY;
+  let memPoolFitting = memPool;
+  if (hostMemGb !== null) {
+    const fitting = memPool.filter((m) => m <= hostMemGb);
+    memPoolFitting = fitting.length > 0 ? fitting : [4];
+  }
+  const mem = pick(memPoolFitting, seed, 0x85ebca6b);
   // Core counts that actually ship with each memory tier: a 4 GB machine
   // claiming 32 cores is a detectable incoherence.
   const coresForMem: Record<number, ReadonlyArray<number>> = {
