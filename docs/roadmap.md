@@ -137,18 +137,15 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   pre-v0.12.5 rows migrate lazily on first read (plaintext dies without
   operator action). Cookies remain engine-side (os-crypt, parity 0110).
 
-## GATE — Jancy feature-parity audit (REQUIRED before this build is called done)
+## GATE — Jancy feature-parity audit ✅ PASSED 2026-11-16
 
 The mission formula is Fury engine + AliasMode lifecycle + **Jancy workflow**.
 Fury/AliasMode parity is proven (0.5.5-parity audit, all gates green 2026-11-14);
-the Jancy leg is NOT yet audited row-by-row. Before the build ships to
-family/friends, run a feature-parity audit of Jancy's documented surface
-against QueuePilot: profiles via CSV/Sheets, proxy providers, resolvers, tab
-operations, plugins/extensions, scripting (client SDK + script runner),
-fingerprint checkers, batch operations. Output: docs/parity-jancy.md with one
-row per Jancy feature — have / missing / deliberately-different (with reason).
-Any "missing" row becomes a P7 item. Source material: the Jancy research in
-the repo (Kimi_Agent_Jancy Clone Repo Search.zip) + public Jancy docs.
+the Jancy leg is audited row-by-row in `docs/parity-jancy.md`, final sign-off
+2026-11-16 with the remaining rows classified as in-build (D-003), owner-approved
+deferrals, or plugin-shaped content. The build may ship to family/friends on the
+workflow surface; the external checker pass (CreepJS/sannysoft, P4) is the last
+verification owed before calling the ENGINE done.
 
 ## Open decision items
 

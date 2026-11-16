@@ -19,9 +19,9 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL ✅ v0.14.12 (CSV `url` column, `\|`-separated start pages opened at launch); favorite ✅ v0.14.10 |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
-| Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ — index only moves via rotate |
+| Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ → **D-003, in build 2026-11-16** (rotation links; see roadmap) |
 | Tab color per profile | ✅ | v0.14.10: `tabColor` (#rgb/#rrggbb, validated) rides the persona bag — CSV `color` column, PATCH persona, console color dot per profile. Engine-side tab tinting deliberately out of the TS layer |
-| Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | ❌ | Console is grid + actions only |
+| Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | 🟡 | v0.14.20: full profile panel on the vanilla console — search, persona/2FA fields, cards (masked), proxies, SMS cycling, favorite/color, start URLs, notes. React rewrite stays deferred (ADR-0005); Jancy's keybinds/assignment-mode extras ❌ |
 
 ## 2. Resolvers & parsers (the 2FA layer)
 
@@ -45,7 +45,7 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | --- | --- | --- |
 | Proxy providers (delimited, header, timezone column) | ✅ | P1.5 incl. Sheets |
 | Distribution: persist / start-over / random | ✅ | `POST /proxy-providers/:id/next` |
-| Provider actions (star default, refresh, trash, test) | ✅ | refresh/test/delete ✅; star/default ✅ v0.14.10 (`POST /proxy-providers/:id/star`, one starred default per workspace, console section) |
+| Provider actions (star default, refresh, trash, test) | 🟡 | refresh/test/delete ✅; star/default ✅ v0.14.10 (`POST /proxy-providers/:id/star`, one starred default per workspace, console section). Soft-delete trash for providers ❌ (profiles got trash v0.15.1; providers are hard-delete only) |
 | Per-proxy timezone applied at assignment | 🟡 | Timezone lives on identity, not per-proxy switch |
 | Temporary proxies per launch | ✅ | P1.5, never persisted |
 | socks5 upstream in relay | ✅ | P7.2 done; live `egress-via-socks5` PASS |
@@ -59,7 +59,7 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | Engine-side tab routing | ✅ | CDP contexts |
 | Tab bar / vertical Tab View, 7 sort modes | 🟡 | Console Tabs panel (v0.14.8): per-running-profile tab table w/ query, select-all, close; v0.14.12: sort modes ✅ (newest/oldest/url/domain/status/partition — the six orderings real tab records can honor; no page-title tracking in the API, vertical bar ❌) |
 | Mass select + "(all selected)" commands | ✅ | v0.14.8: `POST /profiles/:id/tabs/bulk-close` by `tabIds` OR Thinger `q` — per-tab results, idempotent closes; console select-all + Close selected |
-| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | ❌ | bulk-close/bulk-open land (v0.14.8); the rest open |
+| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | 🟡 | cookie clear (partition-scoped) ✅ v0.14.9, bulk-close/bulk-open ✅ v0.14.8; per-tab screenshot/duplicate/move/set-color ❌ (window tiling presets ✅ v0.14.15 cover the move-window shape at launch) |
 | Tab Thinger (formula query language over tabs) | ✅ | v0.14.8 minimal slice: `[!]field:pattern` tokens ANDed (`status`/`url`/`id`/`partition`/`related`/`engine`), `*` wildcard, bare token = url sugar, partition = prefix match; unknown fields refuse 400; `POST /profiles/:id/tabs/query` |
 | Tab Studio (visual bulk editor) | ❌ | Later phase |
 | Tab priority from page signals (queue position → band) | ❌ | Plugin-shaped (§6) |
@@ -126,3 +126,31 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 7. Power-user surface (palette, keybinds, format strings) — last.
 
 Rule unchanged: every adopted feature ships with its claim/verify proof.
+
+---
+
+## Final sign-off (2026-11-16, v0.15.1)
+
+Row-by-row re-verification against the code as of v0.15.1 (565 API tests +
+18 server tests green). Rows updated above where v0.14.12 → v0.15.1 closed
+or moved them.
+
+**Verdict: workflow parity PASSED** for the daily-driver surface. Every
+remaining ❌/🟡 row is one of three kinds:
+
+1. **In build now** — per-launch multi-proxy rotation (D-003, 2026-11-16).
+2. **Deliberately deferred** (owner-approved scope calls, not oversights):
+   power-user polish (command palette, keybinds, menu editor, format
+   strings, theme editor, preference sets, network logger — original plan
+   ranks these last), Tab Studio / tab priority / auto-reload / closed-tab
+   restore (later phase), provider soft-delete trash, per-tab
+   screenshot/duplicate.
+3. **Plugin-shaped content** — specific 2FA provider APIs (textchest…),
+   auto-fetch mailboxes, userscripts, site plugins (commercial ticket-bot
+   ecosystem, deliberately out of scope). The registries they plug into all
+   exist and ship in-tree.
+
+Deliberately-different (➖) stands: C++ engine vs JS noise, attestation,
+launch snapshots, encrypted bundles, checksummed installer — documented in
+"Where QueuePilot exceeds Jancy" above and kept.
+
