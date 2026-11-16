@@ -207,7 +207,10 @@ export class FuryCoreRuntime implements BrowserRuntime {
     // endpoint never comes up is refused and NAMED now — "cdp_readiness" —
     // instead of a profile that looks running but answers nothing.
     try {
-      await waitForCdpReady(debugPort, 15_000);
+      // 60 s, not 15: on AV-heavy hosts (Norton scanning a fresh Chromium
+      // spawn) the DevTools endpoint can take tens of seconds on a COLD
+      // profile. A genuinely dead engine still fails — just named later.
+      await waitForCdpReady(debugPort, 60_000);
     } catch (err) {
       child.removeAllListeners("exit");
       child.kill();
@@ -487,8 +490,11 @@ export async function waitForCdpReady(
 function readEnginePid(child: ChildProcess): Promise<number> {  return new Promise((resolve, reject) => {
     let buf = "";
     const timer = setTimeout(
+      // 60 s, not 20: AV scanners (Norton on this class of host) can hold the
+      // PowerShell bootstrap well past 20 s on a cold machine. The QPID line
+      // is still the only success path — this just stops punishing slow scans.
       () => reject(new Error("fury bootstrap did not report an engine PID")),
-      20_000,
+      60_000,
     );
     let stderr = "";
     child.stderr?.on("data", (d) => (stderr += String(d)));
