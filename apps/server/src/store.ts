@@ -303,6 +303,15 @@ export class TeamServerStore {
       .run(profileId, holder).changes > 0;
   }
 
+  /**
+   * Admin force-release (P5, v0.16.0): evict a stuck lease regardless of
+   * holder — the "that machine died badly and I don't want to wait out the
+   * TTL" path. Distinct from releaseLease, which is holder-scoped on purpose.
+   */
+  forceReleaseLease(profileId: string): boolean {
+    return this.db.prepare("DELETE FROM leases WHERE profile_id = ?").run(profileId).changes > 0;
+  }
+
   /** The live lease, or null when none/unexpired-absent. Expired rows are reaped on read. */
   getLease(profileId: string): LeaseRecord | null {
     const row = this.getLeaseRow(profileId);

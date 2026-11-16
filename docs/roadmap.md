@@ -131,11 +131,24 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 
 - Optional self-hosted sync server: encrypted profile bundles, profile
   locking, role-based access. Local-first remains the default forever.
-- Foundation 🟡 v0.12.6: the bundle format the sync server will move between
-  machines exists and is encrypted (`bundles/session-bundle.ts`); profile
-  locking across processes already lives at the storage layer (admission
-  slots + the per-profile partial unique index). Still open: the server
-  itself, roles, multi-user leases.
+- **COMPLETE v0.16.0** — the 2026-11-14 P7.7 track delivered the whole
+  surface and this batch closed the last ops gap:
+  - Server (`apps/server`): durable mailbox for SEALED bundles — payloads are
+    opaque bytes end to end, no decrypt path on the box. SHA-256-hashed
+    tokens with three roles (viewer reads / operator reads+writes / admin
+    also mints+revokes tokens), plaintext shown once at mint.
+  - Optimistic concurrency: bundle pushes carry `baseRevision`, stale pushes
+    get 409 REVISION_CONFLICT with the current revision — two machines can
+    never silently overwrite one profile.
+  - Multi-user launch leases (P7.7b): `hostname:pid` holders, TTL + renew
+    while running, expired-lease takeover (crashed-holder cleanup), stranger
+    release is a no-op, `TEAM_LEASE_HELD` reaches the second machine's start
+    call. Admin **force-release** (`DELETE /leases/:profileId`, v0.16.0) evicts
+    a stuck lease without waiting out the TTL.
+  - Client side (`team-client.ts`, `team-sync.ts`, `team-sync-loop.ts`,
+    `team-lease-guard.ts`): bearer auth, pull+rebase+retry on conflict,
+    background sync loop, lease guard wired into profile start.
+  - 20 server tests green (roles, leases, concurrency, hash-only tokens).
 
 ## P6 — Secrets hardening
 

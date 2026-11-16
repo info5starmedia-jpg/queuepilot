@@ -153,4 +153,9 @@ export class TeamServerClient {
     });
     return ((await res.json()) as { released: boolean }).released;
   }
+
+  /** Admin force-release: evicts a stuck lease without being the holder. */
+  async forceReleaseLease(profileId: string): Promise<void> {
+    await this.req("DELETE", `/leases/${encodeURIComponent(profileId)}`);
+  }
 }

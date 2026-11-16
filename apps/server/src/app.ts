@@ -239,6 +239,15 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return { released: store.releaseLease(body.profileId, body.holder) };
   });
 
+  // Admin force-release: evict a stuck lease without being the holder.
+  app.delete<{ Params: { profileId: string } }>("/leases/:profileId", async (req, reply) => {
+    if (!requireRole(req, reply, ["admin"])) return;
+    if (!store.forceReleaseLease(req.params.profileId)) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "no live lease for this profile" } });
+    }
+    return { released: req.params.profileId };
+  });
+
   return { app, store, close: () => app.close() };
 }
 

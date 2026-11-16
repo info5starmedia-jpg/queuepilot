@@ -153,4 +153,31 @@ describe("team server leases", () => {
     const res = await rpc("POST", "/leases/acquire", { profileId: "bad id!", holder: "A:1" });
     expect(res.status).toBe(400);
   });
+
+  it("admin force-release evicts a stuck lease; operator/viewer cannot", async () => {
+    await rpc("POST", "/leases/acquire", { profileId: "p8", holder: "A:1", ttlMs: 600_000 });
+    // A stranger's release is a no-op; the lease survives.
+    const noOp = await rpc("POST", "/leases/release", { profileId: "p8", holder: "B:2" });
+    expect((await noOp.json()).released).toBe(false);
+
+    // Operator force-release is refused (admin only).
+    const op = (await (
+      await rpc("POST", "/tokens", { name: "worker", role: "operator" })
+    ).json()) as { token: string };
+    const opDenied = await rpc("DELETE", "/leases/p8", undefined, op.token);
+    expect(opDenied.status).toBe(403);
+
+    // Admin evicts; the profile is immediately acquirable by someone else.
+    const evicted = await rpc("DELETE", "/leases/p8");
+    expect(evicted.status).toBe(200);
+    const gone = await rpc("GET", "/leases/p8");
+    expect(gone.status).toBe(404);
+    const takeover = await rpc("POST", "/leases/acquire", { profileId: "p8", holder: "B:2" });
+    expect(takeover.status).toBe(201);
+  });
+
+  it("force-release of a live-but-unknown profile is 404", async () => {
+    const res = await rpc("DELETE", "/leases/ghost");
+    expect(res.status).toBe(404);
+  });
 });
