@@ -19,7 +19,7 @@ Legend: ✅ have · 🟡 partial · ❌ missing · ➖ deliberately different/ou
 | Optional: group, notes, timezone, URL, favorite | 🟡 | group/notes/timezone ✅ in import; URL ✅ v0.14.12 (CSV `url` column, `\|`-separated start pages opened at launch); favorite ✅ v0.14.10 |
 | Optional: address/DOB/phone/SMS/passcodes/Free 1–10 | ✅ | v0.14: typed layer over `profile.extra` (schemas in contracts, safe-parse read). `PATCH /profiles/:id/persona`, SMS cycling `POST /profiles/:id/sms/rotate`, well-known 2FA fields (`extra.fields`) bound into resolve. Panel UX still ❌ (React-deferred) |
 | Optional: credit-card sets | ✅ | v0.14: shared `PersonaCreditCardSchema` (import contract reuses it), typed merge via persona patch; `GET /profiles/:id/cards` is masked-only (last4 + hasCvv + metadata — PAN/CVV never echoed); `POST /profiles/:id/autofill/card` fills the live page over CDP (§7) |
-| Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation (new entry each start) ❌ → **D-003, in build 2026-11-16** (rotation links; see roadmap) |
+| Per-profile proxy list + "system connection" magic value | ✅ | v0.14: `extra.proxies` typed parse (host:port[:user[:pass]], scheme prefix, system connection), `GET /profiles/:id/proxies` masked, `POST …/proxies/rotate` cycles persisted index; launches with no attached proxy use the current entry (proxySource `profile-list`, drift-explained). Multi-proxy PER-LAUNCH rotation ✅ v0.16 (`6a1ede3`, D-003): rotation links resolve a provider-pool endpoint per launch (`proxySource: "rotation"`, snapshot.proxyId = resolved id, loud refusal when no resolver is wired) |
 | Tab color per profile | ✅ | v0.14.10: `tabColor` (#rgb/#rrggbb, validated) rides the persona bag — CSV `color` column, PATCH persona, console color dot per profile. Engine-side tab tinting deliberately out of the TS layer |
 | Profile panel UX (search, per-field copy, code refresh, assignment modes, keybinds) | 🟡 | v0.14.20: full profile panel on the vanilla console — search, persona/2FA fields, cards (masked), proxies, SMS cycling, favorite/color, start URLs, notes. React rewrite stays deferred (ADR-0005); Jancy's keybinds/assignment-mode extras ❌ |
 
@@ -138,7 +138,8 @@ or moved them.
 **Verdict: workflow parity PASSED** for the daily-driver surface. Every
 remaining ❌/🟡 row is one of three kinds:
 
-1. **In build now** — per-launch multi-proxy rotation (D-003, 2026-11-16).
+1. **None in build** — the last in-build row (per-launch multi-proxy
+   rotation, D-003) shipped 2026-11-16 (`6a1ede3`).
 2. **Deliberately deferred** (owner-approved scope calls, not oversights):
    power-user polish (command palette, keybinds, menu editor, format
    strings, theme editor, preference sets, network logger — original plan

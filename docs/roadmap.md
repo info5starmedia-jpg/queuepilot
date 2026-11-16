@@ -165,8 +165,9 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 The mission formula is Fury engine + AliasMode lifecycle + **Jancy workflow**.
 Fury/AliasMode parity is proven (0.5.5-parity audit, all gates green 2026-11-14);
 the Jancy leg is audited row-by-row in `docs/parity-jancy.md`, final sign-off
-2026-11-16 with the remaining rows classified as in-build (D-003), owner-approved
-deferrals, or plugin-shaped content. The build may ship to family/friends on the
+2026-11-16 with the remaining rows classified as owner-approved
+deferrals or plugin-shaped content (D-003 rotation links shipped same day,
+`6a1ede3`). The build may ship to family/friends on the
 workflow surface; the external checker pass (CreepJS/sannysoft, P4) is the last
 verification owed before calling the ENGINE done.
 
@@ -175,7 +176,9 @@ verification owed before calling the ENGINE done.
 - **D-002**: PID-reuse hardening — store per-platform process start tokens
   (Windows: process creation time; Linux: `/proc/<pid>/stat` starttime) so
   recovery can prove identity, not just liveness.
-- **D-003**: Proxy rotation links (per-launch endpoint refresh) — design owed.
+- **D-003**: RESOLVED 2026-11-16 (`6a1ede3`): proxy rotation links shipped —
+  per-launch pool resolution, `proxySource: "rotation"` snapshots, loud
+  refusal when no resolver is wired. See v0.16 item 7.
 - **D-004**: RESOLVED (ADR-0006): dual engine — Fury's prebuilt BSD Chromium
   core as a second runtime (kind `fury`) via our checksummed installer,
   camoufox stays default until attestation + detection probes say otherwise.
@@ -949,7 +952,20 @@ persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
    when not (absent = real value on the engine). Schema stays strict —
    unknown pin keys are 400. Camoufox/fake runtimes ignore pins they have no
    reader for.
-7. ✅ **Proxy rotation links** (D-003) — see below.
+7. ✅ **Proxy rotation links** (`6a1ede3`) — D-003 closed. A profile links to a
+   proxy provider's pool via `profile.extra.rotationLink`
+   `{providerId, mode}` — **rotate** = per-launch pool pick (cursor advances
+   under start-over distribution), **persist** = stable cursor entry. Launch
+   precedence: tempProxy > attached proxyId > proxy-list entry > rotation
+   link > direct. A configured link with no provider service wired REFUSES
+   launch (`VALIDATION_FAILED`) — never a silent direct connection. The
+   resolved endpoint lands in the launch snapshot with `proxySource:
+   "rotation"` and `snapshot.proxyId` = the resolved proxy, so drift while
+   running reports "the next launch may resolve a different proxy". Routes:
+   `PUT/GET/DELETE /profiles/:id/rotation-link` (PUT 404s on an unknown
+   provider). 5 new tests; 586 API + 20 server green; monorepo typecheck
+   clean again (also fixed four older typecheck regressions from items 2/5a
+   that the test-only gates had missed).
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
