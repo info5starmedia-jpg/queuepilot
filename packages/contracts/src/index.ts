@@ -48,6 +48,8 @@ export const ErrorCodes = {
   FORBIDDEN: "FORBIDDEN",
   /** v0.16.0 — warmup recipe id does not exist under <dataDir>/warmups. */
   WARMUP_NOT_FOUND: "WARMUP_NOT_FOUND",
+  /** v0.16.0 — unexpected internal failure (e.g. a corrupt on-disk recipe). */
+  INTERNAL: "INTERNAL",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 

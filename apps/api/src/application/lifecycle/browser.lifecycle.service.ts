@@ -12,12 +12,14 @@ import {
   type LifecycleEvent,
   type OpenTabInput,
   type Profile,
+  type RotationLink,
   type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
 import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
+import { rotationLinkOf } from "../profiles/rotation-link.js";
 import { startUrlsOf } from "../profiles/start-pages.js";
 import type {
   ProfileRepository,
@@ -116,6 +118,22 @@ export class BrowserLifecycleService {
     },
     /** How often a live run renews its lease. Default 30 s (TTL 60 s). */
     private readonly leaseRenewIntervalMs = 30_000,
+    /**
+     * D-003: rotation-link resolver. When a profile carries
+     * `extra.rotationLink` and nothing more specific decides its proxy, the
+     * launch endpoint comes from the linked provider's pool. Absent = rotation
+     * links refuse loudly instead of silently launching direct.
+     */
+    private readonly rotationProviders?: {
+      resolveRotation(link: RotationLink): {
+        id: string;
+        type: "http" | "https" | "socks5";
+        host: string;
+        port: number;
+        username: string | null;
+        password: string | null;
+      };
+    },
   ) {
     this.events.setMaxListeners(0);
   }
@@ -198,6 +216,21 @@ export class BrowserLifecycleService {
         !tempProxy && !attached ? currentProfileProxy(profile.extra) : null;
       const listDirect =
         listCurrent?.entry.kind === "direct" ? listCurrent.entry : null;
+      // D-003 rotation link: only when nothing more specific decided the
+      // proxy (no temp, no attached, no proxy list). A configured link with
+      // no resolver wired is a launch-time refusal, never a silent direct
+      // connection — a silent fallback would out the real egress IP.
+      const rotationLink =
+        !tempProxy && !attached && !listCurrent ? rotationLinkOf(profile.extra) : null;
+      if (rotationLink && !this.rotationProviders) {
+        throw new DomainError(
+          ErrorCodes.VALIDATION_FAILED,
+          "profile has a rotation link but no proxy-provider service is wired",
+        );
+      }
+      const rotated = rotationLink
+        ? this.rotationProviders!.resolveRotation(rotationLink)
+        : null;
       const launchProxyUrl = tempProxy
         ? proxyUrl({
             type: tempProxy.type,
@@ -216,14 +249,18 @@ export class BrowserLifecycleService {
                 username: listDirect.username,
                 password: listDirect.password,
               })
-            : null;
+            : rotated
+              ? proxyUrl(rotated)
+              : null;
       const proxySource = tempProxy
         ? ("temporary" as const)
         : attached
           ? ("profile" as const)
           : listCurrent
             ? ("profile-list" as const)
-            : ("none" as const);
+            : rotated
+              ? ("rotation" as const)
+              : ("none" as const);
 
       const run: BrowserRun = {
         id: randomUUID(),
@@ -291,7 +328,7 @@ export class BrowserLifecycleService {
         runId: live.id,
         profile,
         identity,
-        proxyId: tempProxy ? null : (profile.proxyId ?? null),
+        proxyId: tempProxy ? null : (rotated?.id ?? profile.proxyId ?? null),
         proxyUrl: launchProxyUrl,
         proxySource,
         engineKind: this.runtime.kind,
@@ -564,7 +601,7 @@ export class BrowserLifecycleService {
     running: boolean;
     engineKind: string;
     proxyUrl: string | null;
-    proxySource: "profile" | "temporary" | "profile-list" | "none";
+    proxySource: "profile" | "temporary" | "profile-list" | "rotation" | "none";
     egress: LaunchIdentitySnapshot["egress"] | null;
   } | null {
     const run = this.runs.occupyingForProfile(profileId);

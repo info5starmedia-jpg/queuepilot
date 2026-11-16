@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { CreateProfileInputSchema, UpdateProfileInputSchema, FingerprintIdentityOverridesSchema } from "@queuepilot/contracts";
+import { CreateProfileInputSchema, UpdateProfileInputSchema, FingerprintIdentityOverridesSchema, RotationLinkSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import { maskCard, personaFieldsOf } from "../application/profiles/persona-fields.js";
 import {
@@ -10,6 +10,8 @@ import {
 } from "../application/profiles/profile-proxies.js";
 import type { TotpService } from "../application/profiles/totp.service.js";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
+import type { ProxyProviderService } from "../application/providers/provider.service.js";
+import { rotationLinkOf } from "../application/profiles/rotation-link.js";
 import { importProfilesCsv } from "../application/profiles/profile-import.js";
 
 const ImportBodySchema = z.object({
@@ -34,6 +36,7 @@ export function registerProfileRoutes(
   proxies: ProxyService,
   lifecycle?: { ensureIdle(profileId: string): Promise<void> },
   totp?: TotpService,
+  proxyProviders?: ProxyProviderService,
 ): void {
   // P6.1: bulk CSV import. Dry-run first, then apply — a bad row never
   // aborts the file.
@@ -133,6 +136,29 @@ export function registerProfileRoutes(
     const { id } = req.params as { id: string };
     const overrides = FingerprintIdentityOverridesSchema.parse(req.body ?? {});
     return { identity: service.updateIdentity(id, overrides) };
+  });
+
+  // Proxy rotation link (D-003): at launch, when nothing more specific
+  // decides the proxy, the endpoint resolves from the linked provider's
+  // pool (rotate = per-launch pick; persist = stable cursor entry).
+  app.put("/profiles/:id/rotation-link", async (req) => {
+    const { id } = req.params as { id: string };
+    const link = RotationLinkSchema.parse(req.body);
+    if (proxyProviders) {
+      proxyProviders.get(link.providerId); // 404 PROVIDER_NOT_FOUND when absent
+    }
+    return service.setRotationLink(id, link);
+  });
+
+  app.get("/profiles/:id/rotation-link", async (req) => {
+    const { id } = req.params as { id: string };
+    const profile = service.get(id);
+    return { link: rotationLinkOf(profile.extra) };
+  });
+
+  app.delete("/profiles/:id/rotation-link", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.clearRotationLink(id);
   });
 
   // Jancy clone — same persona/proxy/group, fresh fingerprint identity.

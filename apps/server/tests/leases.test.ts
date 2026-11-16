@@ -158,7 +158,7 @@ describe("team server leases", () => {
     await rpc("POST", "/leases/acquire", { profileId: "p8", holder: "A:1", ttlMs: 600_000 });
     // A stranger's release is a no-op; the lease survives.
     const noOp = await rpc("POST", "/leases/release", { profileId: "p8", holder: "B:2" });
-    expect((await noOp.json()).released).toBe(false);
+    expect(((await noOp.json()) as { released: boolean }).released).toBe(false);
 
     // Operator force-release is refused (admin only).
     const op = (await (

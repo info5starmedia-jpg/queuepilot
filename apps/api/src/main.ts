@@ -180,6 +180,9 @@ export async function main(): Promise<void> {
     // P7.7b: when Settings → Team is configured, every launch takes a
     // cross-machine lease first (fail closed); unconfigured = no-op.
     new TeamLeaseGuard(settingsService),
+    undefined, // leaseRenewIntervalMs default
+    // D-003: rotation links resolve launch proxies from provider pools.
+    proxyProviders,
   );
 
   // Reconcile runs left occupying by a previous (possibly crashed) process

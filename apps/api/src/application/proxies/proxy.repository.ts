@@ -1,5 +1,6 @@
 import type { Db } from "../../infrastructure/database.js";
 import type { Proxy } from "@queuepilot/contracts";
+import type { ProxyGeo } from "./proxy-probe.js";
 
 /** Stored row includes the password; the public contract never does. */
 export interface StoredProxy extends Proxy {
@@ -102,7 +103,7 @@ export interface ProxyHealthEntry {
   ok: boolean;
   latencyMs: number | null;
   exitIp: string | null;
-  geo: Record<string, unknown> | null;
+  geo: ProxyGeo | null;
   error: string | null;
 }
 
@@ -117,10 +118,10 @@ interface HealthRow {
 }
 
 function toHealth(r: HealthRow): ProxyHealthEntry {
-  let geo: Record<string, unknown> | null = null;
+  let geo: ProxyGeo | null = null;
   if (r.geo) {
     try {
-      geo = JSON.parse(r.geo) as Record<string, unknown>;
+      geo = JSON.parse(r.geo) as ProxyGeo;
     } catch {
       geo = null;
     }

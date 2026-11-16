@@ -916,6 +916,41 @@ items shipped (batches 1–4).
 HISTORY (validation results over time — out of scope above by design), fury
 persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
 
+## v0.16 — Expansion batch (owner-approved 2026-11-16, all seven items)
+
+1. ✅ **Jancy parity gate — PASSED** (`7828688`) — `docs/parity-jancy.md`
+   re-verified row-by-row against v0.15.1; stale rows updated (profile panel,
+   per-launch rotation now in build, provider trash annotated); remaining gaps
+   classified as in-build / owner-approved deferrals / plugin-shaped content.
+2. ✅ **Warmup recorder + player** (`97dad9f`) — P3 closed. Record a live
+   profile's URL/dwell sequence (`POST /profiles/:id/warmup/record`,
+   poll-based, runtime-agnostic), replay for cookie warming
+   (`POST /warmups/:id/run`, ±20% dwell jitter, per-step error isolation,
+   starts idle profiles, leaves them running unless `stopAfter`).
+3. ✅ **External checker harness** (`9461a30`) — P4's manual leg scripted:
+   `scripts/detection-check.mjs` launches a profile, opens CreepJS +
+   sannysoft staggered, snapshots the attestation verdict + engine/proxy
+   identity beside them, writes a sign-off report under `docs/reports/`.
+   One visual review per engine bump remains (needs human eyes on a
+   fury-core machine).
+4. ✅ **Team mode complete** (`d8258cb`) — P5 closed. The 2026-11-14 P7.7
+   track had already delivered the server (roles, hashed tokens, bundle
+   mailbox, optimistic concurrency, multi-user leases with TTL takeover);
+   this batch added the last ops gap: admin **force-release** of stuck
+   leases (`DELETE /leases/:profileId`, admin-only; operator/viewer 403).
+5. ✅ **Proxy health history** (`57bcc0b`) — migration 009 `proxy_health`;
+   every `test()` records ok/latency/exitIp/geo/error, newest-200 retention
+   per proxy, FK cascade on proxy delete. `GET /proxies/:id/health?limit=N`.
+6. ✅ **Engine-level fingerprint pins** (`dbea36e`) — the fury patchset reads
+   `navigator.userAgent` (0011), `fonts`/`fontsHidden` (0050-0052) and
+   `gpu.webglParams.UNMASKED_*` (0031) from the persona config, so the
+   overrides bag now carries real UA / font-list / WebGL vendor+renderer
+   pins. `personaConfig` emits exactly those keys when pinned, omits them
+   when not (absent = real value on the engine). Schema stays strict —
+   unknown pin keys are 400. Camoufox/fake runtimes ignore pins they have no
+   reader for.
+7. ✅ **Proxy rotation links** (D-003) — see below.
+
 ## v0.14 — Persona fields / 2FA layer (first item)
 
 See P7 Jancy-gap item 5 above for sub-steps and goal. The v0.14 list is

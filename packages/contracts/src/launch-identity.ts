@@ -28,7 +28,9 @@ export const LaunchIdentitySnapshotSchema = z.object({
    * applies again at next start. Defaults to "profile" so snapshots written
    * before this field existed keep their original meaning.
    */
-  proxySource: z.enum(["profile", "temporary", "profile-list", "none"]).default("profile"),
+  proxySource: z
+    .enum(["profile", "temporary", "profile-list", "rotation", "none"])
+    .default("profile"),
   /**
    * Egress facts measured at launch (P7 diagnostics): the loopback relay
    * port the engine proxies through, the exit address from the per-launch
@@ -92,6 +94,12 @@ export function computeIdentityDrift(
     fields.push("proxy");
     messages.push(
       "running via the profile's proxy list — the current list entry applies at next start",
+    );
+  } else if (snapshot.proxySource === "rotation") {
+    // D-003: the pool may hand out a different endpoint at the next launch.
+    fields.push("proxy");
+    messages.push(
+      "running via a rotation link — the next launch may resolve a different proxy",
     );
   } else if (snapshot.proxyId !== current.proxyId) {
     fields.push("proxy");

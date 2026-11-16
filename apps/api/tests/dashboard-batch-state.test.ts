@@ -30,11 +30,13 @@ describe("POST /profiles/batch-state", () => {
     expect(res.statusCode).toBe(200);
     const { states } = res.json();
     expect(states).toHaveLength(2);
-    const byId = new Map(states.map((s: { id: string }) => [s.id, s]));
-    expect(byId.get(a.id).tabCount).toBe(1);
-    expect(byId.get(b.id).tabCount).toBe(0);
+    const byId = new Map<string, { tabCount: number; drift?: { stale: boolean } | null }>(
+      states.map((s: { id: string }) => [s.id, s]),
+    );
+    expect(byId.get(a.id)!.tabCount).toBe(1);
+    expect(byId.get(b.id)!.tabCount).toBe(0);
     // Fresh launches: nothing stale yet.
-    expect(byId.get(a.id).drift?.stale ?? false).toBe(false);
+    expect(byId.get(a.id)!.drift?.stale ?? false).toBe(false);
   });
 
   it("reports stale drift after an identity change while running", async () => {

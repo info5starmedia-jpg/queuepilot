@@ -6,9 +6,11 @@ import {
   type FingerprintIdentityOverrides,
   type FingerprintPlatform,
   type Profile,
+  type RotationLink,
   type UpdateProfileInput,
 } from "@queuepilot/contracts";
 import type { ProfileRepository, FingerprintIdentityRepository } from "./profile.repository.js";
+import { rotationLinkOf, withRotationLink } from "./rotation-link.js";
 import { generateIdentity } from "./fingerprint-generator.js";
 import { hostPrimaryDisplay } from "./host-display.js";
 import {
@@ -285,6 +287,27 @@ export class ProfileService {
       }
     }
     this.profiles.delete(id);
+  }
+
+  /**
+   * Attach a proxy rotation link (D-003, v0.16.0): at each launch with no
+   * more specific proxy decision (no temp proxy, no attached proxy, no
+   * proxy-list entry), the endpoint resolves from the linked provider's
+   * pool. Provider existence is validated by the route (which owns the
+   * provider service); the link itself rides the persona bag.
+   */
+  setRotationLink(id: string, link: RotationLink): Profile {
+    const p = this.get(id);
+    const next = withRotationLink(p, link);
+    this.profiles.update(next);
+    return next;
+  }
+
+  clearRotationLink(id: string): Profile {
+    const p = this.get(id);
+    const next = withRotationLink(p, null);
+    this.profiles.update(next);
+    return next;
   }
 
   /**

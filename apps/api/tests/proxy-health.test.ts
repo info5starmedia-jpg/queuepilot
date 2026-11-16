@@ -43,7 +43,7 @@ describe("proxy health history", () => {
       });
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    const port = (server.address() as net.AddressInfo).port;
+    const port = (server.address() as import("node:net").AddressInfo).port;
 
     try {
       const ctx = makeTestContext();

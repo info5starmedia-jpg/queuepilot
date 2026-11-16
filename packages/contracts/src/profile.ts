@@ -296,3 +296,21 @@ export const UpdateProfileInputSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" });
 export type UpdateProfileInput = z.input<typeof UpdateProfileInputSchema>;
+
+/**
+ * Proxy rotation link (D-003, v0.16.0) — the Jancy per-launch multi-proxy
+ * shape. Lives in `profile.extra.rotationLink`. At launch, when nothing more
+ * specific decides the proxy (no temp proxy, no attached proxy, no proxy
+ * list), the link resolves an endpoint from the provider's pool:
+ *   rotate  — pool pick per launch (advances the provider's cursor when its
+ *             distribution is start-over; random when random)
+ *   persist — the pool's current cursor entry, stable across launches
+ * The resolved endpoint is recorded in the launch snapshot with
+ * proxySource "rotation" — drift says "the next launch may resolve a
+ * different proxy". Nothing is persisted onto the profile.
+ */
+export const RotationLinkSchema = z.object({
+  providerId: z.string().uuid(),
+  mode: z.enum(["rotate", "persist"]),
+});
+export type RotationLink = z.infer<typeof RotationLinkSchema>;

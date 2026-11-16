@@ -235,7 +235,9 @@ export class FingerprintIdentityRepository {
     const pinned = Object.keys(overrides).length > 0;
     // The spread carries engine-level pins (userAgent/fonts/webgl*) onto the
     // returned object — personaConfig reads them straight off the identity.
-    return { ...base, ...overrides, overrides: pinned ? overrides : null };
+    // JSON never stores undefined, so the partial spread never actually
+    // clobbers a base field; the cast just tells tsc that.
+    return { ...base, ...overrides, overrides: pinned ? overrides : null } as FingerprintIdentityWithOverrides;
   }
 
   /** Replace the whole pin bag ({} clears every pin back to seed-derived). */

@@ -34,8 +34,8 @@ export class LaunchIdentityService {
     /** Stored proxy used for the launch, or null when none / a temp proxy. */
     proxyId: string | null;
     proxyUrl: string | null;
-    /** Where the launched proxy came from; "temporary"/"profile-list" die with the run. */
-    proxySource: "profile" | "temporary" | "profile-list" | "none";
+    /** Where the launched proxy came from; "temporary"/"profile-list"/"rotation" die with the run. */
+    proxySource: "profile" | "temporary" | "profile-list" | "rotation" | "none";
     engineKind: string;
     /** Egress facts the runtime measured at launch (relay/exit/WebRTC). */
     egress?: LaunchIdentitySnapshot["egress"];

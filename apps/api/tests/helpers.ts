@@ -94,15 +94,6 @@ export function makeTestContext(
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secrets);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-test-"));
   const snapshots = new LaunchIdentityService(dataDir);
-  const lifecycle = new BrowserLifecycleService(
-    profileRepo,
-    identityRepo,
-    proxies,
-    runRepo,
-    runtime,
-    dataDir,
-    snapshots,
-  );
   const sheets = new FakeSheets();
   const google = new GoogleAuthService({
     secrets,
@@ -119,12 +110,26 @@ export function makeTestContext(
     secrets,
     [dataDir, TEST_IMPORTS_DIR],
   );
+  // Built before the lifecycle: D-003 rotation links resolve launch proxies
+  // from provider pools at start() time.
   const proxyProviders = new ProxyProviderService(
     new ProxyProviderRepository(db),
     proxyRepo,
     sheets,
     undefined,
     [dataDir, TEST_IMPORTS_DIR],
+  );
+  const lifecycle = new BrowserLifecycleService(
+    profileRepo,
+    identityRepo,
+    proxies,
+    runRepo,
+    runtime,
+    dataDir,
+    snapshots,
+    undefined,
+    undefined,
+    proxyProviders,
   );
   const aliases = secretAliasStore(secrets);
   const resolvers = new ResolverRegistry();

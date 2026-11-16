@@ -390,6 +390,32 @@ export class ProxyProviderService {
   /** Next proxy per the provider's distribution mode. */
   next(id: string): Proxy {
     const provider = this.get(id);
+    return publicProxy(this.pickNext(provider));
+  }
+
+  /**
+   * D-003 rotation-link resolution: the STORED (credential-bearing) proxy a
+   * launch should use. next() strips passwords for the public contract;
+   * launches need them, so this path returns the hydrated row.
+   *   rotate  — pickNext (cursor advances under start-over)
+   *   persist — the pool's current cursor entry, stable across launches
+   */
+  resolveRotation(link: { providerId: string; mode: "rotate" | "persist" }): StoredProxy {
+    const provider = this.get(link.providerId);
+    const pool = this.proxies.listByProvider(provider.id);
+    if (pool.length === 0) {
+      throw new DomainError(
+        ErrorCodes.PROXY_NOT_FOUND,
+        `provider ${provider.name} has no proxies — refresh it first`,
+      );
+    }
+    if (link.mode === "persist") {
+      return pool[Math.min(provider.cursor, pool.length - 1)]!;
+    }
+    return this.pickNext(provider);
+  }
+
+  private pickNext(provider: ProxyProvider): StoredProxy {
     const pool = this.proxies.listByProvider(provider.id);
     if (pool.length === 0) {
       throw new DomainError(
@@ -411,7 +437,7 @@ export class ProxyProviderService {
         });
       }
     }
-    return publicProxy(picked);
+    return picked;
   }
 
   /** Deleting a provider deletes its proxies, unless any are in use. */
