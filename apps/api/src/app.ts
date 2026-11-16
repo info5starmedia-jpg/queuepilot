@@ -19,6 +19,8 @@ import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
+import { registerWarmupRoutes } from "./http/warmups.routes.js";
+import { WarmupService } from "./application/warmups/warmup.service.js";
 import { registerCookieRoutes } from "./http/cookies.routes.js";
 import { registerGoogleRoutes } from "./http/google.routes.js";
 import { registerDashboardRoutes } from "./http/dashboard.routes.js";
@@ -98,6 +100,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
+  registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.

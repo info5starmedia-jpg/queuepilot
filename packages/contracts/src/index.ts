@@ -46,6 +46,8 @@ export const ErrorCodes = {
   TEAM_LEASE_HELD: "TEAM_LEASE_HELD",
   /** v0.15.0 — authenticated but the operation is not permitted (e.g. raw cookie export without a token-configured install). */
   FORBIDDEN: "FORBIDDEN",
+  /** v0.16.0 — warmup recipe id does not exist under <dataDir>/warmups. */
+  WARMUP_NOT_FOUND: "WARMUP_NOT_FOUND",
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
