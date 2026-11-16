@@ -95,3 +95,86 @@ export class ProxyRepository {
     this.db.prepare("DELETE FROM proxies WHERE provider_id = ?").run(providerId);
   }
 }
+
+export interface ProxyHealthEntry {
+  proxyId: string;
+  checkedAt: string;
+  ok: boolean;
+  latencyMs: number | null;
+  exitIp: string | null;
+  geo: Record<string, unknown> | null;
+  error: string | null;
+}
+
+interface HealthRow {
+  proxy_id: string;
+  checked_at: string;
+  ok: number;
+  latency_ms: number | null;
+  exit_ip: string | null;
+  geo: string | null;
+  error: string | null;
+}
+
+function toHealth(r: HealthRow): ProxyHealthEntry {
+  let geo: Record<string, unknown> | null = null;
+  if (r.geo) {
+    try {
+      geo = JSON.parse(r.geo) as Record<string, unknown>;
+    } catch {
+      geo = null;
+    }
+  }
+  return {
+    proxyId: r.proxy_id,
+    checkedAt: r.checked_at,
+    ok: r.ok === 1,
+    latencyMs: r.latency_ms,
+    exitIp: r.exit_ip,
+    geo,
+    error: r.error,
+  };
+}
+
+export class ProxyHealthRepository {
+  /** Newest-N-per-proxy retention cap. */
+  static readonly KEEP = 200;
+
+  constructor(private readonly db: Db) {}
+
+  record(e: ProxyHealthEntry): void {
+    this.db
+      .prepare(
+        `INSERT INTO proxy_health (proxy_id, checked_at, ok, latency_ms, exit_ip, geo, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        e.proxyId,
+        e.checkedAt,
+        e.ok ? 1 : 0,
+        e.latencyMs,
+        e.exitIp,
+        e.geo ? JSON.stringify(e.geo) : null,
+        e.error,
+      );
+    // Bound the table: keep the newest KEEP rows for this proxy.
+    this.db
+      .prepare(
+        `DELETE FROM proxy_health WHERE proxy_id = ? AND id NOT IN (
+           SELECT id FROM proxy_health WHERE proxy_id = ? ORDER BY checked_at DESC, id DESC LIMIT ?
+         )`,
+      )
+      .run(e.proxyId, e.proxyId, ProxyHealthRepository.KEEP);
+  }
+
+  /** Newest first. `limit` caps the return, not the retention. */
+  history(proxyId: string, limit = 50): ProxyHealthEntry[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM proxy_health WHERE proxy_id = ? ORDER BY checked_at DESC, id DESC LIMIT ?",
+        )
+        .all(proxyId, Math.min(Math.max(limit, 1), 500)) as HealthRow[]
+    ).map(toHealth);
+  }
+}

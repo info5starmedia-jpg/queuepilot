@@ -8,7 +8,7 @@ import {
   FingerprintIdentityRepository,
 } from "../src/application/profiles/profile.repository.js";
 import { ProfileService } from "../src/application/profiles/profile.service.js";
-import { ProxyRepository } from "../src/application/proxies/proxy.repository.js";
+import { ProxyRepository, ProxyHealthRepository } from "../src/application/proxies/proxy.repository.js";
 import { ProxyService } from "../src/application/proxies/proxy.service.js";
 import { BrowserRunRepository } from "../src/application/lifecycle/browser-run.repository.js";
 import { BrowserLifecycleService } from "../src/application/lifecycle/browser.lifecycle.service.js";
@@ -89,7 +89,7 @@ export function makeTestContext(
   const proxyRepo = new ProxyRepository(db);
   const runRepo = new BrowserRunRepository(db);
 
-  const proxies = new ProxyService(proxyRepo);
+  const proxies = new ProxyService(proxyRepo, null, new ProxyHealthRepository(db));
   const secrets = new MapSecretStore();
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secrets);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-test-"));

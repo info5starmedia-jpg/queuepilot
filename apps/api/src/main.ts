@@ -5,7 +5,7 @@ import {
   FingerprintIdentityRepository,
 } from "./application/profiles/profile.repository.js";
 import { ProfileService } from "./application/profiles/profile.service.js";
-import { ProxyRepository } from "./application/proxies/proxy.repository.js";
+import { ProxyHealthRepository, ProxyRepository } from "./application/proxies/proxy.repository.js";
 import { ProxyService } from "./application/proxies/proxy.service.js";
 import { createSecretStore } from "./application/secrets/secret-store.js";
 import { BundleService } from "./application/bundles/bundle.service.js";
@@ -97,7 +97,7 @@ export async function main(): Promise<void> {
   const runRepo = new BrowserRunRepository(db);
 
   const secretStore = createSecretStore();
-  const proxies = new ProxyService(proxyRepo, secretStore);
+  const proxies = new ProxyService(proxyRepo, secretStore, new ProxyHealthRepository(db));
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secretStore);
   // v0.15.0 (audit rec #4): lift any pre-v0.15 full PANs out of the profile
   // rows into the SecretStore; CVVs sitting in SQLite are purged.

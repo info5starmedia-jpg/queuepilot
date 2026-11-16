@@ -6,7 +6,7 @@ import {
   type Proxy,
   type UpdateProxyInput,
 } from "@queuepilot/contracts";
-import { publicProxy, type ProxyRepository, type StoredProxy } from "./proxy.repository.js";
+import { publicProxy, type ProxyRepository, type StoredProxy, type ProxyHealthRepository, type ProxyHealthEntry } from "./proxy.repository.js";
 import { probeProxy, DEFAULT_PROBE_URL, type ProxyGeo } from "./proxy-probe.js";
 import type { SecretStore } from "../secrets/secret-store.js";
 
@@ -25,6 +25,8 @@ export class ProxyService {
   constructor(
     private readonly proxies: ProxyRepository,
     private readonly secrets: SecretStore | null = null,
+    /** v0.16.0: when present, every test() result lands in proxy_health. */
+    private readonly health?: ProxyHealthRepository,
   ) {}
 
   create(input: CreateProxyInput): Proxy {
@@ -145,6 +147,21 @@ export class ProxyService {
       probeUrl,
       timeoutMs,
     );
+    this.health?.record({
+      proxyId: id,
+      checkedAt: new Date().toISOString(),
+      ok: r.ok,
+      latencyMs: r.ok ? Date.now() - started : null,
+      exitIp: r.exitIp,
+      geo: r.geo,
+      error: r.error,
+    });
     return { ok: r.ok, latencyMs: r.ok ? Date.now() - started : null, error: r.error, exitIp: r.exitIp, geo: r.geo };
+  }
+
+  /** Validation history, newest first (empty when no health repo is wired). */
+  healthHistory(id: string, limit = 50): ProxyHealthEntry[] {
+    this.getStored(id);
+    return this.health?.history(id, limit) ?? [];
   }
 }

@@ -209,6 +209,25 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE fingerprint_identities ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}';
     `,
   },
+  {
+    id: "009-proxy-health",
+    up: `
+      -- v0.16.0: validation history per proxy. Every test() appends a row;
+      -- pruning keeps the newest 200 per proxy so the table stays bounded.
+      -- FK cascades: deleting a proxy takes its history with it.
+      CREATE TABLE proxy_health (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proxy_id TEXT NOT NULL REFERENCES proxies(id) ON DELETE CASCADE,
+        checked_at TEXT NOT NULL,
+        ok INTEGER NOT NULL,
+        latency_ms INTEGER,
+        exit_ip TEXT,
+        geo TEXT,
+        error TEXT
+      );
+      CREATE INDEX proxy_health_proxy ON proxy_health(proxy_id, checked_at);
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

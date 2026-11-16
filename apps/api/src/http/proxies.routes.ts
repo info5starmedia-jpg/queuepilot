@@ -31,4 +31,12 @@ export function registerProxyRoutes(app: FastifyInstance, service: ProxyService)
     const { id } = req.params as { id: string };
     return service.test(id);
   });
+
+  // Validation history (v0.16.0): every test() lands here, newest first.
+  app.get("/proxies/:id/health", async (req) => {
+    const { id } = req.params as { id: string };
+    const { limit } = req.query as { limit?: string };
+    service.get(id); // 404 when the proxy doesn't exist
+    return { history: service.healthHistory(id, limit === undefined ? 50 : Number(limit)) };
+  });
 }
