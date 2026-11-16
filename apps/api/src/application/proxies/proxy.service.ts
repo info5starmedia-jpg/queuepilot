@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import net from "node:net";
 import {
   DomainError,
   ErrorCodes,
@@ -8,6 +7,7 @@ import {
   type UpdateProxyInput,
 } from "@queuepilot/contracts";
 import { publicProxy, type ProxyRepository, type StoredProxy } from "./proxy.repository.js";
+import { probeProxy, DEFAULT_PROBE_URL, type ProxyGeo } from "./proxy-probe.js";
 import type { SecretStore } from "../secrets/secret-store.js";
 
 /** Secret key shape for a proxy password. */
@@ -120,23 +120,31 @@ export class ProxyService {
   }
 
   /**
-   * Cheap liveness check: TCP connect with a short timeout. This proves the
-   * proxy port answers; it does NOT prove the tunnel carries traffic or that
-   * credentials work — that needs a real request through it (roadmap P6).
+   * Real validation (v0.15.1, audit G3): makes an actual request THROUGH the
+   * proxy to a geo-IP echo service and reports the exit IP + geo a target
+   * site would see. A bare TCP connect proved the port answers; this proves
+   * the tunnel carries traffic and the credentials work. Failures come back
+   * as { ok: false, error } — a dead proxy is data, not an exception.
+   * `probeUrl` is injectable so tests can substitute a local fake.
    */
-  async test(id: string, timeoutMs = 4000): Promise<{ ok: boolean; latencyMs: number | null; error: string | null }> {
+  async test(
+    id: string,
+    timeoutMs = 4000,
+    probeUrl = DEFAULT_PROBE_URL,
+  ): Promise<{
+    ok: boolean;
+    latencyMs: number | null;
+    error: string | null;
+    exitIp: string | null;
+    geo: ProxyGeo | null;
+  }> {
     const p = this.getStored(id);
     const started = Date.now();
-    return new Promise((resolve) => {
-      const socket = net.connect({ host: p.host, port: p.port });
-      const done = (ok: boolean, error: string | null) => {
-        socket.destroy();
-        resolve({ ok, latencyMs: ok ? Date.now() - started : null, error });
-      };
-      socket.setTimeout(timeoutMs);
-      socket.once("connect", () => done(true, null));
-      socket.once("timeout", () => done(false, "timeout"));
-      socket.once("error", (err) => done(false, err.message));
-    });
+    const r = await probeProxy(
+      { type: p.type, host: p.host, port: p.port, username: p.username, password: p.password },
+      probeUrl,
+      timeoutMs,
+    );
+    return { ok: r.ok, latencyMs: r.ok ? Date.now() - started : null, error: r.error, exitIp: r.exitIp, geo: r.geo };
   }
 }
