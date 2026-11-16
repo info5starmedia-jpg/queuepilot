@@ -3,6 +3,7 @@ import {
   DomainError,
   ErrorCodes,
   type CreateProfileInput,
+  type FingerprintIdentityOverrides,
   type FingerprintPlatform,
   type Profile,
   type UpdateProfileInput,
@@ -205,6 +206,31 @@ export class ProfileService {
     const next: Profile = { ...p, identityId: identity.id, updatedAt: new Date().toISOString() };
     this.profiles.update(next);
     return next;
+  }
+
+  /**
+   * Operator-pinned fingerprint fields (v0.15.1, Jancy's "edit fingerprint"
+   * gap — until now only full regenerate existed). The body REPLACES the pin
+   * bag: pass a partial to pin those fields, {} to drop every pin back to
+   * seed-derived. Applies at next start like regenerate — the running engine
+   * keeps its launch snapshot, and drift says so.
+   */
+  updateIdentity(id: string, overrides: FingerprintIdentityOverrides) {
+    const p = this.get(id);
+    if (!p.identityId) {
+      throw new DomainError(
+        ErrorCodes.CONFLICT,
+        "profile has no fingerprint identity — regenerate one first",
+      );
+    }
+    this.identities.setOverrides(p.identityId, overrides);
+    return this.identities.get(p.identityId);
+  }
+
+  /** Effective identity of record (merged with pins), for display/attest. */
+  identityOf(id: string) {
+    const p = this.get(id);
+    return p.identityId ? this.identities.get(p.identityId) : null;
   }
 
   delete(id: string): void {

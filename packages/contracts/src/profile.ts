@@ -24,6 +24,31 @@ export const FingerprintIdentitySchema = z.object({
   locale: z.string().min(2),
   createdAt: z.string().datetime(),
 });
+
+/**
+ * Operator-pinned fields (v0.15.1, Jancy "edit fingerprint" gap). A partial
+ * bag: whatever is present OVERRIDES the seed-derived value on read; the
+ * seed itself is never pinned (it is the identity anchor regenerate relies
+ * on). UA / WebGL / fonts are NOT here on purpose — the fury persona schema
+ * derives them from platform + seed at the engine; pinning them needs an
+ * engine-side knob, not a lie in storage.
+ */
+export const FingerprintIdentityOverridesSchema = FingerprintIdentitySchema.pick({
+  platform: true,
+  screenWidth: true,
+  screenHeight: true,
+  hardwareConcurrency: true,
+  deviceMemoryGb: true,
+  timezone: true,
+  locale: true,
+}).partial().strict();
+export type FingerprintIdentityOverrides = z.infer<typeof FingerprintIdentityOverridesSchema>;
+
+export const FingerprintIdentityWithOverridesSchema = FingerprintIdentitySchema.extend({
+  /** Pins currently in effect; absent = fully seed-derived. */
+  overrides: FingerprintIdentityOverridesSchema.nullable().optional(),
+});
+export type FingerprintIdentityWithOverrides = z.infer<typeof FingerprintIdentityWithOverridesSchema>;
 export type FingerprintIdentity = z.infer<typeof FingerprintIdentitySchema>;
 
 export const ProfileStatusSchema = z.enum(["idle", "running", "error"]);

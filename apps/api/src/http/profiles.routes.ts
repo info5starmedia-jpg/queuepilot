@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { CreateProfileInputSchema, UpdateProfileInputSchema } from "@queuepilot/contracts";
+import { CreateProfileInputSchema, UpdateProfileInputSchema, FingerprintIdentityOverridesSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import { maskCard, personaFieldsOf } from "../application/profiles/persona-fields.js";
 import {
@@ -119,6 +119,20 @@ export function registerProfileRoutes(
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as { platform?: "windows" | "macos" | "linux" };
     return service.regenerateFingerprint(id, body.platform);
+  });
+
+  // Effective identity (seed-derived + operator pins), read-only.
+  app.get("/profiles/:id/identity", async (req) => {
+    const { id } = req.params as { id: string };
+    return { identity: service.identityOf(id) };
+  });
+
+  // Pin fingerprint fields (v0.15.1): the body REPLACES the pin bag —
+  // partial pins those fields, {} clears back to seed-derived.
+  app.patch("/profiles/:id/identity", async (req) => {
+    const { id } = req.params as { id: string };
+    const overrides = FingerprintIdentityOverridesSchema.parse(req.body ?? {});
+    return { identity: service.updateIdentity(id, overrides) };
   });
 
   // Jancy clone — same persona/proxy/group, fresh fingerprint identity.

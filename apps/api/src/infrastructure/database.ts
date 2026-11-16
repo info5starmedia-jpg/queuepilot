@@ -199,6 +199,16 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE profiles ADD COLUMN deleted_at TEXT;
     `,
   },
+  {
+    id: "008-identity-overrides",
+    up: `
+      -- v0.15.1: operator-pinned fingerprint fields. The seed-derived values
+      -- stay untouched (regenerate still works); the JSON bag here wins on
+      -- read, so a pin applies from the next launch and can be cleared back
+      -- to seed-derived at any time.
+      ALTER TABLE fingerprint_identities ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}';
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

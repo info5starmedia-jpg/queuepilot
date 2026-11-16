@@ -1,5 +1,5 @@
 import type { Db } from "../../infrastructure/database.js";
-import type { Profile, FingerprintIdentity } from "@queuepilot/contracts";
+import type { Profile, FingerprintIdentity, FingerprintIdentityOverrides } from "@queuepilot/contracts";
 
 /** Row shapes as stored; repositories own the SQL <-> contract mapping. */
 interface ProfileRow {
@@ -182,6 +182,7 @@ interface IdentityRow {
   device_memory_gb: FingerprintIdentity["deviceMemoryGb"];
   timezone: string;
   locale: string;
+  overrides: string;
   created_at: string;
 }
 
@@ -191,18 +192,24 @@ export class FingerprintIdentityRepository {
   create(i: FingerprintIdentity): void {
     this.db
       .prepare(
-        `INSERT INTO fingerprint_identities (id, seed, platform, screen_width, screen_height, hardware_concurrency, device_memory_gb, timezone, locale, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO fingerprint_identities (id, seed, platform, screen_width, screen_height, hardware_concurrency, device_memory_gb, timezone, locale, overrides, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)`,
       )
       .run(i.id, i.seed, i.platform, i.screenWidth, i.screenHeight, i.hardwareConcurrency, i.deviceMemoryGb, i.timezone, i.locale, i.createdAt);
   }
 
-  get(id: string): FingerprintIdentity | null {
+  /**
+   * Effective identity: seed-derived values with the operator's override bag
+   * merged on top (v0.15.1). Every reader — launch, snapshot, drift,
+   * attestation — goes through here, so a pin applies uniformly from the
+   * next launch; the seed-derived row underneath is never mutated.
+   */
+  get(id: string): (FingerprintIdentity & { overrides?: FingerprintIdentityOverrides | null }) | null {
     const r = this.db.prepare("SELECT * FROM fingerprint_identities WHERE id = ?").get(id) as
       | IdentityRow
       | undefined;
     if (!r) return null;
-    return {
+    const base: FingerprintIdentity = {
       id: r.id,
       seed: r.seed,
       platform: r.platform,
@@ -214,5 +221,20 @@ export class FingerprintIdentityRepository {
       locale: r.locale,
       createdAt: r.created_at,
     };
+    let overrides: FingerprintIdentityOverrides = {};
+    try {
+      overrides = JSON.parse(r.overrides || "{}") as FingerprintIdentityOverrides;
+    } catch {
+      overrides = {};
+    }
+    const pinned = Object.keys(overrides).length > 0;
+    return { ...base, ...overrides, overrides: pinned ? overrides : null };
+  }
+
+  /** Replace the whole pin bag ({} clears every pin back to seed-derived). */
+  setOverrides(id: string, overrides: FingerprintIdentityOverrides): void {
+    this.db
+      .prepare("UPDATE fingerprint_identities SET overrides = ? WHERE id = ?")
+      .run(JSON.stringify(overrides), id);
   }
 }
