@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.cc b/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.cc
-index 8e9d842904..4ded23674e 100644
+index 8e9d842904..48fdcef349 100644
 --- a/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.cc
 +++ b/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.cc
 @@ -4,6 +4,9 @@
@@ -12,11 +12,12 @@ index 8e9d842904..4ded23674e 100644
  #include "base/location.h"
  #include "base/metrics/histogram_functions.h"
  #include "base/metrics/histogram_macros.h"
-@@ -237,6 +240,39 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
+@@ -237,6 +240,40 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
  
  CanvasAsyncBlobCreator::~CanvasAsyncBlobCreator() = default;
  
-+void CanvasAsyncBlobCreator::FuryApplyNoise(bool wanted) {
++void CanvasAsyncBlobCreator::FuryApplyNoise(
++    bool wanted, base::span<const gfx::Rect> exact) {
 +  uint64_t seed = 0;
 +  if (!wanted || !static_bitmap_image_loaded_ ||
 +      !fury::GetCanvasNoiseSeed(&seed)) {
@@ -44,7 +45,7 @@ index 8e9d842904..4ded23674e 100644
 +      base::span(fury_noised_pixels_), src_data_.rowBytes(), 0, 0,
 +      src_data_.width(), src_data_.height(), 0, 0, src_data_.width(),
 +      src_data_.height(), src_data_.width(), src_data_.height(),
-+      type == kBGRA_8888_SkColorType);
++      type == kBGRA_8888_SkColorType, /*opaque_blends=*/true, exact);
 +  src_data_.reset(src_data_.info(), fury_noised_pixels_.data(),
 +                  src_data_.rowBytes());
 +}
@@ -53,10 +54,26 @@ index 8e9d842904..4ded23674e 100644
    // Eagerly let go of references to prevent retention of these
    // resources while any remaining posted tasks are queued.
 diff --git a/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h b/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h
-index 625c3204a0..57433c9d50 100644
+index 625c3204a0..6974a45669 100644
 --- a/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h
 +++ b/third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h
-@@ -30,6 +30,16 @@ class ImageDataBuffer;
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "base/containers/span.h"
+ #include "base/location.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/time/time.h"
+@@ -21,6 +22,7 @@
+ #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
+ #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+ #include "third_party/blink/renderer/platform/wtf/vector.h"
++#include "ui/gfx/geometry/rect.h"
+ 
+ namespace blink {
+ 
+@@ -30,6 +32,18 @@ class ImageDataBuffer;
  class CORE_EXPORT CanvasAsyncBlobCreator
      : public GarbageCollected<CanvasAsyncBlobCreator> {
   public:
@@ -67,13 +84,15 @@ index 625c3204a0..57433c9d50 100644
 +  // Before this, toBlob() on the main thread took the progressive path, which
 +  // feeds src_data_ straight to ImageEncoder, and came out with the canvas's
 +  // real pixels while toDataURL() of the same canvas was noised — the real
-+  // rendering, and a contradiction to go with it.
-+  void FuryApplyNoise(bool wanted);
++  // rendering, and a contradiction to go with it. `exact` lists putImageData()
++  // rectangles (page-supplied bytes) that must read back untouched; see
++  // CanvasRenderingContextHost::FuryNoteExactRect.
++  void FuryApplyNoise(bool wanted, base::span<const gfx::Rect> exact = {});
 +
    // This enum is used to back an UMA histogram, and should therefore be treated
    // as append-only. Idle tasks are not implemented for some image types.
    enum IdleTaskStatus {
-@@ -101,6 +111,8 @@ class CORE_EXPORT CanvasAsyncBlobCreator
+@@ -101,6 +115,8 @@ class CORE_EXPORT CanvasAsyncBlobCreator
    // see comment above the implementation of ScheduleAsyncBlobCreation.
    sk_sp<SkImage> skia_image_;
    SkPixmap src_data_;  // Holds a raw pointer owned by `skia_ìmage`.
@@ -83,10 +102,18 @@ index 625c3204a0..57433c9d50 100644
    Vector<unsigned char> encoded_image_;
    int num_rows_completed_;
 diff --git a/third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h b/third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h
-index 674d3dd157..d256877dc5 100644
+index 674d3dd157..4efb4a19d2 100644
 --- a/third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h
 +++ b/third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h
-@@ -123,6 +123,30 @@ class CORE_EXPORT CanvasRenderingContextHost : public GarbageCollectedMixin,
+@@ -22,6 +22,7 @@
+ #include "third_party/blink/renderer/platform/graphics/canvas_drawable_paint_record.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+ #include "third_party/blink/renderer/platform/text/text_direction.h"
++#include "third_party/blink/renderer/platform/wtf/vector.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "ui/gfx/geometry/rect_f.h"
+ #include "ui/gfx/geometry/size.h"
+@@ -123,6 +124,54 @@ class CORE_EXPORT CanvasRenderingContextHost : public GarbageCollectedMixin,
    bool IsRenderingContext2D() const;
    bool IsImageBitmapRenderingContext() const;
  
@@ -109,58 +136,86 @@ index 674d3dd157..d256877dc5 100644
 +      fury_platform_dependent_draw_ = true;
 +    }
 +  }
-+  void FuryResetDraws() { fury_platform_dependent_draw_ = false; }
++  void FuryResetDraws() {
++    fury_platform_dependent_draw_ = false;
++    fury_exact_rects_.clear();
++  }
 +  bool FuryWantsCanvasNoise() const {
 +    return !IsRenderingContext2D() || fury_platform_dependent_draw_;
 +  }
 +
++  // Fury: pixels putImageData() wrote are the page's own bytes — putImageData
++  // replaces, it does not rasterize, so every machine reads back exactly what
++  // the page supplied. Noise must skip them or the round-trip betrays it.
++  // The aliasmode.com checker (measured 16.11.2026) draws shapes, then
++  // putImageData()s a known pattern over part of the canvas, then reads that
++  // region back and compares to the pattern: real Chrome matches pixel for
++  // pixel; a noised readback is what produced its "canvas pixels change after
++  // a shape is drawn" warning for us.
++  //
++  // Rects are in canvas coordinates and are only cleared on context reset.
++  // A platform-dependent draw over an exact rect afterwards leaves the rect
++  // tracked: the overdrawn pixels then read back as our real rasterization —
++  // unnoised — which is what this same engine would report unpatched, so it
++  // is never a claim about another machine's GPU.
++  void FuryNoteExactRect(const gfx::Rect& rect) {
++    if (!rect.IsEmpty() && fury_exact_rects_.size() < 64) {
++      fury_exact_rects_.push_back(rect);
++    }
++  }
++  const Vector<gfx::Rect>& FuryExactRects() const { return fury_exact_rects_; }
++
    PlainTextPainter& GetPlainTextPainter();
  
    // Actual RasterMode used for rendering 2d primitives.
-@@ -187,6 +211,7 @@ class CORE_EXPORT CanvasRenderingContextHost : public GarbageCollectedMixin,
+@@ -187,6 +236,8 @@ class CORE_EXPORT CanvasRenderingContextHost : public GarbageCollectedMixin,
  
   private:
  
 +  bool fury_platform_dependent_draw_ = false;
++  Vector<gfx::Rect> fury_exact_rects_;
    bool did_record_canvas_size_to_uma_ = false;
    HostType host_type_ = HostType::kNone;
    RasterModeHint preferred_2d_raster_mode_ = RasterModeHint::kPreferCPU;
 diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-index 13c0ced1be..00490b026c 100644
+index 3da40c38fa..e25f255b4c 100644
 --- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
 +++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
-@@ -1439,6 +1439,9 @@ String HTMLCanvasElement::ToDataURLInternal(
+@@ -1439,6 +1439,10 @@ String HTMLCanvasElement::ToDataURLInternal(
          ImageDataBuffer::Create(image_bitmap);
      if (!data_buffer)
        return String("data:,");
 +    if (FuryWantsCanvasNoise()) {
-+      data_buffer->ApplyFuryNoise();
++      data_buffer->ApplyFuryNoise(
++          base::span<const gfx::Rect>(FuryExactRects()));
 +    }
  
      String data_url = data_buffer->ToDataURL(encoding_mime_type, quality);
      base::TimeDelta elapsed_time = base::TimeTicks::Now() - start_time;
-@@ -1545,6 +1548,7 @@ void HTMLCanvasElement::toBlob(V8BlobCallback* callback,
+@@ -1545,6 +1549,8 @@ void HTMLCanvasElement::toBlob(V8BlobCallback* callback,
          image_bitmap, options,
          CanvasAsyncBlobCreator::kHTMLCanvasToBlobCallback, callback, start_time,
          GetExecutionContext());
-+    async_creator->FuryApplyNoise(FuryWantsCanvasNoise());
++    async_creator->FuryApplyNoise(FuryWantsCanvasNoise(),
++                                  base::span<const gfx::Rect>(FuryExactRects()));
    }
  
    if (async_creator) {
 diff --git a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
-index 41ed6d0c21..f3987d4928 100644
+index 41ed6d0c21..891f822b14 100644
 --- a/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
 +++ b/third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.cc
-@@ -596,6 +596,7 @@ ScriptPromise<Blob> OffscreenCanvas::convertToBlob(
+@@ -596,6 +596,8 @@ ScriptPromise<Blob> OffscreenCanvas::convertToBlob(
      auto* async_creator = MakeGarbageCollected<CanvasAsyncBlobCreator>(
          image_bitmap, options, function_type, start_time, execution_context,
          resolver);
-+    async_creator->FuryApplyNoise(FuryWantsCanvasNoise());
++    async_creator->FuryApplyNoise(FuryWantsCanvasNoise(),
++                                  base::span<const gfx::Rect>(FuryExactRects()));
      async_creator->ScheduleAsyncBlobCreation(options->quality());
      return resolver->Promise();
    }
 diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
-index ba2dcc2f2f..c1ee201f8f 100644
+index ba2dcc2f2f..bb0f35f7de 100644
 --- a/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
 +++ b/third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.cc
 @@ -6,6 +6,9 @@
@@ -173,7 +228,7 @@ index ba2dcc2f2f..c1ee201f8f 100644
  #include <cmath>
  #include <cstdint>
  #include <cstdlib>
-@@ -873,6 +876,73 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
+@@ -873,6 +876,75 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
            snapshot->PaintImageForCurrentFrame().GetSkImageInfo().bounds();
        DCHECK(!bounds.intersect(SkIRect::MakeXYWH(sx, sy, sw, sh)));
      }
@@ -226,10 +281,12 @@ index ba2dcc2f2f..c1ee201f8f 100644
 +        if (snapshot->PaintImageForCurrentFrame().readPixels(
 +                premul, original.data(), premul_row_bytes, ox, oy)) {
 +          Vector<uint8_t> noised_premul = original;
-+          fury_flat::ApplyEdgeNoise(noise_seed, base::span(original),
-+                                    base::span(noised_premul),
-+                                    premul_row_bytes, ox, oy, ow, oh, ix, iy,
-+                                    iw, ih, cw, ch, /*bgra=*/false);
++          fury_flat::ApplyEdgeNoise(
++              noise_seed, base::span(original), base::span(noised_premul),
++              premul_row_bytes, ox, oy, ow, oh, ix, iy, iw, ih, cw, ch,
++              /*bgra=*/false, /*opaque_blends=*/true,
++              fury_host ? base::span<const gfx::Rect>(fury_host->FuryExactRects())
++                        : base::span<const gfx::Rect>());
 +          SkPixmap noised_pixmap(premul, noised_premul.data(),
 +                                 premul_row_bytes);
 +          const SkImageInfo dst_info = out.info().makeWH(iw, ih);
@@ -247,6 +304,20 @@ index ba2dcc2f2f..c1ee201f8f 100644
    }
  
    return image_data;
+@@ -946,6 +1018,13 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
+   gfx::Rect source_rect = dest_rect;
+   source_rect.Offset(-dest_offset);
+ 
++  // Fury: remember which pixels become the page's own bytes, so a later
++  // readback skips noise inside them. See
++  // CanvasRenderingContextHost::FuryNoteExactRect.
++  if (CanvasRenderingContextHost* host = GetCanvasRenderingContextHost()) {
++    host->FuryNoteExactRect(dest_rect);
++  }
++
+   SkPixmap data_pixmap = data->GetSkPixmap();
+ 
+   // WritePixels (called by PutByteArray) requires that the source and
 diff --git a/third_party/blink/renderer/modules/canvas/canvas2d/canvas_2d_recorder_context.cc b/third_party/blink/renderer/modules/canvas/canvas2d/canvas_2d_recorder_context.cc
 index 0d2d48606e..670a0b81d9 100644
 --- a/third_party/blink/renderer/modules/canvas/canvas2d/canvas_2d_recorder_context.cc
@@ -379,10 +450,10 @@ index d85e3d2174..08b4f73d71 100644
      WillDraw(gfx::SkIRectToRect(clip_bounds), draw_type);
 diff --git a/third_party/blink/renderer/platform/graphics/fury_flat.h b/third_party/blink/renderer/platform/graphics/fury_flat.h
 new file mode 100644
-index 0000000000..dc799e7463
+index 0000000000..c24490fb96
 --- /dev/null
 +++ b/third_party/blink/renderer/platform/graphics/fury_flat.h
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,175 @@
 +// Copyright 2026 The Fury Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -396,6 +467,7 @@ index 0000000000..dc799e7463
 +#include <utility>
 +
 +#include "base/containers/span.h"
++#include "ui/gfx/geometry/rect.h"
 +
 +// Canvas noise that looks like a different rasteriser, not like noise.
 +//
@@ -444,6 +516,9 @@ index 0000000000..dc799e7463
 +// inside [nx, nx+nw) x [ny, ny+nh) are noised in `noised`; the rest of the
 +// rectangle is the margin a partial read supplies for its neighbours. The
 +// canvas is [0, cw) x [0, ch). `bgra` says where red and blue sit.
++// `exact` lists canvas rectangles putImageData() wrote (page-supplied bytes):
++// pixels inside them are copied through untouched, so the readback matches
++// real Chrome's exact round-trip of putImageData content.
 +inline void ApplyEdgeNoise(uint64_t seed,
 +                           base::span<const uint8_t> original,
 +                           base::span<uint8_t> noised,
@@ -459,7 +534,8 @@ index 0000000000..dc799e7463
 +                           int cw,
 +                           int ch,
 +                           bool bgra,
-+                           bool opaque_blends = true) {
++                           bool opaque_blends = true,
++                           base::span<const gfx::Rect> exact = {}) {
 +  auto usable = [&](int x, int y) {
 +    return x >= 0 && y >= 0 && x < cw && y < ch && x >= ox && y >= oy &&
 +           x < ox + ow && y < oy + oh;
@@ -473,11 +549,19 @@ index 0000000000..dc799e7463
 +           original[a + 2] == original[b + 2] &&
 +           original[a + 3] == original[b + 3];
 +  };
++  auto put_by_page = [&](int x, int y) {
++    for (const gfx::Rect& r : exact) {
++      if (x >= r.x() && x < r.right() && y >= r.y() && y < r.bottom()) {
++        return true;
++      }
++    }
++    return false;
++  };
 +  static constexpr std::array<std::pair<int, int>, 4> kNeighbours = {
 +      {{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
 +  for (int y = ny; y < ny + nh; ++y) {
 +    for (int x = nx; x < nx + nw; ++x) {
-+      if (!usable(x, y)) {
++      if (!usable(x, y) || put_by_page(x, y)) {
 +        continue;
 +      }
 +      const size_t p = at(x, y);
@@ -546,7 +630,7 @@ index 0000000000..dc799e7463
 +
 +#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_FURY_FLAT_H_
 diff --git a/third_party/blink/renderer/platform/graphics/image_data_buffer.cc b/third_party/blink/renderer/platform/graphics/image_data_buffer.cc
-index 89f8fff042..378acb64b2 100644
+index 89f8fff042..deb547f843 100644
 --- a/third_party/blink/renderer/platform/graphics/image_data_buffer.cc
 +++ b/third_party/blink/renderer/platform/graphics/image_data_buffer.cc
 @@ -32,6 +32,9 @@
@@ -559,7 +643,7 @@ index 89f8fff042..378acb64b2 100644
  #include "base/compiler_specific.h"
  #include "base/logging.h"
  #include "base/memory/ptr_util.h"
-@@ -123,6 +126,48 @@ std::unique_ptr<ImageDataBuffer> ImageDataBuffer::Create(
+@@ -123,6 +126,49 @@ std::unique_ptr<ImageDataBuffer> ImageDataBuffer::Create(
    return buffer;
  }
  
@@ -572,7 +656,7 @@ index 89f8fff042..378acb64b2 100644
 +// getImageData() is perturbed separately but by the SAME function on the same
 +// absolute coordinates, so all of them agree — a site that compares a pixel
 +// from getImageData against the decoded PNG sees no contradiction.
-+void ImageDataBuffer::ApplyFuryNoise() {
++void ImageDataBuffer::ApplyFuryNoise(base::span<const gfx::Rect> exact) {
 +  uint64_t seed = 0;
 +  if (!fury::GetCanvasNoiseSeed(&seed)) {
 +    return;
@@ -599,7 +683,8 @@ index 89f8fff042..378acb64b2 100644
 +      base::span(fury_noised_pixels_), pixmap_.rowBytes(), 0, 0,
 +      pixmap_.width(), pixmap_.height(), 0, 0, pixmap_.width(),
 +      pixmap_.height(), pixmap_.width(), pixmap_.height(),
-+      pixmap_.colorType() == kBGRA_8888_SkColorType);
++      pixmap_.colorType() == kBGRA_8888_SkColorType, /*opaque_blends=*/true,
++      exact);
 +
 +  pixmap_.reset(pixmap_.info(), fury_noised_pixels_.data(),
 +                pixmap_.rowBytes());
@@ -609,23 +694,34 @@ index 89f8fff042..378acb64b2 100644
      const SkPixmap& pixmap) {
    std::unique_ptr<ImageDataBuffer> buffer =
 diff --git a/third_party/blink/renderer/platform/graphics/image_data_buffer.h b/third_party/blink/renderer/platform/graphics/image_data_buffer.h
-index 7788473df7..880c8aeca7 100644
+index 7788473df7..2784dacb82 100644
 --- a/third_party/blink/renderer/platform/graphics/image_data_buffer.h
 +++ b/third_party/blink/renderer/platform/graphics/image_data_buffer.h
-@@ -51,6 +51,12 @@ class PLATFORM_EXPORT ImageDataBuffer {
+@@ -40,6 +40,7 @@
+ #include "third_party/blink/renderer/platform/wtf/vector.h"
+ #include "third_party/skia/include/core/SkPixmap.h"
+ #include "third_party/skia/include/core/SkRefCnt.h"
++#include "ui/gfx/geometry/rect.h"
+ 
+ namespace blink {
+ 
+@@ -51,6 +52,15 @@ class PLATFORM_EXPORT ImageDataBuffer {
        scoped_refptr<StaticBitmapImage>);
    static std::unique_ptr<ImageDataBuffer> Create(const SkPixmap&);
  
 +  // Applies the configured canvas noise to an owned copy, and repoints
 +  // pixmap_ at it. Doing it in place would mutate the live canvas and make the
 +  // perturbation cumulative — the second toDataURL() would then differ from the
-+  // first, which is worse than not perturbing at all.
-+  void ApplyFuryNoise();
++  // first, which is worse than not perturbing at all. `exact` lists
++  // putImageData() rectangles (page-supplied bytes) that must read back
++  // untouched — the same list getImageData() skips, so every readback path
++  // agrees.
++  void ApplyFuryNoise(base::span<const gfx::Rect> exact = {});
 +
    String ToDataURL(const ImageEncodingMimeType mime_type,
                     const double& quality) const;
    bool EncodeImage(const ImageEncodingMimeType mime_type,
-@@ -67,6 +73,7 @@ class PLATFORM_EXPORT ImageDataBuffer {
+@@ -67,6 +77,7 @@ class PLATFORM_EXPORT ImageDataBuffer {
  
    sk_sp<SkImage> retained_image_;
    SkPixmap pixmap_;

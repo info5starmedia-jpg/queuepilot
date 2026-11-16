@@ -53,6 +53,16 @@ What 0030 claims is harder, and each part is checkable:
      it returned the canvas's REAL pixels beside a noised toDataURL() — the
      real rendering, and a contradiction to go with it.
 
+  10. putImageData() ROUND-TRIPS EXACTLY. putImageData replaces pixels; it
+     does not rasterize. Real Chrome hands the page's own bytes back
+     byte-for-byte, and the aliasmode.com checker (measured 16.11.2026)
+     proves a noised readback of them: it draws shapes — which arms the
+     noise — then putImageData()s a known 64x64 pattern, reads it back and
+     counts differing pixels. Real Chrome: 0. Us before this claim: the
+     whole pattern, moved. The fix tracks putImageData rectangles per host
+     and every readback path (getImageData, toDataURL, toBlob,
+     convertToBlob, workers included) skips noise inside them.
+
 Usage: core/verify/verify-0030.py <core binary>
 """
 
@@ -218,6 +228,48 @@ EXACT = """
 })()
 """
 
+# Claim 10: the aliasmode.com checker sequence, reduced to what it measures.
+# Shapes first (they arm the noise), then putImageData of a known pattern,
+# then a readback that must equal the pattern byte for byte. Real Chrome: 0
+# differing pixels. A noised readback fails here even though every claim
+# above passes — measured 16.11.2026 on a build that passed all of them.
+PUTROUNDTRIP = """
+(async () => {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const x = c.getContext('2d');
+  // What the checker draws before the pattern: a platform-dependent shape
+  // and text, so FuryWantsCanvasNoise() is armed for this canvas.
+  x.beginPath(); x.arc(100, 100, 20, 0, 6.28);
+  x.fillStyle = '#123'; x.fill();
+  x.font = '14px Arial'; x.fillText('arm', 2, 120);
+  // The checker's pattern, byte for byte: (e*37+11)&255 and friends.
+  const u = new ImageData(64, 64);
+  for (let e = 0; e < 4096; e++) {
+    u.data[e * 4] = (e * 37 + 11) & 255;
+    u.data[e * 4 + 1] = (e * 91 + 53) & 255;
+    u.data[e * 4 + 2] = (e * 17 + 29) & 255;
+    u.data[e * 4 + 3] = 255;
+  }
+  x.putImageData(u, 10, 10);
+  const f = x.getImageData(10, 10, 64, 64);
+  let diff = 0;
+  for (let e = 0; e < f.data.length; e++) if (f.data[e] !== u.data[e]) diff++;
+  // Read it again: the skip must be as stable as the noise is.
+  const f2 = x.getImageData(10, 10, 64, 64);
+  let diff2 = 0;
+  for (let e = 0; e < f2.data.length; e++) if (f2.data[e] !== u.data[e]) diff2++;
+  // And the encoded path must agree: a site can decode the PNG and compare
+  // this region against the pattern (decoded outside the page).
+  return JSON.stringify({
+    diff, diff2,
+    whole: Array.from(x.getImageData(0, 0, 128, 128).data).join(','),
+    dataURL: c.toDataURL('image/png'),
+  });
+})()
+"""
+
+
 # Claim 8: toBlob() on the main thread, beside toDataURL() and getImageData().
 BLOB = """
 (async () => {
@@ -351,12 +403,38 @@ def main():
                      "toBlob() on the main thread matches getImageData byte for "
                      "byte — the progressive encoder is noised too")
 
+        put = json.loads(s.js(PUTROUNDTRIP))
+        claims.check(put["diff"] == 0,
+                     f"putImageData round-trips byte for byte on a noised "
+                     f"canvas — aliasmode.com's palette check "
+                     f"({put['diff']} of 16384 bytes differ)")
+        claims.check(put["diff2"] == 0,
+                     f"and a second readback agrees ({put['diff2']} differ)")
+        # The encoded path must agree too: a site can decode the PNG and
+        # compare this region against the pattern.
+        pw, ph, ppx = decode_png(put["dataURL"])
+        pattern_wrong = 0
+        for e in range(4096):
+            o = ((10 + e // 64) * pw + (10 + e % 64)) * 4
+            want = bytes([(e * 37 + 11) & 255, (e * 91 + 53) & 255,
+                          (e * 17 + 29) & 255, 255])
+            if ppx[o:o + 4] != want:
+                pattern_wrong += 1
+        claims.check(pattern_wrong == 0,
+                     f"the toDataURL PNG decodes to the pattern in its region "
+                     f"({pattern_wrong} of 4096 pixels wrong)")
+
     with launch(CORE, {"noise": {"canvasSeed": SEED_B}}) as s:
         b = json.loads(s.js(READ))
         print(f"  seed B canvas hash: {hashlib.sha256(b['whole'].encode()).hexdigest()[:16]}")
         claims.check(a["whole"] != b["whole"],
                      "a different seed gives different pixels — otherwise every "
                      "profile shares one hash, which fingerprints the product")
+        put_b = json.loads(s.js(PUTROUNDTRIP))
+        claims.check(put_b["whole"] != put["whole"],
+                     "noise is still alive around a putImageData region — the "
+                     "skip must not silence the canvas, only the page's own "
+                     "bytes")
 
     with launch(CORE, None) as s:
         bare = json.loads(s.js(READ))
@@ -406,6 +484,12 @@ def main():
             f"differently from both seeds, and has the two readback paths "
             f"already agreeing — which is the bar the noised build has to meet "
             f"(moved {bare['flatMoved']})")
+        put_bare = json.loads(s.js(PUTROUNDTRIP))
+        claims.control(
+            put_bare["diff"] == 0 and put_bare["whole"] != put["whole"],
+            f"an unconfigured build round-trips putImageData exactly and still "
+            f"hashes its shapes differently from seed A — so the claim above "
+            f"it is a real control, not a tautology")
 
     return claims.done()
 
