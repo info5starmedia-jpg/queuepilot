@@ -237,23 +237,37 @@ async function loadProfiles() {
 async function renderProfileGrid() {
   const grid = $("#profiles");
   grid.innerHTML = "";
-  for (const p of visibleProfiles()) {
+  const profiles = visibleProfiles();
+
+  // ONE batch request for every running profile's drift + tab count — the
+  // old per-card /drift + /tabs pair was 2N requests per grid refresh and
+  // buckled past a few dozen running profiles (audit B4).
+  const stateById = new Map();
+  const runningIds = profiles.filter((p) => p.status === "running").map((p) => p.id);
+  if (runningIds.length > 0) {
+    try {
+      const { states } = await api("/profiles/batch-state", {
+        method: "POST",
+        body: JSON.stringify({ ids: runningIds }),
+      });
+      for (const s of states) stateById.set(s.id, s);
+    } catch {
+      /* batch state is best-effort — badges just stay hidden */
+    }
+  }
+
+  for (const p of profiles) {
     const card = document.createElement("div");
     card.className = "card";
     card.dataset.id = p.id;
 
     let driftBadge = "";
     let tabsInfo = "";
-    if (p.status === "running") {
-      try {
-        const { drift } = await api(`/profiles/${p.id}/drift`);
-        if (drift?.stale)
-          driftBadge = `<span class="badge badge-drift" title="${esc(drift.message)}">applies at next start</span>`;
-        const { tabs } = await api(`/profiles/${p.id}/tabs`);
-        tabsInfo = `${tabs.length} tab${tabs.length === 1 ? "" : "s"}`;
-      } catch {
-        /* drift/tabs best-effort */
-      }
+    const state = stateById.get(p.id);
+    if (state) {
+      if (state.drift?.stale)
+        driftBadge = `<span class="badge badge-drift" title="${esc(state.drift.message)}">applies at next start</span>`;
+      tabsInfo = `${state.tabCount} tab${state.tabCount === 1 ? "" : "s"}`;
     }
 
     const favorite = p.extra?.favorite === true;

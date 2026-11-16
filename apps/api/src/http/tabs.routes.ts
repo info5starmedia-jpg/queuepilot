@@ -15,6 +15,28 @@ export function registerTabRoutes(
   app: FastifyInstance,
   lifecycle: BrowserLifecycleService,
 ): void {
+  /**
+   * Batch state for the dashboard grid (v0.15.1, audit B4): drift + live tab
+   * count for MANY profiles in ONE request. The grid re-renders on every SSE
+   * event; per-profile /drift + /tabs made that 2N requests per refresh and
+   * fell over past a few dozen running profiles. Per-profile failures are
+   * isolated — a bad id yields a null entry, never a failed batch.
+   */
+  app.post("/profiles/batch-state", async (req) => {
+    const { ids } = z
+      .object({ ids: z.array(z.string().uuid()).min(1).max(1000) })
+      .parse(req.body ?? {});
+    const states = ids.map((id) => {
+      try {
+        const listed = lifecycle.listTabs(id);
+        return { id, drift: lifecycle.identityDrift(id), tabCount: listed.tabs.length };
+      } catch {
+        return { id, drift: null, tabCount: 0 };
+      }
+    });
+    return { states };
+  });
+
   app.post("/profiles/:id/tabs", async (req, reply) => {
     const { id } = req.params as { id: string };
     const input = OpenTabInputSchema.parse(req.body ?? {});
