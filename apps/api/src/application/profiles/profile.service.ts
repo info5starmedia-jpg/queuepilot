@@ -24,7 +24,7 @@ import {
   nextProxyIndex,
   type MaskedProxyEntry,
 } from "./profile-proxies.js";
-import { copyCardSecrets, sealCardsInExtra } from "./card-secrets.js";
+import { copyCardSecrets, sealCardsInExtra, cardSecretKey } from "./card-secrets.js";
 import type { SecretStore } from "../secrets/secret-store.js";
 
 export class ProfileService {
@@ -211,6 +211,52 @@ export class ProfileService {
     const p = this.get(id);
     if (p.status === "running") {
       throw new DomainError(ErrorCodes.CONFLICT, "stop the browser before deleting the profile");
+    }
+    this.profiles.delete(id);
+  }
+
+  /**
+   * Trash (v0.15.1): soft delete — the row survives but vanishes from every
+   * live list/get/launch until restored. Refuses while the browser runs.
+   * The provider linkage stays on the row but getByProviderKey now skips
+   * trashed rows, so a provider refresh re-imports as a FRESH profile instead
+   * of resurrecting the old one (and without colliding on the unique index).
+   */
+  trash(id: string): void {
+    const p = this.get(id);
+    if (p.status === "running") {
+      throw new DomainError(ErrorCodes.CONFLICT, "stop the browser before trashing the profile");
+    }
+    this.profiles.trash(id);
+  }
+
+  restore(id: string): Profile {
+    const p = this.profiles.getTrashed(id);
+    if (!p) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_FOUND, `profile ${id} is not in the trash`);
+    }
+    this.profiles.restore(id);
+    return this.get(id);
+  }
+
+  listTrashed(): Profile[] {
+    return this.profiles.listTrashed();
+  }
+
+  /**
+   * Permanent delete — only reachable from the trash. Wipes the row AND the
+   * card PAN secrets sealed under it (DPAPI entries keyed by profile id would
+   * otherwise dangle forever).
+   */
+  purge(id: string): void {
+    const p = this.profiles.getTrashed(id);
+    if (!p) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_FOUND, `profile ${id} is not in the trash`);
+    }
+    if (this.secrets) {
+      for (const card of personaFieldsOf(p.extra).creditCards) {
+        this.secrets.delete(cardSecretKey(id, card.set));
+      }
     }
     this.profiles.delete(id);
   }

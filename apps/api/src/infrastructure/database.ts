@@ -191,6 +191,14 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "007-trash",
+    up: `
+      -- v0.15.1: soft delete. NULL = live row; a timestamp means the profile
+      -- is in the trash and hidden from every list/get until restored.
+      ALTER TABLE profiles ADD COLUMN deleted_at TEXT;
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

@@ -58,6 +58,30 @@ export function registerProfileRoutes(
     return { profiles };
   });
 
+  // Trash bin (v0.15.1) — registered before /profiles/:id so the static path
+  // wins regardless of router precedence rules.
+  app.get("/profiles/trash", async () => ({ profiles: service.listTrashed() }));
+
+  app.post("/profiles/:id/trash", async (req) => {
+    const { id } = req.params as { id: string };
+    service.trash(id);
+    return { trashed: true };
+  });
+
+  app.post("/profiles/:id/restore", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.restore(id);
+  });
+
+  // Permanent delete — ONLY from the trash. Live deletes stay on
+  // DELETE /profiles/:id. Waits out in-flight launches like the live delete.
+  app.delete("/profiles/:id/trash", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (lifecycle) await lifecycle.ensureIdle(id);
+    service.purge(id);
+    return reply.code(204).send();
+  });
+
   // Folder-tab aggregates for the console's group tabs (v0.14.16).
   app.get("/profile-groups", async () => ({ groups: service.groups() }));
 

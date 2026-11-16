@@ -15,6 +15,7 @@ interface ProfileRow {
   provider_key: string | null;
   email: string | null;
   extra: string;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,6 +34,7 @@ function toProfile(r: ProfileRow): Profile {
     providerId: r.provider_id ?? null,
     providerKey: r.provider_key ?? null,
     extra: JSON.parse(r.extra ?? "{}") as Record<string, unknown>,
+    deletedAt: r.deleted_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -51,14 +53,22 @@ export class ProfileRepository {
   }
 
   get(id: string): Profile | null {
-    const row = this.db.prepare("SELECT * FROM profiles WHERE id = ?").get(id) as
+    const row = this.db.prepare("SELECT * FROM profiles WHERE id = ? AND deleted_at IS NULL").get(id) as
+      | ProfileRow
+      | undefined;
+    return row ? toProfile(row) : null;
+  }
+
+  /** The trashed row, if any (restore/purge operate on these). */
+  getTrashed(id: string): Profile | null {
+    const row = this.db.prepare("SELECT * FROM profiles WHERE id = ? AND deleted_at IS NOT NULL").get(id) as
       | ProfileRow
       | undefined;
     return row ? toProfile(row) : null;
   }
 
   list(filter: { group?: string; query?: string } = {}): Profile[] {
-    let sql = "SELECT * FROM profiles";
+    let sql = "SELECT * FROM profiles WHERE deleted_at IS NULL";
     const where: string[] = [];
     const args: unknown[] = [];
     if (filter.group) {
@@ -69,7 +79,7 @@ export class ProfileRepository {
       where.push("name LIKE ?");
       args.push(`%${filter.query}%`);
     }
-    if (where.length) sql += " WHERE " + where.join(" AND ");
+    if (where.length) sql += " AND " + where.join(" AND ");
     sql += " ORDER BY created_at DESC";
     return (this.db.prepare(sql).all(...args) as ProfileRow[]).map(toProfile);
   }
@@ -82,12 +92,16 @@ export class ProfileRepository {
           `SELECT grp AS "group",
                   COUNT(*) AS total,
                   SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
-           FROM profiles GROUP BY grp ORDER BY grp ASC`,
+           FROM profiles WHERE deleted_at IS NULL GROUP BY grp ORDER BY grp ASC`,
         )
         .all() as { group: string; total: number; running: number }[]
     );
   }
 
+  /**
+   * Live-row update. Deliberately does NOT touch deleted_at: editing a
+   * trashed profile keeps it trashed until an explicit restore.
+   */
   update(p: Profile): void {
     this.db
       .prepare(
@@ -100,10 +114,34 @@ export class ProfileRepository {
     this.db.prepare("DELETE FROM profiles WHERE id = ?").run(id);
   }
 
+  /** Soft delete: hide the profile from every live query until restored. */
+  trash(id: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE profiles SET deleted_at = ?, updated_at = ? WHERE id = ?")
+      .run(now, now, id);
+  }
+
+  /** Bring a trashed profile back to the live lists. */
+  restore(id: string): void {
+    this.db
+      .prepare("UPDATE profiles SET deleted_at = NULL, updated_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), id);
+  }
+
+  /** Everything in the trash, newest-discarded first. */
+  listTrashed(): Profile[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM profiles WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+        .all() as ProfileRow[]
+    ).map(toProfile);
+  }
+
   /** The profile a provider row maps to, if it was imported before. */
   getByProviderKey(providerId: string, providerKey: string): Profile | null {
     const row = this.db
-      .prepare("SELECT * FROM profiles WHERE provider_id = ? AND provider_key = ?")
+      .prepare("SELECT * FROM profiles WHERE provider_id = ? AND provider_key = ? AND deleted_at IS NULL")
       .get(providerId, providerKey) as ProfileRow | undefined;
     return row ? toProfile(row) : null;
   }

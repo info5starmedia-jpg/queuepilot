@@ -49,6 +49,8 @@ export const ProfileSchema = z.object({
    * timezone, favorite. Shape: ImportedProfile minus key/name/email.
    */
   extra: z.record(z.unknown()).default({}),
+  /** Soft-delete marker (v0.15.1); absent/null = live, timestamp = trashed. */
+  deletedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
