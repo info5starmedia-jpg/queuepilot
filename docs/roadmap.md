@@ -851,9 +851,50 @@ for this build (deferred, revisit with real usage): RBAC/multi-user, recorder
       and /cards.
 
 **v0.15.0 security hardening is COMPLETE** — all nine audit P0/P1-security
-items shipped (batches 1–4). Next: v0.15.1 daily-driver gaps: cookie
-import/export formats, trash/restore, proxy validation, fingerprint editing,
-dashboard batch endpoints.
+items shipped (batches 1–4).
+
+## v0.15.1 — Daily-driver gaps (all five shipped 2026-11-16)
+
+1. ✅ **Cookie import/export** (`c9093ec`) — `POST /profiles/:id/cookies/import`
+   (body `{format, content, partitionId?}`) + `GET /profiles/:id/cookies/export?format=netscape|json`.
+   Netscape tab-file and JSON formats both ways; per-cookie results on import;
+   export values redacted to `***` unless `reveal=raw` on a token-configured
+   install (same rule as the list). Parse errors are 400 VALIDATION_FAILED,
+   never 500.
+2. ✅ **Trash/restore** (`19b56c1`) — migration 007 adds `profiles.deleted_at`;
+   `POST /profiles/:id/trash`, `POST /profiles/:id/restore`,
+   `GET /profiles/trash`, `DELETE /profiles/:id/trash` (purge — wipes the row
+   AND its card PAN secrets from the SecretStore). Live queries filter
+   `deleted_at IS NULL`, so a trashed profile is invisible to lists, gets,
+   group counts AND launches. Provider-key lookup skips trashed rows, so a
+   provider refresh re-imports as a FRESH profile instead of colliding with
+   the unique index. Refuses (409) while the browser runs.
+3. ✅ **Proxy validation, real** (`4f3d4d0`) — `test()` was a bare TCP connect;
+   it now makes an actual request THROUGH the proxy to a geo-IP echo
+   (`proxy-probe.ts`) and reports `{ok, latencyMs, error, exitIp, geo}` with
+   country/region/city/timezone. http/https (absolute-URI GET) + socks5
+   (handshake, auth when creds set) supported; 407 surfaces as a clear auth
+   failure. Probe URL injectable for tests.
+4. ✅ **Fingerprint field pinning** (`e88e088`) — migration 008 adds
+   `fingerprint_identities.overrides`; `GET/PATCH /profiles/:id/identity`.
+   The PATCH body REPLACES the pin bag: partial pins those fields, `{}` clears
+   back to seed-derived. Pins merge on READ inside the repository, so launch,
+   snapshot, drift and attestation all see the effective identity; the
+   seed-derived row underneath never mutates, regenerate still works. Pin-able:
+   platform, screen, hardwareConcurrency, deviceMemoryGb, timezone, locale.
+   UA/WebGL/fonts are NOT pin-able — the fury persona schema derives them at
+   the engine; pinning them needs an engine-side knob (fury persona v2), not
+   storage that lies. Seed is never pin-able (strict schema, 400).
+5. ✅ **Dashboard batch endpoints** (`ab26a74`) — `POST /profiles/batch-state`
+   returns `{id, drift, tabCount}` for up to 1000 profiles in ONE request,
+   per-profile failures isolated (null entry, never a failed batch). The grid
+   now makes 1 request per refresh instead of 2N — the N+1 that fell over
+   past a few dozen running profiles on every SSE event (audit B4).
+
+**v0.15.1 daily-driver gaps are COMPLETE.** All gates green: 565 API tests +
+18 server tests, clean typecheck and build. Next candidates: proxy health
+HISTORY (validation results over time — out of scope above by design), fury
+persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
