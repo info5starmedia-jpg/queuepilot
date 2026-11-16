@@ -992,9 +992,33 @@ persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
      call sites wired. Caveat recorded: team-synced profiles moving across
      machines with different RAM could mismatch again (same class as the
      screen clamp).
-   - (c) One open engine item remains: **canvas cross-context noise** — all
-     6 contexts hash identically, but the checker notes redraw variance;
-     the per-draw vs per-content noise question is engine-side work.
+   - (c) **canvas palette — FIXED same day (qp.4, commit 3c89fc9 + manifest
+     bump).** Root cause found by reading the AliasMode checker source: it
+     draws shapes (arming `FuryWantsCanvasNoise`), then `putImageData()`s a
+     known 64x64 pattern, reads it back and counts differing pixels. Real
+     Chrome round-trips putImageData byte-for-byte; our position-pure noise
+     noised the whole pattern ("canvas pixels change after a shape is
+     drawn"). Fix: the host tracks putImageData rectangles
+     (`FuryNoteExactRect`, cap 64, cleared on reset) and every readback path
+     (getImageData, toDataURL, toBlob, convertToBlob, workers) skips noise
+     inside them. Same-canvas `toDataURL` twice, cross-realm hashes and
+     seed-stability unchanged by design. Engine rebuilt in 23 min;
+     verify-0030 grew claim 10 (putImageData round-trip) — 21/21 PASS;
+     packaged as fury-core **0.5.5-qp.4** and re-run live:
+     **AliasMode /check: 0 problems, 0 warnings, 23 passed — fully green.**
+     The identical cross-context hash was never the problem: the checker
+     only warns when realm hashes DIFFER, and stock Chrome agrees across
+     realms too. Also found live: the detect-test profile still carried a
+     pre-clamp deviceMemory=4 pin; patched to 8 (32 GB host). Two follow-ups:
+     identity PATCH replaces `overrides` instead of merging (timezone pin
+     was lost on the first PATCH — v0.16 item 9), and legacy profiles keep
+     stored personas that predate the host clamp (one-line PATCH each, or
+     regenerate).
+9. 🔲 **Identity PATCH must merge overrides** — found during the qp.4
+   verification: `PATCH /profiles/:id/identity {"deviceMemoryGb":8}` silently
+   dropped the existing `timezone` override (response `overrides` contained
+   only the new key). Merge, don't replace; add a regression test. Until
+   shipped, clients must send the full override set in one PATCH.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

@@ -93,3 +93,51 @@ consistency checks.
 
 Signed: QueuePilot agent, 2026-11-16. Operator desktop takeover (KimiCU)
 witnessed all four result pages rendering in the Fury engine windows.
+
+
+---
+
+## Addendum — 2026-11-16 evening: both warnings closed, 0 problems / 0 warnings
+
+The two warnings above are fixed and verified on a rebuilt engine.
+
+**1. Canvas palette ("canvas pixels change after a shape is drawn").**
+Root cause found by reading the AliasMode checker source
+(`/_astro/FingerprintChecker.*.js`): it draws shapes — which arms
+`FuryWantsCanvasNoise` — then `putImageData()`s a known 64x64 pattern at
+(10,10) and counts pixels where `getImageData(10,10,64,64)` differs from the
+pattern (`paletteDiff > 0`). putImageData replaces pixels without
+rasterizing, so real Chrome returns the page's own bytes byte-for-byte; our
+noise, a pure function of absolute position, moved the whole pattern. The
+identical hash across the six realms was never the flag: the checker warns
+only when realm hashes *differ*, and stock Chrome agrees across realms.
+
+Fix (engine patch 0030, commit `3c89fc9`): `CanvasRenderingContextHost`
+tracks putImageData rectangles (`FuryNoteExactRect`, capped at 64, cleared on
+context reset) and every readback path — `getImageData`,
+`toDataURL` (`ImageDataBuffer::ApplyFuryNoise`), `toBlob` /
+`convertToBlob` (`CanvasAsyncBlobCreator::FuryApplyNoise`), OffscreenCanvas
+and workers included — passes them to `ApplyEdgeNoise`, which copies those
+pixels through untouched. toDataURL twice, cross-realm agreement and
+seed-stability are unchanged by design. verify-0030 gained claim 10
+replicating the checker sequence exactly: **21/21 PASS** (pattern diff 0 of
+16384 bytes, PNG decode matches, noise alive around the region).
+
+Engine rebuilt (`out/windows-x64.noindex`, incremental, 23 min), packaged as
+**fury-core 0.5.5-qp.4** (sha256 `dda72d52…1c867`, installed with receipt;
+`engines.manifest.json` bumped). Live re-run of
+https://aliasmode.com/check/ in the detect-test profile on qp.4:
+
+> **No problems found — 0 problems, 0 warnings, 23 passed.**
+
+**2. Hardware values.** The product-level fix (host-memory clamp at identity
+generation, commit `159273b`) shipped earlier today; the detect-test profile
+still carried a pre-fix `deviceMemoryGb: 4` pin and was patched to 8
+(32 GB host; V8 heap 4.09 GiB is the ≥8 GB-machine limit). Caveat carried:
+profiles created before the clamp keep their stored personas — one PATCH
+each, or regenerate. New finding logged as a bug: identity PATCH replaces
+`overrides` instead of merging (the first deviceMemory PATCH silently dropped
+the timezone pin) — roadmap v0.16 item 9.
+
+Signed: QueuePilot agent, 2026-11-16 (evening). Verdicts extracted over CDP
+from the live engine window on the operator desktop.
