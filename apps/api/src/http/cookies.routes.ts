@@ -7,6 +7,11 @@ import {
   listCookies,
   setCookie,
 } from "../application/cookies/cookie-thinger.js";
+import {
+  parseCookies,
+  serializeCookies,
+  type CookieFileFormat,
+} from "../application/cookies/cookie-formats.js";
 
 /**
  * Cookie Thinger routes — programmable cookie surgery on a running profile.
@@ -161,5 +166,90 @@ export function registerCookieRoutes(
     const engineTabIds = partitionTabIds(id, body.partitionId);
     const matched = await clearCookies(wsEndpoint, body, { engineTabIds });
     return { matched };
+  });
+
+  /**
+   * Standard-format import (v0.15.1, Jancy gap): load a Netscape cookies.txt
+   * or JSON cookie export into the running profile. Per-cookie results; one
+   * bad cookie reports its error and the rest still load.
+   */
+  app.post("/profiles/:id/cookies/import", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const wsEndpoint = requireRunning(id);
+    const body = z
+      .object({
+        format: z.enum(["netscape", "json"]),
+        content: z.string().min(1).max(16 * 1024 * 1024),
+        partitionId: z.string().uuid().optional(),
+      })
+      .strict()
+      .parse(req.body ?? {});
+    const cookies = parseCookies(body.format as CookieFileFormat, body.content);
+    const engineTabIds = partitionTabIds(id, body.partitionId);
+    const engineTabId = [...(engineTabIds ?? [])][0];
+
+    const results: { index: number; name: string; set: boolean; error?: string }[] = [];
+    for (const [index, cookie] of cookies.entries()) {
+      try {
+        await setCookie(
+          wsEndpoint,
+          {
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            expires: cookie.expires || undefined,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+          },
+          { engineTabId },
+        );
+        results.push({ index, name: cookie.name, set: true });
+      } catch (err) {
+        results.push({
+          index,
+          name: cookie.name,
+          set: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    const set = results.filter((r) => r.set).length;
+    return reply
+      .code(201)
+      .send({ total: results.length, set, partitionScoped: Boolean(body.partitionId), results });
+  });
+
+  /**
+   * Standard-format export: the run's cookies (optionally filtered/scoped)
+   * serialized as Netscape cookies.txt or JSON. Respects the same redaction
+   * rule as the list: values are `***` unless `reveal=raw` on a token-configured
+   * install — an exported file is no safer than the list it came from.
+   */
+  app.get("/profiles/:id/cookies/export", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const wsEndpoint = requireRunning(id);
+    const q = FilterSchema.extend({
+      format: z.enum(["netscape", "json"]).default("netscape"),
+    }).parse(req.query ?? {});
+    const engineTabIds = partitionTabIds(id, q.partitionId);
+    const cookies = await listCookies(wsEndpoint, q, { engineTabIds });
+    if (q.reveal === "raw") {
+      if (!opts.rawCookieExportAllowed) {
+        throw new DomainError(
+          ErrorCodes.FORBIDDEN,
+          "raw cookie export requires SPECTRA_API_TOKEN to be configured on this install",
+        );
+      }
+    } else {
+      // Same redaction rule as the list — an exported file is no safer
+      // than the list it came from.
+      for (const c of cookies) c.value = "***";
+    }
+    const text = serializeCookies(q.format as CookieFileFormat, cookies);
+    return reply
+      .type(q.format === "json" ? "application/json" : "text/plain; charset=utf-8")
+      .header("content-disposition", `attachment; filename="cookies.${q.format === "json" ? "json" : "txt"}"`)
+      .send(text);
   });
 }

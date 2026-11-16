@@ -294,3 +294,95 @@ describe("POST /profiles/:id/cookies/load (v0.14.12)", () => {
     await ctx.lifecycle.stop(p.id);
   });
 });
+
+describe("cookie import/export in standard formats (v0.15.1)", () => {
+  it("imports a Netscape cookies.txt file into the running profile", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/import`,
+      payload: {
+        format: "netscape",
+        content: [
+          "# Netscape HTTP Cookie File",
+          ".imported.example\tTRUE\t/\tFALSE\t1893456000\timported\tfresh",
+          "#HttpOnly_.imported.example\tTRUE\t/\tTRUE\t0\tsecure\tyes",
+        ].join("\n"),
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ total: 2, set: 2 });
+    expect(mock.setCookieCalls.map((c) => c.name).sort()).toEqual(["imported", "secure"]);
+    const secure = mock.setCookieCalls.find((c) => c.name === "secure")!;
+    expect(secure).toMatchObject({ value: "yes", domain: ".imported.example", httpOnly: true, secure: true });
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("imports JSON and reports per-cookie failures without aborting", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/import`,
+      payload: {
+        format: "json",
+        content: JSON.stringify([
+          { name: "j1", value: "v1", domain: ".example.com" },
+          { name: "j2", value: "v2", domain: ".example.com" },
+        ]),
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().set).toBe(2);
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("400s on malformed content with a useful message", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/cookies/import`,
+      payload: { format: "json", content: "not json" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toMatch(/parse/);
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("exports Netscape by default with redacted values", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies/export`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body.startsWith("# Netscape HTTP Cookie File")).toBe(true);
+    expect(res.body).toContain("session");
+    expect(res.body).not.toContain("abc"); // value redacted
+    await ctx.lifecycle.stop(p.id);
+  });
+
+  it("exports JSON on request and refuses raw reveal without a token", async () => {
+    const p = await boot();
+    await ctx.lifecycle.start(p.id);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies/export?format=json`,
+    });
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toHaveLength(2);
+    expect(parsed.find((c: { name: string }) => c.name === "session").value).toBe("***");
+
+    const denied = await ctx.app.inject({
+      method: "GET",
+      url: `/profiles/${p.id}/cookies/export?format=json&reveal=raw`,
+    });
+    expect(denied.statusCode).toBe(403);
+    await ctx.lifecycle.stop(p.id);
+  });
+});
