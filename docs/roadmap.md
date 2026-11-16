@@ -71,7 +71,12 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
 - Script runner: `queuepilot script <file.mjs> --profile <id>` runs a user
   module against a profile — borrows the live session (starts if needed,
   never stops), typed client + CDP endpoint handed to the script. ✅ v0.9.0
-- Warmup recorder. (open)
+- Warmup recorder + player. ✅ v0.16.0 (`97dad9f`) — record a live profile's
+  URL visit sequence with real dwell times (`POST /profiles/:id/warmup/record`,
+  poll-based so it works on every runtime), replay on any profile for cookie
+  warming (`POST /warmups/:id/run`, dwell re-sampled ±20%, per-step error
+  isolation, starts idle profiles, `stopAfter` opt-in). Recipes are plain
+  operator-owned JSON under `<dataDir>/warmups/`.
 
 ## P4 — Own engine track
 
@@ -89,9 +94,14 @@ TABS_UNSUPPORTED`. `tab.opened`/`tab.closed` on the SSE stream. ✅ v0.5.0
   truth (`npm run verify:calibrate`), not detector folklore — e.g. modern
   stock Chrome does NOT expose `chrome.runtime` to web pages. Live result:
   16/16 PASS on fury-core (Chrome 157). Run: `npm run verify --workspace
-  apps/api -- --engine fury`. Remaining P4: external checker pass (CreepJS/
-  sannysoft-class surfaces, deliberately manual) on every engine bump, then
-  the default-engine decision.
+  apps/api -- --engine fury`. External checker pass (CreepJS/sannysoft-class
+  surfaces, visual review deliberately manual): harness ✅ v0.16.0
+  (`scripts/detection-check.mjs` — launches a profile, opens CreepJS +
+  sannysoft staggered, snapshots the attestation verdict + engine/proxy
+  identity beside them, writes a `docs/reports/detection-check-*.md` report
+  the operator signs off). One manual run per engine bump remains — it needs
+  eyes on the checker pages, on a fury-core machine. Then: the
+  default-engine decision.
 - **P0 (found in P4 audit 2026-11-10, FIXED v0.12.0): the fury runtime used
   to silently drop `proxyUrl`.** Now every configured proxy is fronted by an
   auth-injecting loopback relay, unsupported schemes refuse loudly
