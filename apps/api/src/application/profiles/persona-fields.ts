@@ -108,10 +108,13 @@ export function maskCardNumber(number: string): string {
   return last4.length === 0 ? "••••" : `•••• •••• •••• ${last4}`;
 }
 
-/** Masked, panel-safe view of a card — everything but last4 + metadata. */
+/**
+ * Masked, panel-safe view of a card — the stored metadata IS already safe
+ * (last4 only since v0.15.0), so this adds the legacy `hasCvv` flag for API
+ * compatibility. It is always false: CVVs are never stored anymore.
+ */
 export function maskCard(
   card: PersonaFields["creditCards"][number],
-): Omit<typeof card, "number" | "cvv"> & { last4: string; hasCvv: boolean } {
-  const { number, cvv, ...rest } = card;
-  return { ...rest, last4: maskCardNumber(number), hasCvv: cvv.length > 0 };
+): typeof card & { hasCvv: boolean } {
+  return { ...card, hasCvv: false };
 }

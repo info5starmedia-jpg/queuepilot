@@ -33,6 +33,7 @@ import type { Proxy } from "@queuepilot/contracts";
 import { publicProxy } from "../proxies/proxy.repository.js";
 import type { SheetReader } from "../google/sheets-client.js";
 import { resolveContainedPath } from "../paths/contained-path.js";
+import { sealCardsInExtra } from "../profiles/card-secrets.js";
 
 export interface RefreshResult {
   imported: number;
@@ -147,7 +148,8 @@ export class ProfileProviderService {
           group: row.group ?? existing.group,
           email: row.email,
           notes: row.notes ?? existing.notes,
-          extra: extraOf(row),
+          // PANs sealed into the SecretStore; CVVs discarded (audit v0.15.0).
+          extra: sealCardsInExtra(existing.id, existing.extra, extraOf(row), this.secrets),
           updatedAt: now,
         });
         updated++;
@@ -155,8 +157,9 @@ export class ProfileProviderService {
       } else {
         const identity = generateIdentity("windows", "UTC", "en-US", undefined, hostPrimaryDisplay());
         this.identities.create(identity);
+        const id = randomUUID();
         this.profiles.create({
-          id: randomUUID(),
+          id,
           name: row.name,
           group: row.group ?? provider.name, // missing group = provider name
           proxyId: null,
@@ -167,7 +170,7 @@ export class ProfileProviderService {
           email: row.email,
           providerId: provider.id,
           providerKey: row.key,
-          extra: extraOf(row),
+          extra: sealCardsInExtra(id, {}, extraOf(row), this.secrets),
           createdAt: now,
           updatedAt: now,
         });

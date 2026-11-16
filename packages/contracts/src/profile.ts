@@ -82,9 +82,10 @@ export const PersonaSmsNumberSchema = z.object({
 export type PersonaSmsNumber = z.infer<typeof PersonaSmsNumberSchema>;
 
 /**
- * One named credit-card set (Jancy's `CC Number:<set>` / `CC CVV:<set>`
- * columns). Full PANs ride in `extra.creditCards` — same shape provider
- * import writes — but panel reads go through `maskCardNumber` (last4 only).
+ * One named credit-card set as WRITTEN (Jancy's `CC Number:<set>` /
+ * `CC CVV:<set>` columns, persona PATCH, provider CSV import). The full PAN
+ * in this shape is sealed into the SecretStore on write — see
+ * `StoredCreditCardSchema` for what the profile row keeps.
  */
 export const PersonaCreditCardSchema = z.object({
   set: z.string().min(1).max(60),
@@ -100,6 +101,26 @@ export const PersonaCreditCardSchema = z.object({
   note: z.string().max(500).nullable().default(null),
 });
 export type PersonaCreditCard = z.infer<typeof PersonaCreditCardSchema>;
+
+/**
+ * What a credit-card set looks like IN STORAGE (audit v0.15.0): the profile
+ * row keeps last4 + fill metadata only. The full PAN lives in the
+ * SecretStore (DPAPI) under `card:<profileId>:<set>:number`; CVVs are
+ * discarded on write and never stored anywhere.
+ */
+export const StoredCreditCardSchema = z.object({
+  set: z.string().min(1).max(60),
+  last4: z.string().max(4).default(""),
+  expDate: z.string().max(10).nullable().default(null),
+  name: z.string().max(120).nullable().default(null),
+  address: z.string().max(200).nullable().default(null),
+  address2: z.string().max(200).nullable().default(null),
+  city: z.string().max(80).nullable().default(null),
+  state: z.string().max(80).nullable().default(null),
+  zip: z.string().max(20).nullable().default(null),
+  note: z.string().max(500).nullable().default(null),
+});
+export type StoredCreditCard = z.infer<typeof StoredCreditCardSchema>;
 
 /** Last-applied outer window geometry (A3 tiling "remember" feature). */
 export const PersonaWindowBoundsSchema = z.object({
@@ -118,8 +139,11 @@ export const PersonaFieldsSchema = z.object({
   passcodes: z.array(z.string().max(200)).max(50).default([]),
   /** Jancy "Free 1 … Free 10" arbitrary columns. */
   free: z.record(z.string(), z.string().max(4000)).default({}),
-  /** Named credit-card sets — full PANs; read masked outside this layer. */
-  creditCards: z.array(PersonaCreditCardSchema).max(20).default([]),
+  /**
+   * Named credit-card sets as stored: last4 + metadata only (v0.15.0 audit
+   * hardening — PANs moved to the SecretStore, CVVs never stored).
+   */
+  creditCards: z.array(StoredCreditCardSchema).max(20).default([]),
   /**
    * Per-profile proxy list (Jancy's proxies column): "host:port:user:pass",
    * "host:port", optional "scheme://" prefix, or the magic value

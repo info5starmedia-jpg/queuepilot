@@ -253,11 +253,19 @@ describe("GET /profiles/:id/cards — masked card reads", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({
       set: "personal",
-      last4: "•••• •••• •••• 4242",
-      hasCvv: true,
+      last4: "4242",
+      hasCvv: false, // CVVs are never stored since the v0.15.0 seal
       expDate: "12/28",
     });
     expect(JSON.stringify(cards[0])).not.toContain("4242 4242 4242 4242");
+
+    // The raw profile read cannot leak what the row no longer holds — the
+    // PAN lives in the SecretStore, only last4 + metadata ride in extra.
+    const raw = await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}` });
+    expect(JSON.stringify(raw.json())).not.toContain("4242 4242 4242 4242");
+    expect(JSON.stringify(raw.json())).not.toContain("4242424242424242");
+    const list = await ctx.app.inject({ method: "GET", url: "/profiles" });
+    expect(JSON.stringify(list.json())).not.toContain("4242424242424242");
     expect(cards[0]).not.toHaveProperty("number");
     expect(cards[0]).not.toHaveProperty("cvv");
   });

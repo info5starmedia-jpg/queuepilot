@@ -54,6 +54,7 @@ import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
 import { secretAliasStore } from "./application/resolvers/token-aliases.js";
+import { migrateLegacyCardStorage } from "./application/profiles/card-secrets.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -97,7 +98,15 @@ export async function main(): Promise<void> {
 
   const secretStore = createSecretStore();
   const proxies = new ProxyService(proxyRepo, secretStore);
-  const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
+  const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secretStore);
+  // v0.15.0 (audit rec #4): lift any pre-v0.15 full PANs out of the profile
+  // rows into the SecretStore; CVVs sitting in SQLite are purged.
+  const migratedCards = migrateLegacyCardStorage(profiles.list(), (p) => profileRepo.update(p), secretStore);
+  if (migratedCards > 0) {
+    console.log(
+      `[queuepilot] security: sealed credit cards in ${migratedCards} profile row(s) — PANs moved to the SecretStore, CVVs discarded`,
+    );
+  }
 
   // Plugin + resolver + parser registries (Jancy workflow layer, P7).
   const resolvers = new ResolverRegistry();
@@ -205,6 +214,7 @@ export async function main(): Promise<void> {
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),
     settingsStore: settingsService,
+    secrets: secretStore,
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries

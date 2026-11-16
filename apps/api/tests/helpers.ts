@@ -90,7 +90,8 @@ export function makeTestContext(
   const runRepo = new BrowserRunRepository(db);
 
   const proxies = new ProxyService(proxyRepo);
-  const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo);
+  const secrets = new MapSecretStore();
+  const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secrets);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "queuepilot-test-"));
   const snapshots = new LaunchIdentityService(dataDir);
   const lifecycle = new BrowserLifecycleService(
@@ -103,7 +104,6 @@ export function makeTestContext(
     snapshots,
   );
   const sheets = new FakeSheets();
-  const secrets = new MapSecretStore();
   const google = new GoogleAuthService({
     secrets,
     dataDir,
@@ -156,6 +156,7 @@ export function makeTestContext(
     aliases,
     jyl,
     settingsStore: settings,
+    secrets,
   });
   return {
     app,

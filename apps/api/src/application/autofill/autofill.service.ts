@@ -5,6 +5,8 @@ import {
 } from "@queuepilot/contracts";
 import type { ProfileService } from "../profiles/profile.service.js";
 import { personaFieldsOf } from "../profiles/persona-fields.js";
+import { resolveCardForFill } from "../profiles/card-secrets.js";
+import type { SecretStore } from "../secrets/secret-store.js";
 import type { BrowserLifecycleService } from "../lifecycle/browser.lifecycle.service.js";
 import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
 import {
@@ -28,11 +30,15 @@ import { buildTypingExpression, parseTypingResult, type TypingResult } from "./t
  * Both travel INTO the page's inputs only; responses name which fields
  * were filled, never the values. Requires a running profile with a
  * reachable CDP endpoint and at least one page target.
+ *
+ * Card PANs are re-hydrated from the SecretStore at fill time (audit
+ * v0.15.0) — the profile row only ever carries last4 + metadata.
  */
 export class AutofillService {
   constructor(
     private readonly profiles: ProfileService,
     private readonly lifecycle: BrowserLifecycleService,
+    private readonly secrets?: SecretStore,
   ) {}
 
   async fillCard(
@@ -42,7 +48,7 @@ export class AutofillService {
   ): Promise<{ profileId: string; set: string; targetId: string } & CardFillResult> {
     const profile = this.profiles.get(profileId);
     this.requireRunning(profileId);
-    const card = this.cardSet(profile, set);
+    const card = this.cardSet(profileId, profile.extra, set);
 
     const { target, value } = await this.evaluateOnPage(
       profileId,
@@ -212,18 +218,11 @@ export class AutofillService {
   }
 
   private cardSet(
-    profile: { extra: Record<string, unknown> },
+    profileId: string,
+    extra: Record<string, unknown>,
     set: string,
   ): PersonaCreditCard {
-    const cards = personaFieldsOf(profile.extra).creditCards;
-    const card = cards.find((c) => c.set === set);
-    if (!card) {
-      throw new DomainError(
-        ErrorCodes.CONFLICT,
-        `profile has no credit-card set named "${set}"`,
-      );
-    }
-    return card;
+    return resolveCardForFill(profileId, extra, set, this.secrets);
   }
 
   private async pickPageTarget(conn: CdpConnection, targetId?: string): Promise<string> {

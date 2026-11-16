@@ -827,9 +827,33 @@ for this build (deferred, revisit with real usage): RBAC/multi-user, recorder
     - Tests: 3 zip-bomb cases + 2 gate cases (403-by-default, opens after
       opt-in, read-only routes unaffected).
 
-Remaining v0.15.0 items: PAN/CVV → SecretStore + `extra` redaction on profile
-reads. v0.15.1 daily-driver: cookie import/export formats, trash/restore,
-proxy validation, fingerprint editing, dashboard batch endpoints.
+28. ✅ **Audit P0 batch 4 — PAN/CVV custody** (2026-11-16, v0.15.0) — the last
+    v0.15.0 P0, closing the hole the auditors called out hardest: full card
+    numbers AND CVVs rode in `profile.extra` in SQLite plaintext, and every
+    `GET /profiles/:id` (plus team bundle exports) handed them out raw — the
+    masked `/cards` endpoint was decoration, not a boundary.
+    - **PANs → SecretStore** (new `card-secrets.ts`): persona PATCH and
+      provider CSV import both seal on write — PAN lands in DPAPI under
+      `card:<profileId>:<set>:number`, the row keeps last4 + fill metadata
+      only. Autofill re-hydrates the PAN at fill time; clones copy the secret
+      under their own profile id.
+    - **CVVs never stored** — discarded at the seal, on every write path; a
+      fill simply has no CVV to type. Purged from legacy rows by the boot
+      migration.
+    - **Reads safe by construction** — the row cannot leak what it no longer
+      holds; `personaFieldsOf` now returns the stored metadata shape.
+    - **Boot migration** — `migrateLegacyCardStorage` lifts pre-v0.15 PANs
+      into the SecretStore and reports the count at startup.
+    - Honest consequence: team bundles now sync card METADATA only (last4) —
+      PANs are per-machine by design.
+    - Tests: new `card-secrets` suite (seal/storeless-drop/idempotent/prune/
+      resolve/clone/migration) + raw-read leak checks on GET profile, list,
+      and /cards.
+
+**v0.15.0 security hardening is COMPLETE** — all nine audit P0/P1-security
+items shipped (batches 1–4). Next: v0.15.1 daily-driver gaps: cookie
+import/export formats, trash/restore, proxy validation, fingerprint editing,
+dashboard batch endpoints.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 

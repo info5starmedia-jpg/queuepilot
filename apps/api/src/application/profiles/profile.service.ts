@@ -24,12 +24,20 @@ import {
   nextProxyIndex,
   type MaskedProxyEntry,
 } from "./profile-proxies.js";
+import { copyCardSecrets, sealCardsInExtra } from "./card-secrets.js";
+import type { SecretStore } from "../secrets/secret-store.js";
 
 export class ProfileService {
   constructor(
     private readonly profiles: ProfileRepository,
     private readonly identities: FingerprintIdentityRepository,
     private readonly proxies: ProxyRepository,
+    /**
+     * v0.15.0 (audit rec #4): PANs are sealed into the SecretStore on every
+     * persona write; CVVs are discarded. Optional so store-less test
+     * contexts degrade to metadata-only cards instead of plaintext PANs.
+     */
+    private readonly secrets?: SecretStore,
   ) {}
 
   create(input: CreateProfileInput): Profile {
@@ -151,6 +159,8 @@ export class ProfileService {
       updatedAt: now,
     };
     this.profiles.create(profile);
+    // The clone inherits fillable cards: its PAN secrets ride under the new id.
+    copyCardSecrets(src.id, profile.id, profile.extra, this.secrets);
     return profile;
   }
 
@@ -212,7 +222,9 @@ export class ProfileService {
    */
   updatePersona(id: string, input: unknown): Profile {
     const p = this.get(id);
-    const extra = mergePersonaFields(p.extra, input as UpdatePersonaInput);
+    const merged = mergePersonaFields(p.extra, input as UpdatePersonaInput);
+    // Full cards in the patch are sealed here: PAN → SecretStore, CVV dropped.
+    const extra = sealCardsInExtra(id, p.extra, merged, this.secrets);
     const next: Profile = { ...p, extra, updatedAt: new Date().toISOString() };
     this.profiles.update(next);
     return next;

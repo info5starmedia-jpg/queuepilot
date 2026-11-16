@@ -157,10 +157,18 @@ describe("credit cards", () => {
     note: null,
   };
 
-  it("personaFieldsOf reads imported card sets", () => {
+  it("personaFieldsOf reads stored (metadata-only) card sets", () => {
+    // Since v0.15.0 the row carries last4 + metadata only; a legacy full
+    // card in the bag degrades to metadata with an empty last4.
     const fields = personaFieldsOf({ creditCards: [card] });
     expect(fields.creditCards).toHaveLength(1);
-    expect(fields.creditCards[0]).toMatchObject({ set: "personal", number: "4242 4242 4242 4242" });
+    expect(fields.creditCards[0]).toMatchObject({ set: "personal", expDate: "12/28" });
+    expect(fields.creditCards[0]).not.toHaveProperty("number");
+    expect(fields.creditCards[0]).not.toHaveProperty("cvv");
+    const sealed = personaFieldsOf({
+      creditCards: [{ set: "personal", last4: "4242", expDate: "12/28" }],
+    });
+    expect(sealed.creditCards[0]).toMatchObject({ set: "personal", last4: "4242" });
   });
 
   it("malformed card sets degrade to defaults, never a crash", () => {
@@ -180,12 +188,15 @@ describe("credit cards", () => {
     expect(maskCardNumber("")).toBe("••••");
   });
 
-  it("maskCard never leaks PAN or CVV, flags CVV presence", () => {
-    const masked = maskCard(personaFieldsOf({ creditCards: [card] }).creditCards[0]!);
+  it("maskCard reports a metadata-only view; CVV is never stored anymore", () => {
+    const masked = maskCard(
+      personaFieldsOf({ creditCards: [{ set: "personal", last4: "4242", expDate: "12/28" }] })
+        .creditCards[0]!,
+    );
     expect(masked).not.toHaveProperty("number");
     expect(masked).not.toHaveProperty("cvv");
-    expect(masked.last4).toBe("•••• •••• •••• 4242");
-    expect(masked.hasCvv).toBe(true);
+    expect(masked.last4).toBe("4242");
+    expect(masked.hasCvv).toBe(false); // CVVs were purged at the v0.15.0 seal
     expect(masked.set).toBe("personal");
     expect(masked.expDate).toBe("12/28");
   });

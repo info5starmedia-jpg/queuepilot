@@ -4,6 +4,7 @@ import { TempProxyInputSchema } from "@queuepilot/contracts";
 import type { BrowserLifecycleService } from "../application/lifecycle/browser.lifecycle.service.js";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import { AutofillService } from "../application/autofill/autofill.service.js";
+import type { SecretStore } from "../application/secrets/secret-store.js";
 
 const StartRunBodySchema = z
   .object({
@@ -31,8 +32,9 @@ export function registerRunRoutes(
   app: FastifyInstance,
   lifecycle: BrowserLifecycleService,
   profiles: ProfileService,
+  secrets?: SecretStore,
 ): void {
-  const autofill = new AutofillService(profiles, lifecycle);
+  const autofill = new AutofillService(profiles, lifecycle, secrets);
 
   /**
    * Credit-card autofill: pushes the named card set from the profile's extra
