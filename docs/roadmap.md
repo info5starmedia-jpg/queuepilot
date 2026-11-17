@@ -1541,14 +1541,56 @@ Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
 
 - [ ] **DNS leak through the HTTP proxy (the one "problem" on the proxied
   run)** — page DNS resolved via Cloudflare US resolvers while the proxy
-  exits in CA. Almost certainly Chromium Secure DNS (DoH) bypassing the
-  proxy. Fix is engine-level (`C:\queuepilot-engine`): policy/patch to
-  disable Secure DNS or force DNS through the proxy. Highest impact —
-  affects every proxied profile.
+  exits in CA. **Diagnosed 2026-11-18: not the browser — the proxy's own
+  resolver plus its bad geo record.** Evidence:
+  - `curl.exe -x <69.33.225.30 proxy> http://edns.ip-api.com/json` (no
+    browser, no DoH) → `United States - Cloudflare, Inc.` `162.158.152.43`
+    (3/3 runs, Cloudflare each time); direct → `Canada - Rogers` `99.212.12.4`.
+  - Scratch API (50477, fury qp.4, branch `engine-dns-voices`), throwaway
+    proxied through the same proxy, `--disable-features=DnsOverHttpsUpgrade`
+    confirmed on the engine command line: aliasmode still "DNS leak: lookups
+    go to another country", resolvers `162.158.152.43 · Cloudflare, Inc. (US);
+    104.22.99.43 …; 172.71.221.198 …` — the same resolver curl hit. iphey:
+    IP 69.33.225.30, Brampton CA, "Location … (light)".
+  - The host's resolvers (64.71.255.204/.198) are not in Chromium's DoH
+    upgrade table (`net/dns/public/doh_provider_entry.cc`), so the upgrade
+    could never fire here. The German residential proxies resolve via
+    Telekom/Vodafone (2026-11-17), i.e. through each proxy's own ISP.
+  - With an HTTP proxy Chromium sends hostnames to the proxy; the proxy
+    resolves. The "CA" half is the ARIN/Brampton record (see above); the
+    exit is physically Ashburn, so a US resolver is actually consistent.
+  Fix is provider-side: correct the ARIN record / PTR / geofeed (makes
+  "US resolver, US IP" agree), or resolve via an ISP-local resolver. No
+  engine patch (a 0072 would not change this) and no rebuild.
+  `8bbe8cc` keeps the switch as hardening only (inert on this host; it only
+  matters on hosts whose resolver is 1.1.1.1/8.8.8.8 etc.). Note it makes
+  such a host differ from stock Chrome, which upgrades — owner's call
+  whether to keep it.
 - [ ] **Speech voices: only online Google voices, no Microsoft voice** —
-  not what stock Windows Chrome shows (it lists local Microsoft voices).
-  Our engine build lacks the Windows SAPI speech component. Engine-level
-  (component inclusion in the build manifest).
+  **Not reproducible 2026-11-18; no engine change needed.** Stock Windows
+  TTS (`content/browser/speech/tts_win.cc`, SAPI `ISpVoice`) is compiled
+  into every Windows build unconditionally; no patch touches it; 0041 is
+  inactive without `speech.voices`/mobile config; 0042 only adds the Google
+  extension. Measured on this machine (SAPI tokens: David, Zira; OneCore:
+  David, Mark, Zira):
+  - App-launched throwaways on the scratch API (proxied and direct):
+    `total 22`, local `Microsoft David - English (United States) (default)`,
+    `Microsoft Mark …`, `Microsoft Zira …`, remote 19.
+  - Field-by-field diff (name, voiceURI, lang, localService, default, order)
+    app-launched qp.4 vs stock Chrome 157.0.8103.51: 22 vs 22, zero
+    differences.
+  - Cold first page right after launch: Microsoft voices arrive in 30–34 ms
+    on qp.4, 46–73 ms on stock. `getVoices()` returns 0 on the very first
+    call in both (normal async load). A reading taken in a different state
+    (other machine, mobile persona) is the likely origin; re-open with
+    the profile id + page if it recurs.
+- [ ] **iphey "whale" — watch item, not a finding** — on scratch
+  throwaways it was intermittent with and without the DNS switch:
+  2 fresh profiles 4/4 Trustworthy (switch on); one flagless profile
+  Trustworthy then whale on its second visit; whale on later visits of
+  longer-used instances. Stock Chrome, one sample: Trustworthy. Matches the
+  earlier note (long-lived sessions, clean replica passes). Not caused by
+  the voice list (identical to stock).
 - [x] **No-proxy profiles default to UTC** — FIXED 2026-11-17 (code in this
   commit). aliasmode flagged "Browser runs at UTC+0 but the IP is at UTC-5"
   for any profile without a proxy and no pinned timezone. The launch
