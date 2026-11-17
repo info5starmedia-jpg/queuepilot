@@ -1180,3 +1180,34 @@ boot bug found by the visual pass (topbar actions never rendered at boot —
 `setView` was only called on click) and fixed. Gates: dashboard-syntax
 guard green, 605/605 API tests, build clean.
 
+
+## Phase 2 — D-002 PID-reuse hardening follow-ups (branch `d002-followups`)
+
+D-002 (P7 item 8a) checks the process-start token exactly once, in
+`reconcileOnBoot`. Runs adopted after an API restart have no in-memory
+session, which leaves the gaps below. Windows only for now; macOS has no
+`/proc`, so its token is always null (plain liveness) until the
+macOS/Linux port phase. Standing rule applies: a box is ticked only with
+code + tests + docs + live verification + the commit hash.
+
+- [ ] **Three-way identity result** — `checkProcessIdentity` answers
+  `match` / `mismatch` / `unknown` / `dead` instead of a boolean, so an
+  unreadable start time is no longer indistinguishable from a proven
+  match. Unverified adoptions are logged and counted in `/metrics`. Launch
+  capture rejects a token that predates the run's own `startedAt` (a
+  stranger that inherited the PID between spawn and capture).
+- [ ] **Identity-safe stop for adopted runs** — `stop()` on a run with no
+  session used to mark the row stopped and leave the engine running. Now:
+  CDP `Browser.close` on the stored endpoint first; kill by PID only when
+  the token re-verifies as `match` immediately beforehand; otherwise never
+  kill, and say so in `lastError`. Behavior change (owner-approved): Stop
+  on an adopted profile closes its browser window.
+- [ ] **Adopted-run watcher** — sessionless occupying runs are re-checked
+  on a timer; a dead or PID-reused engine is marked crashed through the
+  same path as boot reconciliation instead of reading "running" until the
+  next API boot.
+- [ ] **Batched boot capture** — one start-token read for all occupying
+  PIDs at boot instead of one blocking PowerShell spawn per run. Same
+  invocation style as the single-PID capture.
+- [ ] **Docs** — `docs/architecture.md` invariant 5 and the
+  `docs/parity.md` process-identity row describe the shipped behavior.
