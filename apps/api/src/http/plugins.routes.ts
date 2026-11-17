@@ -1,6 +1,8 @@
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
+import { DomainError, ErrorCodes, PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
+import { installPluginFile, PluginImportError, PLUGIN_UPLOAD_MAX_BYTES } from "../application/plugins/plugin-import.js";
 import type { PluginRegistry } from "../application/plugins/plugin-registry.js";
 import type { ResolverRegistry, ResolverContext } from "../application/resolvers/resolver-registry.js";
 import { resolveSiteField } from "../application/resolvers/resolver-registry.js";
@@ -50,6 +52,39 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
     assertScriptingEnabled(); // loads new code from disk
     return plugins.rescan();
   });
+  // B3: import a script (.mjs/.js) or a zipped plugin folder. Raw bytes as
+  // application/octet-stream, ?filename= names the file. Gated BEFORE the
+  // body is read (scripting opt-in + API token; the origin-deny hook already
+  // refuses browser-originated requests to /plugins/*). The plugin lands
+  // disabled and is not imported until enabled. Per-file, loud result.
+  app.register(async (scope) => {
+    scope.addHook("onRequest", async () => assertScriptingEnabled());
+    scope.addContentTypeParser(
+      "application/octet-stream",
+      { parseAs: "buffer", bodyLimit: PLUGIN_UPLOAD_MAX_BYTES },
+      (_req, body, done) => done(null, body),
+    );
+    scope.post("/plugins/import", async (req, reply) => {
+      const { filename } = z.object({ filename: z.string().min(1).max(255) }).parse(req.query);
+      const file = path.basename(filename.replace(/\\/g, "/"));
+      if (!Buffer.isBuffer(req.body)) {
+        throw new DomainError(ErrorCodes.VALIDATION_FAILED, "send the file bytes as application/octet-stream");
+      }
+      try {
+        const { id, name } = installPluginFile(plugins.dir, file, req.body);
+        const info = await plugins.addInstalled(id);
+        return reply.code(201).send({ installed: [{ file, id, name, enabled: info.enabled }], rejected: [] });
+      } catch (err) {
+        if (!(err instanceof PluginImportError)) throw err;
+        return reply.code(422).send({
+          installed: [],
+          rejected: [{ file, reason: err.message }],
+          error: { code: "PLUGIN_REJECTED", message: `${file}: ${err.message}` },
+        });
+      }
+    });
+  });
+
   app.post("/plugins/:id/enable", async (req) => {
     const { id } = req.params as { id: string };
     const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});

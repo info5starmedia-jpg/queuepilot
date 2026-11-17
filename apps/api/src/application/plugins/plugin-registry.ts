@@ -81,6 +81,11 @@ export class PluginRegistry {
   }>();
   private logs: string[] = [];
 
+  /** Where plugin folders live (<dataDir>/plugins). */
+  get dir(): string {
+    return this.pluginsDir;
+  }
+
   constructor(
     private readonly pluginsDir: string,
     private readonly resolvers: ResolverRegistry,
@@ -93,35 +98,68 @@ export class PluginRegistry {
     const errors: { id: string; error: string }[] = [];
     fs.mkdirSync(this.pluginsDir, { recursive: true });
     for (const entry of fs.readdirSync(this.pluginsDir).sort()) {
+      // Dot-folders are import staging (B3), never plugins.
+      if (entry.startsWith(".")) continue;
       const dir = path.join(this.pluginsDir, entry);
       if (!fs.statSync(dir).isDirectory()) continue;
-      try {
-        await this.loadOne(entry, dir);
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        errors.push({ id: entry, error });
-        this.plugins.set(entry, {
-          info: { id: entry, name: entry, version: "", enabled: false, loaded: false, error },
-          module: null,
-          dir,
-          enabledState: false,
-        });
-      }
+      await this.loadOrRecord(entry, dir, errors);
     }
     return { loaded: [...this.plugins.values()].filter((p) => p.info.loaded).length, errors };
+  }
+
+  /**
+   * Register a plugin folder that was just installed (B3 import) without
+   * rescanning — and so without re-running any other plugin's onInit.
+   */
+  async addInstalled(id: string): Promise<PluginInfo> {
+    const errors: { id: string; error: string }[] = [];
+    await this.loadOrRecord(id, path.join(this.pluginsDir, id), errors);
+    return { ...this.plugins.get(id)!.info };
+  }
+
+  private async loadOrRecord(id: string, dir: string, errors: { id: string; error: string }[]): Promise<void> {
+    try {
+      await this.loadOne(id, dir);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      errors.push({ id, error });
+      this.plugins.set(id, {
+        info: { id, name: id, version: "", enabled: false, loaded: false, error },
+        module: null,
+        dir,
+        enabledState: false,
+      });
+    }
+  }
+
+  /** The operator's persisted toggle, or null when never set. */
+  private storedEnabled(dir: string): boolean | null {
+    const stateFile = path.join(dir, "enabled.json");
+    return fs.existsSync(stateFile)
+      ? (JSON.parse(fs.readFileSync(stateFile, "utf8")) as { enabled: boolean }).enabled
+      : null;
   }
 
   private async loadOne(id: string, dir: string): Promise<void> {
     const manifestRaw = JSON.parse(
       fs.readFileSync(path.join(dir, "package.json"), "utf8"),
     ) as PluginManifest;
+    // A plugin the operator has switched off is listed but NOT imported: its
+    // top-level code and onInit run only once it is enabled (B3 — imported
+    // plugins land disabled and must not execute before the owner says so).
+    if (this.storedEnabled(dir) === false) {
+      this.plugins.set(id, {
+        info: { id, name: manifestRaw.name ?? id, version: manifestRaw.version ?? "", enabled: false, loaded: false, error: null },
+        module: null,
+        dir,
+        enabledState: false,
+      });
+      return;
+    }
     const main = manifestRaw.main ?? "index.mjs";
     const mod = (await import(pathToFileURL(path.join(dir, main)).href)) as PluginModule;
     const enabledByDefault = mod.queuepilotProps?.enabled !== false;
-    const stateFile = path.join(dir, "enabled.json");
-    const enabledState = fs.existsSync(stateFile)
-      ? (JSON.parse(fs.readFileSync(stateFile, "utf8")) as { enabled: boolean }).enabled
-      : enabledByDefault;
+    const enabledState = this.storedEnabled(dir) ?? enabledByDefault;
     const info: PluginInfo = {
       id,
       name: manifestRaw.name ?? id,
@@ -204,6 +242,18 @@ export class PluginRegistry {
       path.join(p.dir, "enabled.json"),
       JSON.stringify({ enabled }, null, 2),
     );
+    // First enable of a never-imported plugin: import it now (onInit +
+    // onEnabled run inside loadOne). A broken plugin is recorded, and the
+    // toggle reverts so it is not retried on every rescan.
+    if (enabled && !p.module) {
+      const errors: { id: string; error: string }[] = [];
+      await this.loadOrRecord(id, p.dir, errors);
+      if (errors.length) {
+        fs.writeFileSync(path.join(p.dir, "enabled.json"), JSON.stringify({ enabled: false }, null, 2));
+        throw new Error(`plugin ${id} failed to load: ${errors[0]!.error}`);
+      }
+      return;
+    }
     if (!enabled) {
       this.resolvers.unregisterByPrefix(`plugin.${id}.`);
       this.parsers.unregisterBySource(`plugin:${id}`);
