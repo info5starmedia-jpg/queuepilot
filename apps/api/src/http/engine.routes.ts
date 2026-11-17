@@ -26,7 +26,9 @@ export function registerEngineRoutes(
   });
 
   if (engineUpdate) {
-    app.get("/engine/update", async () => engineUpdate.check());
+    app.get("/engine/update", async () => ({ ...(await engineUpdate.check()), launchCheck: engineUpdate.launchCheck }));
+    // The answer from the check made when the API started — no network.
+    app.get("/engine/update/launch", async () => ({ launchCheck: engineUpdate.launchCheck }));
     app.post("/engine/update", async (_req, reply) => {
       const r = await engineUpdate.start();
       return reply.code(r.started ? 202 : 200).send(r);

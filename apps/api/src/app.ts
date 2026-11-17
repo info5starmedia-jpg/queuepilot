@@ -68,9 +68,25 @@ export interface AppDeps {
   extensions?: ExtensionRegistry;
   totp?: TotpService;
   settingsStore?: SettingsService;
+  /** C1 engine updates; built from config + settings when absent. */
+  engineUpdate?: EngineUpdateService;
   secrets?: SecretStore;
   /** Email accounts for the IMAP resolver (Settings → Integrations). */
   emailAccounts?: EmailAccountService;
+}
+
+/**
+ * C1 engine updates. Manifest source, resolved per check: Settings → Engine
+ * → Update server URL (the owner's server), else SPECTRA_ENGINE_MANIFEST,
+ * else the repo's raw manifest. Consent is the existing Settings → Engine
+ * switch; no settings store = no consent.
+ */
+export function engineUpdateServiceFor(config: AppConfig, settings?: SettingsService): EngineUpdateService {
+  return new EngineUpdateService({
+    enginesDir: path.join(config.dataDir, "engines"),
+    manifestRef: () => settings?.get("engine").updateUrl || config.engineManifest || DEFAULT_MANIFEST_URL,
+    consent: () => settings?.get("engine").downloadConsent === true,
+  });
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -137,12 +153,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerEngineRoutes(
     app,
     deps.engineHealth,
-    new EngineUpdateService({
-      enginesDir: path.join(deps.config.dataDir, "engines"),
-      manifestRef: deps.config.engineManifest ?? DEFAULT_MANIFEST_URL,
-      // The owner's existing Settings → Engine switch; no store = no consent.
-      consent: () => deps.settingsStore?.get("engine").downloadConsent === true,
-    }),
+    deps.engineUpdate ?? engineUpdateServiceFor(deps.config, deps.settingsStore),
   );
   registerTabRoutes(app, deps.lifecycle);
   registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));

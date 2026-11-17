@@ -1,141 +1,114 @@
-# Family release — updates, packaging and profiles that follow you
+# Team release — updates from the owner's server, and profiles that follow you
 
-Status: plan (2026-11-18, branch `phase-ab`). Owner decisions are listed
-explicitly at the end of each part and are **not** assumed anywhere below.
+Status: plan + client-side implementation (2026-11-18, branch `phase-ab`).
+Framing follows the roadmap track **"Hosted team deployment (owner-directed
+2026-11-17)"**: the owner's server (Ubuntu, ≤ 10 team members) hosts app
+releases and engine dists; team members' machines are pure consumers that
+check at launch, download, verify and restart. This file keeps the name the
+Phase A+B brief gave it; the people it serves are **team members**.
 
-The gap: a family member cannot `git pull` and `npm install`. Today a
-machine needs a git checkout, Node.js 22+, `npm install` on an NTFS volume,
-and the engine installed by hand. Updates are the same steps again.
+Owner decisions are listed at the end and are **not** assumed anywhere.
 
 ## What exists today
 
 | Piece | Where | State |
 | --- | --- | --- |
-| One-double-click start | `scripts/start-queuepilot.cmd` | Starts the API minimized (`npx tsx src/main.ts`), waits for `/health`, opens the dashboard. Needs Node + an installed checkout. |
-| Engine packaging | `scripts/publish-engine.mjs`, `scripts/package-installer.ps1` | Builds a `.tar.xz` + manifest entry (sha256, size), or a self-installing zip (`setup.ps1` + payload). |
-| Engine install / update | `queuepilot engine install` / `engine update` (`apps/api/src/cli/engine-*.ts`, `EngineInstaller`) | Checksummed, atomic, consent-gated (`--yes`), previous version kept for rollback. CLI only until this branch. |
-| Engine manifest | `engines.manifest.json` (repo root) | One entry, `url: file:///C:/queuepilot-engine/dist/…` — only resolvable on the build machine. |
-| Engine consent setting | Settings → Engine → "Allow engine binary downloads" (`engine.downloadConsent`) | Exists, was not consulted by anything. |
-| Session bundles | `/profiles/:id/bundle/export`, `/bundles/restore` | Encrypted (PBKDF2 + AES-256-GCM), passphrase-protected; cookies today; restore upserts the profile by name. |
-| Team sync | `TeamSyncService` + `apps/server` | Push/pull of the same bundles through a self-hosted server. Needs a server. |
+| One-double-click start | `scripts/start-queuepilot.cmd` | Starts the API minimized (`npx tsx src/main.ts`), waits for `/health`, opens the dashboard. Needs Node + a checkout with `node_modules`. |
+| Engine packaging | `scripts/publish-engine.mjs`, `scripts/package-installer.ps1` | Builds a `.tar.xz` + manifest entry (sha256, size), or a self-installing zip. |
+| Engine installer | `EngineInstaller` (`apps/api/src/application/engine/`) | Checksum-pinned (sha256), atomic (staging + rename), previous version kept → rollback by deleting the new receipt. |
+| Engine manifest | `engines.manifest.json` | One entry, `url: file:///C:/queuepilot-engine/dist/…` — resolvable only on the build machine. |
+| Session bundles | `/profiles/:id/bundle/export`, `/bundles/restore` | Encrypted (PBKDF2 + AES-256-GCM), passphrase-protected; cookies today. |
+| Team sync server | `apps/server` + `TeamSyncService` | Encrypted bundle push/pull, revisions, launch leases, three roles. |
 
-## C1 — App updates
+## C1 — Update distribution, CLIENT side (implemented on this branch)
 
-### Options
+What a team member's machine does now, for the **engine**:
 
-**(a) git fetch + reset behind an "Update" button.**
-The API runs `git fetch`, `git reset --hard origin/<branch>`, `npm ci`, then
-restarts itself.
+1. **Version check at launch.** When the API starts it reads the engine
+   manifest once (off the startup path — an unreachable server never delays
+   boot) and logs `engine update available: fury-core <v> (from <url>)`.
+   The dashboard's setup checklist shows "engine update <v> available —
+   Settings → Engine to install". It never downloads by itself.
+2. **Configurable server URL.** Settings → Engine → "Update server URL" —
+   the owner's server URL of an engines manifest. Precedence: that setting
+   → `SPECTRA_ENGINE_MANIFEST` → the repo's raw manifest. http(s) only.
+3. **Download + checksum verify.** Settings → Engine → "Install update"
+   (requires the existing "Allow engine binary downloads" switch) runs the
+   `EngineInstaller` in the background: sha256-pinned, atomic, resumable
+   download, previous version kept. A mismatch discards the payload and the
+   job reports `checksum mismatch`.
+4. **Restart.** A new engine is used by every profile *launched* after the
+   install (the resolver prefers the newest verified receipt); running
+   profiles keep the engine they started with until they are restarted —
+   the card says so. Nothing is killed behind the operator's back.
 
-- + No release process; every pushed commit is immediately available.
-- − Every family machine needs git *and* a working npm toolchain (native
-  `better-sqlite3` build or prebuilt download, which fails on FAT32 volumes
-  and behind some AV).
-- − `reset --hard` destroys any local edits; a broken `main` reaches every
-  machine at once; the API would be replacing its own running files.
-- − An endpoint that runs git and npm is a code-execution surface; it would
-  have to sit behind the same gate as scripting (token + opt-in), which the
-  dashboard cannot reach today (see roadmap B3b).
+API: `GET /engine/update` (fresh check: `status`, `source`, `latest`,
+`consent`, running `job`, and the `launchCheck`), `GET /engine/update/launch`
+(the launch answer, no network), `POST /engine/update` (202 started / 200
+already current / 403 no consent / 409 one already running / 403
+cross-site).
 
-**(b) Download a release zip from GitHub (recommended).**
-A release is a zip with the app *already installed* (`node_modules`
-included, prebuilt `better-sqlite3` for win-x64), plus its sha256. The
-updater downloads it, verifies the checksum, unpacks next to the current
-version (`app/<version>/`), switches a `current` pointer, and restarts.
+### Not built here, deliberately (needs the hosted-deployment work order)
 
-- + No git, no npm, no compiler on family machines — only Node.js (or, later,
-  a bundled Node).
-- + Same discipline as the engine: pinned checksum, atomic switch, previous
-  version kept, one-step rollback.
-- + Only tagged releases reach family; a bad commit on `main` does not.
-- − Needs a release step (CI or a script) and somewhere to host the zips.
-- − A zip with `node_modules` is ~100 MB; updates are whole-zip.
-
-**Recommendation: (b).** It is the engine installer's proven model applied to
-the app, and the only option that removes git/npm from family machines.
-
-### What can be built without an owner decision
-
-Not much, honestly: every concrete step of (b) depends on where releases
-live and who builds them. This branch therefore implements the engine half
-(below) and leaves app updates as this plan. The start script needs no change
-until (b) exists: it would point at `app\current\apps\api` instead of the
-checkout.
-
-## C1 — Engine updates (implemented on this branch)
-
-The checksummed installer already existed but only as a CLI. The dashboard
-now offers it the same one-click way, with no new infrastructure:
-
-- `GET /engine/update` — reads the engine manifest (default: the repo's raw
-  `engines.manifest.json`; override `SPECTRA_ENGINE_MANIFEST`), picks the
-  newest entry for this platform, and reports `current` / `available` /
-  `error`, plus the state of any running install.
-- `POST /engine/update` — starts the install in the background (202). It is
-  refused unless **Settings → Engine → Allow engine binary downloads** is on
-  (the existing consent switch), refused while another install runs, and
-  refused for browser-originated cross-site requests. The download goes
-  through `EngineInstaller`: sha256-pinned, atomic, previous version kept.
-- Dashboard: Settings → Engine shows the check result and an "Install
-  update" button with live status.
-
-What still blocks family use: the manifest's `url` is `file:///` on the build
-machine (owner decision below).
+- **The server publish endpoint** (owner uploads a dist, server hosts the
+  manifest + files) and **accounts/auth on it**. The client already reads
+  any http(s) manifest whose entries carry absolute URLs + sha256, so a
+  static file host works as a first server.
+- **App self-update.** The app is still a source checkout run by `tsx`;
+  there is no release artefact to download yet. The roadmap's compiled,
+  single-executable client (track item 5) is that artefact. Once it exists
+  the same client flow applies unchanged: manifest entry for the app (same
+  schema, a new `kind`), download → sha256 → stage next to the running
+  version → switch → restart via the start script. Recommendation for the
+  interim: **release zips**, not `git pull` on team members' machines —
+  git/npm on every machine, `reset --hard` destroying local state, and a
+  broken `main` reaching everyone at once are the problems releases remove.
 
 ## C2 — Profiles that follow you (proposal, not implemented)
 
-### Simplest family-grade flow: a sync folder
+With the hosted track, the long-term answer is **"store on cloud" profiles
+on the owner's server** (track item 3: the server is the source of truth,
+the existing launch lease guards double-launch). Everything needed for the
+data path already exists: encrypted bundles, server-side opaque storage,
+revisions, leases.
 
-1. Settings gets a **sync folder** (e.g. the OneDrive / Google Drive desktop
-   folder that already syncs between the family's machines).
-2. When a profile **stops**, QueuePilot exports its session bundle
-   (encrypted) to `<sync folder>/<profile name>.qpbundle`. Export needs the
-   profile running (cookies live in the engine), so the export happens in
-   the stop path, just before the engine closes.
-3. On the other machine, the Profiles view shows "N profiles in your sync
-   folder are newer than here — restore?" and calls the existing
-   `/bundles/restore` for each.
+The simplest flow **before** accounts exist — and for a solo operator with
+two machines — is a **sync folder**:
 
-No server, no account: the cloud drive the family already uses does the
-transport; the bundle format, crypto and restore logic already exist.
+1. Settings gets a sync folder (e.g. a OneDrive/Drive desktop folder).
+2. When a profile stops, QueuePilot exports its encrypted bundle to
+   `<sync folder>/<profile name>.qpbundle` (export needs the engine running,
+   so it happens in the stop path just before the engine closes).
+3. On the other machine the Profiles view offers "N profiles in your sync
+   folder are newer — restore?" and calls the existing `/bundles/restore`.
 
-### Why not implemented here
-
-- It needs the bundle **passphrase** at stop time without a human typing it.
-  That means storing it (DPAPI SecretStore, per machine) — a security
-  decision, not a default to guess.
-- Bundles carry cookies only today; localStorage/IndexedDB are "later" in
-  `session-bundle.ts`. Whether cookies alone are enough for the family's
-  sites decides whether this is worth shipping before storage lands.
-- Two machines running the same profile at once would race; the team server
-  has revisions for that, a folder does not. A "last stopped wins" rule plus
-  a visible timestamp is the simple answer — but it is the owner's call.
-
-The team sync server remains the right answer when more than one person
-actively uses the *same* profile; the folder flow is for "my profiles on my
-two computers".
+Not implemented because: unattended export needs the bundle passphrase
+stored per machine (DPAPI) — a security decision; bundles carry cookies
+only (storage is "later" in `session-bundle.ts`); and two machines running
+the same profile race without the server's revisions — the conflict rule is
+the owner's call. If the hosted server is coming soon, skip the folder flow
+and go straight to cloud profiles.
 
 ## Owner decisions
 
-1. **Where releases live** — GitHub Releases on the (currently public?)
-   repo, a private repo with a token, or a shared drive. Determines the
-   manifest URLs for both the app and the engine.
-2. **Who builds a release** — a GitHub Actions workflow (CI minutes, signing
-   secrets in CI) or a local script on the build machine.
-3. **Engine hosting** — the 283 MB engine tarball cannot live in git; it
-   needs the same host as (1). Until then the manifest stays `file:///`.
-4. **Auto vs manual update** — check on start and install silently, check
-   and *offer*, or only on click. This branch implements *offer + click*.
-5. **Update channel** — Settings already has `engine.channel`
-   (stable/beta); does a beta channel exist for the app too, and who is on
-   it?
-6. **Bundled Node.js** — ship a portable Node in the release (no
-   prerequisite, +30 MB) or keep "install Node 22 first".
-7. **Code signing** — the engine package is unsigned (SmartScreen/AV
-   warnings, `docs/av-notes.md`). Buy a certificate, or keep documenting AV
-   exclusions.
-8. **Sync folder (C2)** — wanted at all; may the bundle passphrase be stored
-   per machine (DPAPI) so export-on-stop runs unattended; conflict rule.
-9. **Dashboard auth (B3b)** — needed before any code-running or
-   update-the-app button can live in the dashboard of a token-protected
-   install.
+1. **Server exposure** — LAN-only or internet-reachable (TLS + domain).
+   Determines the URL team members put in "Update server URL".
+2. **How releases are published** — a static folder on the server
+   (manifest + files, works with this client today) or an upload endpoint
+   with owner auth (hosted work order).
+3. **Engine hosting** — the 283 MB engine tarball must move from
+   `file:///C:/queuepilot-engine/dist/` to the server; until then the
+   manifest only resolves on the build machine.
+4. **Auto vs manual install** — this branch: check automatically at launch,
+   install on click with consent. Silent auto-install is one flag away but
+   is a policy decision.
+5. **Manifest auth** — public read, or a team token on the manifest/dist
+   URLs (the client sends none today).
+6. **App release artefact** — compiled single executable (track item 5)
+   vs an interim release zip; bundled Node or "install Node 22 first".
+7. **Code signing** — unsigned binaries trip SmartScreen/AV
+   (`docs/av-notes.md`); certificate or documented exclusions.
+8. **C2** — cloud profiles only (hosted track) vs an interim sync folder;
+   whether a per-machine stored bundle passphrase is acceptable.
+9. **Dashboard auth (roadmap B3b)** — needed before any code-running or
+   install button can live in the dashboard of a token-protected install.

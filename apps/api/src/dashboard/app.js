@@ -134,6 +134,15 @@ async function loadChecklist() {
     items.push({ ok: false, label: "engine health unreachable" });
   }
   try {
+    /* C1: the version check made when the API started (no network here). */
+    const { launchCheck: lc } = await api("/engine/update/launch");
+    if (lc?.status === "available") {
+      items.push({ ok: false, label: `engine update ${lc.latest.version} available — Settings → Engine to install` });
+    }
+  } catch {
+    /* older API without the route: no item */
+  }
+  try {
     const { proxies } = await api("/proxies");
     items.push({
       ok: proxies.length > 0,
@@ -1497,6 +1506,7 @@ const SETTINGS_FIELDS = {
   engine: [
     { key: "channel", label: "Engine update channel", type: "select", options: [["stable", "Stable"], ["beta", "Beta"]] },
     { key: "downloadConsent", label: "Allow engine binary downloads", type: "checkbox" },
+    { key: "updateUrl", label: "Update server URL (engine manifest; empty = default)", type: "text", placeholder: "https://your-server/engines.manifest.json" },
   ],
   launch: [
     { key: "batchStaggerMs", label: "Batch start delay (ms)", type: "number", min: 0, max: 60000 },
@@ -1621,7 +1631,7 @@ async function refreshEngineUpdate() {
     else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
     else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
     if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" below to install.`;
-    status.innerHTML = line;
+    status.innerHTML = `${line}<br><span style="color:var(--faint)">Checked: ${esc(u.source)}</span>`;
     install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
     if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
   } catch (err) {
@@ -1775,7 +1785,7 @@ async function persistSetting(key, field) {
     settingsData[settingsSection] = updated;
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
-    if (settingsSection === "engine" && key === "downloadConsent") refreshEngineUpdate();
+    if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */

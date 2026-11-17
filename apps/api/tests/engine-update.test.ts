@@ -110,6 +110,43 @@ describe("EngineUpdateService", () => {
   });
 });
 
+describe("server-hosted updates (client side)", () => {
+  it("the launch check records the answer and never downloads", async () => {
+    const ref = manifestWith(tmp(), [{ version: "0.5.5-qp.9", bytes: Buffer.from("e") }]);
+    const enginesDir = tmp();
+    const svc = new EngineUpdateService({ enginesDir, manifestRef: ref, consent: () => true, platform: PLATFORM });
+    const lines: string[] = [];
+    await svc.checkAtLaunch((l) => lines.push(l));
+    expect(svc.launchCheck).toMatchObject({ status: "available", source: ref, latest: { version: "0.5.5-qp.9" } });
+    expect(lines[0]).toMatch(/engine update available: fury-core 0\.5\.5-qp\.9/);
+    expect(fs.readdirSync(enginesDir)).toEqual([]); // nothing fetched or installed
+  });
+
+  it("Settings → Engine → Update server URL beats SPECTRA_ENGINE_MANIFEST; only http(s) is accepted", async () => {
+    const dir = tmp();
+    const envRef = manifestWith(dir, [{ version: "0.5.5-qp.1", bytes: Buffer.from("old") }]);
+    const serverManifest = fs.readFileSync(manifestWith(tmp(), [{ version: "0.5.5-qp.20", bytes: Buffer.from("new") }]), "utf8");
+    const http = await import("node:http");
+    const server = http.createServer((_req, res) => res.end(serverManifest));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/engines.manifest.json`;
+    try {
+      const ctx = makeTestContext(undefined, { engineManifest: envRef });
+      expect((await ctx.app.inject({ method: "GET", url: "/engine/update" })).json()).toMatchObject({ source: envRef, latest: { version: "0.5.5-qp.1" } });
+
+      const bad = await ctx.app.inject({ method: "PATCH", url: "/settings/sections/engine", payload: { updateUrl: "file:///C:/evil.json" } });
+      expect(bad.statusCode).toBe(400);
+
+      await ctx.app.inject({ method: "PATCH", url: "/settings/sections/engine", payload: { updateUrl: url } });
+      expect((await ctx.app.inject({ method: "GET", url: "/engine/update" })).json()).toMatchObject({ source: url, latest: { version: "0.5.5-qp.20" } });
+      // No launch check ran inside buildApp (tests must never hit the network).
+      expect((await ctx.app.inject({ method: "GET", url: "/engine/update/launch" })).json()).toEqual({ launchCheck: null });
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe("GET/POST /engine/update", () => {
   it("check is open; install honours the consent setting and refuses cross-site requests", async () => {
     const ref = manifestWith(tmp(), [{ version: "0.5.5-qp.8", bytes: Buffer.from("e") }]);

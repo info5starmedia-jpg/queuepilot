@@ -70,6 +70,8 @@ export interface EngineUpdateJob {
 
 export interface EngineUpdateCheck {
   status: "current" | "available" | "error";
+  /** The manifest this check read (settings URL, env override, or the repo default). */
+  source: string;
   /** The newest manifest entry for this platform (no url credentials exist in manifests). */
   latest: { kind: string; version: string; sizeBytes: number | null; url: string } | null;
   consent: boolean;
@@ -84,7 +86,8 @@ export class EngineUpdateService {
   constructor(
     private readonly opts: {
       enginesDir: string;
-      manifestRef: string;
+      /** Resolved per call, so Settings → Engine → Update server URL applies without a restart. */
+      manifestRef: string | (() => string);
       /** The owner's Settings → Engine → downloadConsent, read at call time. */
       consent: () => boolean;
       installer?: EngineInstaller;
@@ -95,16 +98,36 @@ export class EngineUpdateService {
     this.installer = opts.installer ?? new EngineInstaller(opts.enginesDir);
   }
 
+  /** Result of the version check run when the API started (null until it ran). */
+  launchCheck: (EngineUpdateCheck & { checkedAt: string }) | null = null;
+
   async check(): Promise<EngineUpdateCheck> {
     const consent = this.opts.consent();
+    const source = this.source();
     try {
       const entry = await this.latest();
-      if (!entry) return { status: "error", latest: null, consent, error: "no engine in the manifest for this platform", job: this.job };
+      if (!entry) return { status: "error", source, latest: null, consent, error: "no engine in the manifest for this platform", job: this.job };
       const latest = { kind: entry.kind, version: entry.version, sizeBytes: entry.sizeBytes ?? null, url: entry.url };
-      return { status: this.installer.isInstalled(entry) ? "current" : "available", latest, consent, error: null, job: this.job };
+      return { status: this.installer.isInstalled(entry) ? "current" : "available", source, latest, consent, error: null, job: this.job };
     } catch (err) {
-      return { status: "error", latest: null, consent, error: err instanceof Error ? err.message : String(err), job: this.job };
+      return { status: "error", source, latest: null, consent, error: err instanceof Error ? err.message : String(err), job: this.job };
     }
+  }
+
+  /**
+   * Version check at launch (hosted-deployment track, client side): check
+   * once at API start and remember the answer for the dashboard. It never
+   * downloads — installing stays an explicit, consent-gated click.
+   */
+  async checkAtLaunch(log: (line: string) => void = () => {}): Promise<void> {
+    const r = await this.check();
+    this.launchCheck = { ...r, checkedAt: new Date().toISOString() };
+    if (r.status === "available") log(`engine update available: ${r.latest!.kind} ${r.latest!.version} (from ${r.source}) — Settings → Engine to install`);
+    else if (r.status === "error") log(`engine update check failed (${r.source}): ${r.error}`);
+  }
+
+  private source(): string {
+    return typeof this.opts.manifestRef === "function" ? this.opts.manifestRef() : this.opts.manifestRef;
   }
 
   /** Start the background install of the newest entry. Resolves once it has started. */
@@ -132,7 +155,7 @@ export class EngineUpdateService {
   }
 
   private async latest(): Promise<EngineManifestEntry | null> {
-    const raw = await readManifestRef(this.opts.manifestRef, this.opts.fetchImpl);
+    const raw = await readManifestRef(this.source(), this.opts.fetchImpl);
     return newestEntry(raw, "fury-core", this.opts.platform ?? currentPlatformTag());
   }
 }
