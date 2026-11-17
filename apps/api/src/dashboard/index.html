@@ -55,7 +55,7 @@
             <table class="grid" id="profiles-table">
               <thead>
                 <tr>
-                  <th style="width:28px"></th>
+                  <th style="width:28px"><input type="checkbox" id="profiles-select-all" title="select every profile in this view (all pages)" /></th>
                   <th style="width:44px">#</th>
                   <th>Name</th>
                   <th style="width:110px">Status</th>
@@ -77,17 +77,24 @@
 
         <!-- ========================== proxies =========================== -->
         <section class="view" id="view-proxies" hidden>
-          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Add them via a <b>provider</b> (Providers view) or a CSV/xlsx profile import.</div>
+          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Add them here (one, or paste a list), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
+          <div class="toolbar">
+            <button id="proxy-add-open" class="primary">+ Add proxies</button>
+            <div class="spacer"></div>
+            <span id="proxies-selected" class="hint" style="color:var(--faint)"></span>
+            <button id="proxies-test-selected" title="test every selected proxy">Test selected</button>
+            <button id="proxies-delete-selected" class="danger" title="delete every selected proxy">Delete selected</button>
+          </div>
           <div class="table-wrap">
             <table class="grid" id="proxies">
               <thead>
-                <tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:220px">Liveness</th></tr>
+                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th></tr>
               </thead>
               <tbody></tbody>
             </table>
             <div class="empty-state" id="proxies-empty" hidden>
               <div class="big">⇄</div>
-              No proxies configured — profiles will use your real IP.
+              No proxies configured — profiles will use your real IP. Click <b>+ Add proxies</b>.
             </div>
           </div>
         </section>
@@ -246,12 +253,32 @@
         <div class="drawer-head"><h3>New Profile</h3><button id="create-close" class="ghost">✕</button></div>
         <form id="create-profile" style="display:flex;flex-direction:column;gap:13px">
           <label>Name <input id="new-name" required maxlength="120" placeholder="account-1" /></label>
-          <label>Group <input id="new-group" maxlength="120" placeholder="(optional)" /></label>
+          <label>Group <input id="new-group" maxlength="120" placeholder="(optional) pick or type a new one" list="group-names" /></label>
+          <datalist id="group-names"></datalist>
           <div class="actions">
             <button type="submit" class="primary">Create profile</button>
             <span class="hint">A coherent fingerprint identity is generated automatically.</span>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- add-proxies drawer -->
+    <div id="proxy-add-modal" class="overlay" hidden>
+      <div class="drawer" style="width:520px">
+        <div class="drawer-head"><h3>Add Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
+        <label>Type
+          <select id="proxy-add-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
+        </label>
+        <label>Paste one proxy per line
+          <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;name:host:port:username:password&#10;host:port"></textarea>
+        </label>
+        <div class="hint">Lines without a name are named <code>host:port</code>. A <code>socks5://</code> or <code>http://</code> prefix on a line overrides the type above.</div>
+        <div class="actions">
+          <button id="proxy-add-go" class="primary">Add</button>
+          <span class="hint" id="proxy-add-status"></span>
+        </div>
+        <div id="proxy-add-result"></div>
       </div>
     </div>
 

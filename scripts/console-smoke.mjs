@@ -194,6 +194,58 @@ export async function runConsoleSmoke({ base, ok }) {
     const recipeGone = await waitFor(async () => (await api("GET", `/warmups/${recipe.json?.id}`)).status === 404);
     ok("console recipe Delete deletes the recipe", Boolean(recipeGone));
 
+    // Profiles: header select-all -> "+ New group" (groups need members)
+    const g1 = await api("POST", "/profiles", { name: `${name}-g1` });
+    const g2 = await api("POST", "/profiles", { name: `${name}-g2` });
+    // Created behind the console's back (API), so reload it like a user would.
+    await page.call("Page.reload");
+    await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profiles-table tbody tr')].some((tr) => tr.textContent.includes(${JSON.stringify(`${name}-g2`)}))`));
+    await page.evaluate("window.confirm = () => true; window.prompt = () => null; true");
+    const selectedAll = await page.evaluate(`(() => {
+      const box = document.querySelector('#profiles-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return document.querySelector('#batch-count').textContent;
+    })()`);
+    const expected = (await api("GET", "/profiles")).json?.profiles?.length ?? -1;
+    ok("profiles select-all selects every profile", selectedAll === `${expected} selected`, `${selectedAll} / ${expected}`);
+    const groupName = `${name}-grp`;
+    await page.evaluate(`window.prompt = () => ${JSON.stringify(groupName)}; document.querySelector('#new-group-chip').click(); true`);
+    const grouped = await waitFor(async () => {
+      const a = (await api("GET", `/profiles/${g1.json?.id}`)).json;
+      const b = (await api("GET", `/profiles/${g2.json?.id}`)).json;
+      return a?.group === groupName && b?.group === groupName;
+    });
+    ok("+ New group moves the selection into a new group", Boolean(grouped));
+    await page.evaluate("window.prompt = () => null; true");
+
+    // Proxies: paste two dummy loopback proxies, select all, delete selected
+    await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "x" })); true`);
+    await page.evaluate(`(() => {
+      document.querySelector('#proxy-add-open').click();
+      document.querySelector('#proxy-add-lines').value = "smoke-a:127.0.0.1:9:user:pa:ss\\n127.0.0.2:9";
+      document.querySelector('#proxy-add-go').click();
+      return true;
+    })()`);
+    const added = await waitFor(async () => {
+      const list = (await api("GET", "/proxies")).json?.proxies ?? [];
+      return list.length === 2 ? list : undefined;
+    });
+    ok("pasting two lines adds two proxies", Boolean(added), added ? added.map((p) => p.name).join(", ") : "");
+    const named = (added ?? []).find((p) => p.name === "smoke-a");
+    ok("pasted line keeps its name, user and port", Boolean(named && named.username === "user" && named.port === 9));
+    await page.evaluate(`(() => {
+      document.querySelector('#proxy-add-close').click();
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    await page.evaluate(`document.querySelector('#proxies-delete-selected').click(); true`);
+    const emptied = await waitFor(async () => ((await api("GET", "/proxies")).json?.proxies ?? []).length === 0);
+    ok("select-all + Delete selected removes every proxy", Boolean(emptied));
+
     ok("no uncaught exceptions in the console page", page.exceptions.length === 0, page.exceptions.slice(0, 3).join(" | "));
   } finally {
     page?.close();

@@ -182,6 +182,50 @@ function updateBatchBar() {
   const n = batchSelection.size;
   $("#batch-bar").hidden = n === 0;
   $("#batch-count").textContent = `${n} selected`;
+  updateSelectAll();
+}
+
+/* Header checkbox: checked = every profile in the current view (all pages,
+   current group + search) is selected; dash = some are. */
+function updateSelectAll() {
+  const box = $("#profiles-select-all");
+  if (!box) return;
+  const ids = visibleProfiles().map((p) => p.id);
+  const picked = ids.filter((id) => batchSelection.has(id)).length;
+  box.checked = ids.length > 0 && picked === ids.length;
+  box.indeterminate = picked > 0 && picked < ids.length;
+}
+
+$("#profiles-select-all").addEventListener("change", (e) => {
+  const ids = visibleProfiles().map((p) => p.id);
+  for (const id of ids) {
+    if (e.target.checked) batchSelection.add(id);
+    else batchSelection.delete(id);
+  }
+  updateBatchBar();
+  renderProfileTable();
+});
+
+/* "+ New group": groups are a property of profiles, so a new group needs
+   its first members — the selection, or a newly created profile. */
+async function newGroupFromSelection() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) {
+    toast("Tick the profiles for the new group (or the select-all box), then click + New group again — or create a profile and type a new group name.");
+    return;
+  }
+  const name = window.prompt(`New group name for ${ids.length} selected profile${ids.length === 1 ? "" : "s"}:`, "");
+  if (!name || name.trim() === "") return;
+  try {
+    const r = await api("/profiles/batch-move", { method: "POST", body: JSON.stringify({ ids, group: name.trim() }) });
+    toast(`created group "${name.trim()}" with ${r.moved} profile${r.moved === 1 ? "" : "s"}`);
+    activeGroup = name.trim();
+    batchSelection.clear();
+    updateBatchBar();
+    await loadProfiles();
+  } catch (err) {
+    toast(err.message, "error");
+  }
 }
 
 async function startSelected() {
@@ -316,6 +360,15 @@ function renderProfileTabs(groups) {
     }
     bar.appendChild(b);
   }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.id = "new-group-chip";
+  add.className = "chip-tab";
+  add.title = "create a group from the selected profiles";
+  add.textContent = "+ New group";
+  add.addEventListener("click", newGroupFromSelection);
+  bar.appendChild(add);
+  $("#group-names").innerHTML = groups.map((g) => `<option value="${esc(g.group)}"></option>`).join("");
   const moveSel = $("#batch-move-group");
   moveSel.innerHTML =
     groups.map((g) => `<option value="${esc(g.group)}">${esc(g.group)}</option>`).join("") +
@@ -443,6 +496,7 @@ async function renderProfileTable() {
   });
 
   renderPagination(list.length, pageCount);
+  updateSelectAll();
 }
 
 function renderPagination(total, pageCount) {
@@ -757,32 +811,168 @@ $("#create-modal").addEventListener("click", (e) => { if (e.target.id === "creat
 async function loadProxies() {
   const { proxies } = await api("/proxies");
   proxyById = new Map(proxies.map((p) => [p.id, p]));
+  for (const id of [...proxySelection]) if (!proxyById.has(id)) proxySelection.delete(id);
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
   $("#proxies-empty").hidden = proxies.length !== 0;
   for (const p of proxies) {
     const tr = document.createElement("tr");
+    if (proxySelection.has(p.id)) tr.classList.add("selected");
     tr.innerHTML = `
+      <td><input type="checkbox" data-proxy="${esc(p.id)}" ${proxySelection.has(p.id) ? "checked" : ""} /></td>
       <td style="font-weight:600">${esc(p.name)}</td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono">${esc(p.host)}:${esc(p.port)}</td>
+      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
-      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>`;
-    tr.querySelector("[data-act='test']").addEventListener("click", async (ev) => {
-      const out = tr.querySelector("[data-out]");
-      out.textContent = "…";
+      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
+      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>`;
+    tr.querySelector("[data-proxy]").addEventListener("change", (ev) => {
+      if (ev.target.checked) proxySelection.add(p.id);
+      else proxySelection.delete(p.id);
+      tr.classList.toggle("selected", ev.target.checked);
+      updateProxySelection();
+    });
+    tr.querySelector("[data-act='test']").addEventListener("click", () => testProxyRow(p, tr));
+    tr.querySelector("[data-act='delete']").addEventListener("click", async () => {
+      if (!window.confirm(`Delete proxy "${p.name}"?`)) return;
       try {
-        const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
-        out.textContent = r.ok ? `ok · ${r.latencyMs}ms` : `fail: ${r.error}`;
-        out.style.color = r.ok ? "var(--green)" : "var(--red)";
+        await api(`/proxies/${p.id}`, { method: "DELETE" });
+        proxySelection.delete(p.id);
+        toast(`proxy "${p.name}" deleted`);
       } catch (err) {
-        out.textContent = err.message;
-        out.style.color = "var(--red)";
+        toast(err.message, "error");
       }
+      await loadProxies();
     });
     tbody.appendChild(tr);
   }
+  updateProxySelection();
 }
+
+/* Proxies view: selection, bulk test/delete, add drawer */
+const proxySelection = new Set();
+
+function updateProxySelection() {
+  const n = proxySelection.size;
+  $("#proxies-selected").textContent = n ? `${n} selected` : "";
+  $("#proxies-delete-selected").disabled = n === 0;
+  $("#proxies-test-selected").disabled = n === 0;
+  const all = [...proxyById.keys()];
+  const box = $("#proxies-select-all");
+  box.checked = all.length > 0 && all.every((id) => proxySelection.has(id));
+  box.indeterminate = n > 0 && !box.checked;
+}
+
+async function testProxyRow(p, tr) {
+  const out = tr.querySelector("[data-out]");
+  out.textContent = "…";
+  out.style.color = "var(--faint)";
+  try {
+    const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
+    const geo = r.geo ? ` · ${[r.geo.city, r.geo.region, r.geo.country].filter(Boolean).join(", ")}` : "";
+    out.textContent = r.ok ? `ok · ${r.latencyMs}ms${r.exitIp ? ` · ${r.exitIp}` : ""}${geo}` : `fail: ${r.error}`;
+    out.style.color = r.ok ? "var(--green)" : "var(--red)";
+  } catch (err) {
+    out.textContent = err.message;
+    out.style.color = "var(--red)";
+  }
+}
+
+$("#proxies-select-all").addEventListener("change", (e) => {
+  for (const id of proxyById.keys()) {
+    if (e.target.checked) proxySelection.add(id);
+    else proxySelection.delete(id);
+  }
+  loadProxies();
+});
+
+$("#proxies-test-selected").addEventListener("click", async () => {
+  for (const tr of document.querySelectorAll("#proxies tbody tr")) {
+    const id = tr.querySelector("[data-proxy]")?.dataset.proxy;
+    if (id && proxySelection.has(id)) await testProxyRow(proxyById.get(id), tr);
+  }
+});
+
+$("#proxies-delete-selected").addEventListener("click", async () => {
+  const ids = [...proxySelection];
+  if (ids.length === 0) return;
+  if (!window.confirm(`Delete ${ids.length} prox${ids.length === 1 ? "y" : "ies"}?`)) return;
+  const failed = [];
+  for (const id of ids) {
+    try {
+      await api(`/proxies/${id}`, { method: "DELETE" });
+      proxySelection.delete(id);
+    } catch (err) {
+      failed.push(`${proxyById.get(id)?.name ?? id}: ${err.message}`);
+    }
+  }
+  toast(failed.length ? `${ids.length - failed.length} deleted; ${failed.length} kept — ${failed.join("; ")}` : `${ids.length} deleted`, failed.length ? "error" : "info");
+  await loadProxies();
+});
+
+/* One pasted line -> proxy input. Accepts host:port, host:port:user:pass and
+   name:host:port:user:pass, with an optional scheme:// prefix. The password
+   is everything after the user (it may itself contain ':'). */
+function parseProxyLine(raw, defaultType) {
+  let line = raw.trim();
+  if (!line) return null;
+  let type = defaultType;
+  const scheme = /^(https?|socks5h?):\/\//i.exec(line);
+  if (scheme) {
+    type = scheme[1].toLowerCase().replace("socks5h", "socks5");
+    line = line.slice(scheme[0].length);
+  }
+  const parts = line.split(":");
+  let name = null;
+  if (parts.length >= 3 && !/^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) name = parts.shift();
+  const [host, port, username, ...rest] = parts;
+  if (!host || !/^\d+$/.test(port ?? "")) throw new Error("expected host:port[:user:pass]");
+  return {
+    name: name || `${host}:${port}`,
+    type,
+    host,
+    port: Number(port),
+    username: username || null,
+    password: rest.length ? rest.join(":") : null,
+  };
+}
+
+$("#proxy-add-open").addEventListener("click", () => {
+  $("#proxy-add-result").innerHTML = "";
+  $("#proxy-add-status").textContent = "";
+  $("#proxy-add-modal").hidden = false;
+  $("#proxy-add-lines").focus();
+});
+$("#proxy-add-close").addEventListener("click", () => { $("#proxy-add-modal").hidden = true; });
+$("#proxy-add-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-add-modal") $("#proxy-add-modal").hidden = true; });
+
+$("#proxy-add-go").addEventListener("click", async () => {
+  const lines = $("#proxy-add-lines").value.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length === 0) return;
+  const type = $("#proxy-add-type").value;
+  const btn = $("#proxy-add-go");
+  btn.disabled = true;
+  const rows = [];
+  let added = 0;
+  for (const [i, raw] of lines.entries()) {
+    let input = null;
+    try {
+      input = parseProxyLine(raw, type);
+      await api("/proxies", { method: "POST", body: JSON.stringify(input) });
+      added++;
+      rows.push(`<tr><td>line ${i + 1}</td><td>${esc(input.name)} added</td></tr>`);
+    } catch (err) {
+      /* never echo the line back: it may carry a password */
+      rows.push(`<tr class="import-err"><td>line ${i + 1}</td><td>${esc(input?.name ?? "")} ${esc(err.message)}</td></tr>`);
+    }
+  }
+  btn.disabled = false;
+  $("#proxy-add-status").textContent = `${added}/${lines.length} added`;
+  $("#proxy-add-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
+  if (added === lines.length) $("#proxy-add-lines").value = "";
+  toast(`${added} prox${added === 1 ? "y" : "ies"} added`);
+  await loadProxies();
+});
 
 /* ========================= CSV / xlsx import ============================ */
 
