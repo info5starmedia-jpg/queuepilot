@@ -1530,7 +1530,7 @@ function renderIntegrationsInfo() {
       <p>Used to read one-time codes from mail. For Gmail, turn on 2-Step Verification and create an <b>app password</b> (Google Account → Security → App passwords). The app password is stored encrypted on this machine and never shown again.</p>
       <table class="import-table" id="email-accounts-table"><tbody></tbody></table>
       <p id="email-accounts-empty" class="hint" hidden>No email accounts yet.</p>
-      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:2fr 1.4fr 1.4fr 0.6fr auto;gap:8px;align-items:end;margin-top:10px">
+      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;margin-top:10px">
         <label>Email <input id="email-account-email" type="email" required maxlength="254" placeholder="you@gmail.com" /></label>
         <label>App password <input id="email-account-password" type="password" required maxlength="200" autocomplete="new-password" placeholder="16-letter app password" /></label>
         <label>Server <input id="email-account-host" required maxlength="253" value="imap.gmail.com" /></label>
