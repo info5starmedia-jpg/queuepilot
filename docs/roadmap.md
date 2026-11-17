@@ -1090,3 +1090,62 @@ vanilla).
 ## P5.6 — Perf & startup
 
 Folded into the P7 numbered list (item 12) with sub-steps and goal.
+
+
+## v0.16.3 — Phase 1 release hardening (2026-11-16, shipped in `300d849`)
+
+Owner-approved Phase 1 of the release-hardening plan: prove the product the
+way a family member uses it, package the entry point, and hand the repo to
+the next builder cleanly. The E2E gate earned its keep immediately — it
+found and fixed two real-engine CDP defects that all 605 unit tests could
+not see (they run against the fake runtime).
+
+1. ✅ **Scripted fresh-install E2E run** — `scripts/e2e-smoke.mjs`. One
+   command boots the API on a scratch data dir + scratch port
+   (`SPECTRA_RUNTIME=fake`, `NODE_ENV=production`) and walks boot →
+   security gates (scripting 403 without opt-in AND without token) → CSV +
+   xlsx import (dry-run → apply → upsert) → surface (`/metrics`,
+   identity-PATCH merge, garbage-xlsx 400) → teardown (SIGTERM exit,
+   scratch cleanup). `--launch` additionally drives the REAL fury engine on
+   the live 50325 install: start → /egress → cookie jar over CDP → stop →
+   no run after stop. Plain run is CI-safe (no browser windows).
+   **E2E GREEN — ship it.** Two real bugs found by the launch phase and
+   fixed in `300d849`:
+   - *Bare `ws://host:port` CDP endpoint rejected.* FurySession publishes a
+     bare `ws://127.0.0.1:<port>`; Chromium only upgrades WebSocket on
+     `/devtools/browser/<id>`, so every cookie/tab op failed with an empty
+     "CDP connection error". `CdpConnection.connect` now resolves the real
+     `webSocketDebuggerUrl` via `/json/version` (path-ful endpoints like
+     the fake runtime's are untouched; any resolution failure falls back
+     to the URL as given).
+   - *`Network.*` called on the browser-level socket.* Real Chromium serves
+     page domains only on attached page sessions ("wasn't found"). New
+     `cdp-page-session.ts` (`attachPageSession` — reuses the first open
+     page, creates a transient `about:blank` only when the browser has no
+     page, closes it on release); `cookie-thinger` and the bundle
+     export/import transport now route every `Network.*` call through a
+     page session. Partition scoping semantics preserved
+     (`Network.getCookies { browserContextId }` per context, deduped).
+2. ✅ **Family packaging — start script** — `scripts/start-queuepilot.cmd`.
+   Dependency-free Windows entry point: checks Node is on PATH, detects an
+   already-healthy API (opens the dashboard only), otherwise spawns the API
+   minimized (log `%USERPROFILE%\.queuepilot\api.log`), polls `/health` up
+   to 60 s, prints the log tail on failure, opens the dashboard on success.
+   Cold-start tested live end to end (the first cut had a `%~dp0` root bug
+   caught by this very test).
+3. ✅ **Docs handoff pass** — README gains a "Handoff for the next LLM /
+   agent" section: the mission (Fury engine + AliasMode lifecycle + Jancy
+   workflow, personal/family use), the locked decisions (ADR-0005 vanilla
+   dashboard, fury default runtime, cookie redaction, CDP session
+   discipline), the pre-commit gates, the standing no-checkbox-without-
+   code+tests+docs+live-verify rule, and the current Phase 2 next steps.
+   Stale default-runtime references corrected (README said camoufox;
+   config has said fury since v0.13).
+4. ✅ **Dev API restarted with the new gates** — live on 50325 with pino
+   logging + `/metrics` counters; scripting endpoints correctly 403 there
+   (family-machine default runs without `SPECTRA_API_TOKEN`).
+
+Gates at ship time: 605/605 API tests, 20/20 server tests, `tsc --noEmit`
+clean, `npm run build` clean, E2E GREEN in both modes. Phase 2 next steps
+(D-002 follow-ups, warmup console UX, tab-ops depth, canvas cross-context
+engine item) are queued in the release-hardening plan.

@@ -138,6 +138,60 @@ and fixed *by* external checkers that our own claims could never see.
 Full per-item detail with live results: [docs/roadmap.md](docs/roadmap.md)
 Phase P7, and [docs/parity.md](docs/parity.md).
 
+## Handoff for the next LLM / agent
+
+You are picking up a working product, not a greenfield repo. Read this before
+touching code.
+
+**The mission (do not drift from it).** QueuePilot = Fury's engine knowledge
+(C++-level identity patches, vendored in `engine/`) + AliasMode's lifecycle
+discipline (launch snapshots, edit-while-running, clean teardown, health
+checks) + Jancy's workflow layer (CSV/Sheets providers, proxies, tab ops,
+scripting) — rebuilt as original MIT code. Personal/family use only, never
+commercial. Features ship only if they serve that formula.
+
+**What is locked — do not change without an ADR:**
+- Vanilla zero-build dashboard served by the API at `/` (ADR-0005). No React,
+  no bundler, no CDN — the console must work offline from loopback.
+- `fury` is the default runtime (config default in `apps/api/src/config/config.ts`);
+  camoufox remains only as an A/B fallback (`SPECTRA_RUNTIME=camoufox`).
+- Cookie values are redacted by default; raw reveal requires `SPECTRA_API_TOKEN`
+  (audit A5, v0.15.0). Never weaken this.
+- CDP page-domain methods (`Network.*`, `Runtime.*`) go through
+  `attachPageSession` (`apps/api/src/application/runtime/cdp/cdp-page-session.ts`)
+  or a resolved page session — the browser-level socket rejects them. The
+  bare `ws://host:port` endpoint is auto-resolved via `/json/version` inside
+  `CdpConnection.connect`.
+- Scripting endpoints require both the operator opt-in and the bearer token
+  (audit finding 1); browser-originated requests are denied by origin checks.
+
+**Gates — run before every commit that touches source:**
+```bash
+npm test -w apps/api      # ~140 s, 605 tests — must be all green
+npm test -w apps/server   # ~10 s
+npx tsc --noEmit          # in apps/api (strict)
+npm run build             # from repo root (~20 s)
+node scripts/e2e-smoke.mjs            # CI-safe API phases (temp data dir)
+node scripts/e2e-smoke.mjs --launch   # + real engine launch; opens one
+                                      # browser window briefly — run only
+                                      # on a machine where that is OK
+```
+
+**Standing rule (from the roadmap):** no item gets a green checkbox in
+`docs/roadmap.md` without code + tests + docs + live verification, and the
+hash of the commit that shipped it.
+
+**Where to continue (current next steps):** Phase 2 of the release-hardening
+plan in `docs/roadmap.md` — D-002 PID-reuse hardening follow-ups, warmup
+console UX, tab-ops depth, and the canvas cross-context engine item. The
+release-gate script and the family start script (`scripts/start-queuepilot.cmd`)
+are done; do not regress them.
+
+**Family-machine entry point:** `scripts\start-queuepilot.cmd` — checks
+Node, boots the API (log at `%USERPROFILE%\.queuepilot\api.log`), waits for
+`/health`, opens the dashboard. If the API is already healthy it just opens
+the dashboard.
+
 ## Quickstart
 
 ```bash
@@ -191,15 +245,15 @@ npm start -- engine install --manifest engines.json --yes
 # without --yes: prints the entry and refuses — no bytes move
 ```
 
-### Engines: camoufox (default) and fury-core
+### Engines: fury-core (default) and camoufox
 
 Two engine runtimes ship behind the same API:
 
-- `camoufox` — C++-patched Firefox (default; `SPECTRA_CAMOUFOX_PATH` or
-  `<dataDir>/engines/camoufox/`).
-- `fury` — Fury's BSD-3-Clause patched Chromium core (Chrome 157):
+- `fury` (default) — Fury's BSD-3-Clause patched Chromium core (Chrome 157):
   C++-level canvas/audio/WebGL/WebGPU/font/timezone spoofing. Install the
-  pinned, checksum-verified build and select it:
+  pinned, checksum-verified build and it is used automatically:
+- `camoufox` — C++-patched Firefox (`SPECTRA_CAMOUFOX_PATH` or
+  `<dataDir>/engines/camoufox/`), kept as an A/B fallback.
 
 ```bash
 npm start -- engine install --manifest engines.manifest.json --yes
@@ -357,7 +411,7 @@ All config is environment variables:
 | `SPECTRA_PORT`                 | `50325`         | API port                                                                   |
 | `SPECTRA_HOST`                 | `127.0.0.1`     | Bind address (loopback by default, on purpose)                             |
 | `SPECTRA_DATA_DIR`             | `~/.queuepilot` | SQLite + profile data                                                      |
-| `SPECTRA_RUNTIME`              | `camoufox`      | `camoufox` or `fake`                                                       |
+| `SPECTRA_RUNTIME`              | `fury`          | `fury`, `camoufox` or `fake` (fury is the locked default; camoufox = A/B fallback) |
 | `SPECTRA_API_TOKEN`            | unset           | If set, every route except `/health` needs `Authorization: Bearer <token>` |
 | `SPECTRA_GOOGLE_CLIENT_ID`     | unset           | Google Cloud OAuth client id (Sheets API) for Google Sheets providers      |
 | `SPECTRA_GOOGLE_CLIENT_SECRET` | unset           | Google Cloud OAuth client secret                                           |
