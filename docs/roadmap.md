@@ -1021,6 +1021,40 @@ persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
    clears one pin back to seed-derived, empty body is a no-op, regenerate
    clears all. Regression test locks the merge behavior.
 
+## v0.16.1 — Audit fixes, GPT-5.4 findings 1–4 (owner-approved 2026-11-16)
+
+Report: `docs/reports/audit-gpt-5.4-2026-11-16.md`. All four findings
+fixed in `347d885`; 598 API + 20 server tests green; tsc + build clean.
+
+1. ✅ **Scripting/JYL/plugin RCE surface** (the audit's only High) —
+   scripting endpoints now demand a credential boundary on top of the
+   settings opt-in: without `SPECTRA_API_TOKEN` every scripting route 403s
+   (request-time gate), the dashboard toggle refuses to enable them, and
+   `main.ts` logs a loud boot warning. Plus a deny hook that 403s any
+   cross-site (`Sec-Fetch-Site`) or cross-origin (`Origin` ≠ Host, non-
+   loopback) request to `/jyl /plugins /resolvers /parsers /aliases`
+   before handlers run — a web page inside any profile browser can no
+   longer reach code-executing endpoints. Dashboard (same-origin) and
+   header-less CLIs unaffected.
+2. ✅ **CDP connection leak** — `WindowTilingService` opened a
+   `CdpConnection` per tiled window and never closed it. Now a
+   `driverHandle` closed in `finally`; regression test asserts the mock
+   CDP server sees zero open sockets after a tiling pass.
+3. ✅ **Structured logging/metrics** — pino via Fastify options (level via
+   `SPECTRA_LOG_LEVEL`, silent in tests), request IDs on every line,
+   in-process counters, `GET /metrics`, 5xx lines logged with reqId.
+4. ✅ **Security mediums** — Google OAuth pending flows (PKCE verifiers)
+   moved from plaintext `oauth-pending.json` into the DPAPI SecretStore
+   (legacy file migrated once and deleted); team-server `/health` returns
+   `{ok:true}` only to unauthenticated probes (metadata behind the bearer
+   token); team-sync watermark file written `0o600`; session-bundle
+   PBKDF2 (310k iterations) moved off the event loop (`createSessionBundle`
+   /`openSessionBundle` now async).
+
+Remaining audit items (owner picks next): stability batch (#5 — SSE dead-
+client pruning, plugin store race, `withTimeout` timer, CSV newlines,
+fsync, double latency calc) and stale `docs/parity.md` corrections (#6).
+
 ## v0.14 — Persona fields / 2FA layer (first item)
 
 See P7 Jancy-gap item 5 above for sub-steps and goal. The v0.14 list is
