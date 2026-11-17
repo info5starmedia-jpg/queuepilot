@@ -43,6 +43,7 @@ import {
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
+import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe.js";
 import { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
@@ -205,6 +206,12 @@ export async function main(): Promise<void> {
     undefined, // leaseRenewIntervalMs default
     // D-003: rotation links resolve launch proxies from provider pools.
     proxyProviders,
+    // Browser timezone follows the proxy: look up the exit IP's timezone
+    // through the proxy itself at launch (same geo echo as the proxy Test).
+    async (proxy) => {
+      const r = await probeProxy(proxy, DEFAULT_PROBE_URL, 8_000);
+      return r.ok ? (r.geo?.timezone ?? null) : null;
+    },
   );
 
   // Reconcile runs left occupying by a previous (possibly crashed) process

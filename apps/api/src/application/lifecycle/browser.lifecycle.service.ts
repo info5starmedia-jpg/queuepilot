@@ -12,6 +12,7 @@ import {
   type IdentityDrift,
   type LifecycleEvent,
   type OpenTabInput,
+  type FingerprintIdentityWithOverrides,
   type Profile,
   type RotationLink,
   type SessionPartition,
@@ -176,6 +177,12 @@ export class BrowserLifecycleService {
         password: string | null;
       };
     },
+    /**
+     * Looks up the IANA timezone of a proxy's exit IP by making a request
+     * THROUGH that proxy (the same geo-IP echo the proxy Test uses). Absent =
+     * no lookup; the proxy's own timezone field and pins still apply.
+     */
+    private readonly proxyTimezoneLookup?: (proxy: LaunchProxyEndpoint) => Promise<string | null>,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -273,27 +280,28 @@ export class BrowserLifecycleService {
       const rotated = rotationLink
         ? this.rotationProviders!.resolveRotation(rotationLink)
         : null;
-      const launchProxyUrl = tempProxy
-        ? proxyUrl({
+      const launchProxy: LaunchProxyEndpoint | null = tempProxy
+        ? {
             type: tempProxy.type,
             host: tempProxy.host,
             port: tempProxy.port,
             username: tempProxy.username ?? null,
             password: tempProxy.password ?? null,
-          })
+          }
         : attached
-          ? proxyUrl(attached)
+          ? attached
           : listDirect
-            ? proxyUrl({
+            ? {
                 type: listDirect.scheme,
                 host: listDirect.host,
                 port: listDirect.port,
                 username: listDirect.username,
                 password: listDirect.password,
-              })
+              }
             : rotated
-              ? proxyUrl(rotated)
+              ? rotated
               : null;
+      const launchProxyUrl = launchProxy ? proxyUrl(launchProxy) : null;
       const proxySource = tempProxy
         ? ("temporary" as const)
         : attached
@@ -303,6 +311,19 @@ export class BrowserLifecycleService {
             : rotated
               ? ("rotation" as const)
               : ("none" as const);
+
+      // The browser's clock follows the proxy's exit IP: a proxied profile
+      // on a UTC (or home) clock contradicts the IP's location — exactly what
+      // checkers flag. Pin > proxy's own timezone > exit-IP lookup > identity.
+      const { timezone: launchTimezone, source: timezoneSource } = await this.resolveLaunchTimezone(
+        identity,
+        launchProxy,
+        attached?.timezone ?? null,
+      );
+      const launchIdentity =
+        identity && launchTimezone && launchTimezone !== identity.timezone
+          ? { ...identity, timezone: launchTimezone }
+          : identity;
 
       const run: BrowserRun = {
         id: randomUUID(),
@@ -336,7 +357,7 @@ export class BrowserLifecycleService {
       try {
         session = await this.runtime.launch({
           profile,
-          identity,
+          identity: launchIdentity,
           proxyUrl: launchProxyUrl,
           profileDataDir: path.join(this.dataDir, "profiles", profile.id),
         });
@@ -370,12 +391,13 @@ export class BrowserLifecycleService {
       this.snapshots?.capture({
         runId: live.id,
         profile,
-        identity,
+        identity: launchIdentity,
         proxyId: tempProxy ? null : (rotated?.id ?? profile.proxyId ?? null),
         proxyUrl: launchProxyUrl,
         proxySource,
         engineKind: this.runtime.kind,
         egress: session.egress ?? undefined,
+        timezoneSource,
       });
       void session.exited.then(({ code, signal }) =>
         this.onEngineExit(profileId, live.id, code, signal),
@@ -510,6 +532,29 @@ export class BrowserLifecycleService {
     await terminateProcess(pid, true);
     if (await waitForProcessExit(pid, grace)) return null;
     return `engine (pid ${pid}) did not exit after a forced stop`;
+  }
+
+  /**
+   * The timezone this launch should present, and why. A profile pin always
+   * wins; then the proxy's own timezone field (the operator knows better than
+   * any database); then the exit IP's timezone looked up through the proxy;
+   * otherwise the identity default. A failed lookup is never a launch
+   * failure — the clock may not match, but nothing leaks.
+   */
+  private async resolveLaunchTimezone(
+    identity: FingerprintIdentityWithOverrides | null,
+    proxy: LaunchProxyEndpoint | null,
+    proxyTimezone: string | null,
+  ): Promise<{ timezone: string | null; source: "pinned" | "proxy" | "exit-ip" | "identity" }> {
+    if (!identity) return { timezone: null, source: "identity" };
+    if (identity.overrides?.timezone) return { timezone: identity.timezone, source: "pinned" };
+    if (!proxy) return { timezone: identity.timezone, source: "identity" };
+    if (proxyTimezone && isValidTimezone(proxyTimezone)) return { timezone: proxyTimezone, source: "proxy" };
+    if (this.proxyTimezoneLookup) {
+      const looked = await this.proxyTimezoneLookup(proxy).catch(() => null);
+      if (looked && isValidTimezone(looked)) return { timezone: looked, source: "exit-ip" };
+    }
+    return { timezone: identity.timezone, source: "identity" };
   }
 
   activeRun(profileId: string): BrowserRun | null {
@@ -862,6 +907,9 @@ export class BrowserLifecycleService {
     proxyUrl: string | null;
     proxySource: "profile" | "temporary" | "profile-list" | "rotation" | "none";
     egress: LaunchIdentitySnapshot["egress"] | null;
+    /** The browser timezone this run launched with, and where it came from. */
+    timezone: string | null;
+    timezoneSource: LaunchIdentitySnapshot["timezoneSource"] | null;
     /**
      * Whether the measured egress still describes where traffic goes:
      * "live" = this API launched the engine and its relay is serving;
@@ -890,6 +938,8 @@ export class BrowserLifecycleService {
       proxyUrl: redactProxyUrl(snapshot?.proxyUrl ?? null),
       proxySource: snapshot?.proxySource ?? "none",
       egress: snapshot?.egress ?? null,
+      timezone: snapshot?.identity?.timezone ?? null,
+      timezoneSource: snapshot?.timezoneSource ?? null,
       relay,
       note,
     };
@@ -1194,6 +1244,25 @@ export class BrowserLifecycleService {
 /** PIDs whose identity can be proven: the run has both a PID and a token. */
 function pidsToVerify(runs: readonly BrowserRun[]): number[] {
   return runs.flatMap((r) => (r.pid && r.processToken ? [r.pid] : []));
+}
+
+/** A proxy endpoint as the launch resolved it (password included, in memory only). */
+export interface LaunchProxyEndpoint {
+  type: "http" | "https" | "socks5";
+  host: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+}
+
+/** True for an IANA zone this runtime knows (rejects garbage from a geo service). */
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function now(): string {
