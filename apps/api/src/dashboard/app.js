@@ -1575,11 +1575,70 @@ function renderSettingsNav() {
   }
 }
 
+/* Settings → Engine: one-click engine update (C1). Check is free; Install
+   needs the "Allow engine binary downloads" switch above it. The install
+   runs in the API's background; this card polls its status. */
+let engineUpdatePoll = null;
+
+async function renderEngineUpdateCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="engine-update-card">
+      <h4>Engine updates</h4>
+      <p>Checks the engine manifest for a newer verified engine. Installs are checksum-pinned and atomic; the current engine stays installed, so a bad update can be rolled back.</p>
+      <div id="engine-update-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="engine-update-check">Check again</button>
+        <button type="button" class="primary" id="engine-update-install" hidden>Install update</button>
+      </div>
+    </div>`;
+  $("#engine-update-check").addEventListener("click", () => refreshEngineUpdate());
+  $("#engine-update-install").addEventListener("click", async () => {
+    try {
+      const r = await api("/engine/update", { method: "POST" });
+      toast(r.started ? `installing engine ${r.version}…` : `engine ${r.version} is already current`);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    await refreshEngineUpdate();
+  });
+  await refreshEngineUpdate();
+}
+
+async function refreshEngineUpdate() {
+  const status = $("#engine-update-status");
+  const install = $("#engine-update-install");
+  if (!status) return;
+  clearTimeout(engineUpdatePoll);
+  try {
+    const u = await api("/engine/update");
+    const job = u.job;
+    const size = u.latest?.sizeBytes ? ` (${Math.round(u.latest.sizeBytes / 1048576)} MB)` : "";
+    let line =
+      u.status === "current" ? `Up to date — ${esc(u.latest.kind)} ${esc(u.latest.version)}.`
+      : u.status === "available" ? `Update available: ${esc(u.latest.kind)} ${esc(u.latest.version)}${size}.`
+      : `Cannot check: ${esc(u.error)}`;
+    if (job?.state === "running") line += ` Installing ${esc(job.version)}…`;
+    else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
+    else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
+    if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" above to install.`;
+    status.innerHTML = line;
+    install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
+    if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
+  } catch (err) {
+    status.textContent = err.message;
+    install.hidden = true;
+  }
+}
+
 /* Integrations gets a read-only reference card for the email resolvers —
    there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
    the scripting layer. This card documents the URL shapes. */
 function renderIntegrationsInfo() {
   const box = $("#integrations-info");
+  if (settingsSection === "engine") {
+    renderEngineUpdateCard(box);
+    return;
+  }
   if (settingsSection !== "integrations") {
     box.innerHTML = "";
     return;
@@ -1716,6 +1775,7 @@ async function persistSetting(key, field) {
     settingsData[settingsSection] = updated;
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
+    if (settingsSection === "engine" && key === "downloadConsent") refreshEngineUpdate();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */

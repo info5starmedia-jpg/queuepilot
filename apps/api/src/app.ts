@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
+import { EngineUpdateService, DEFAULT_MANIFEST_URL } from "./application/engine/engine-update.service.js";
 import type { AppConfig } from "./config/config.js";
 import { createApiLogger } from "./http/logger.js";
 import { registerScriptingOriginDeny } from "./http/scripting-origin-deny.js";
@@ -132,7 +134,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
-  registerEngineRoutes(app, deps.engineHealth);
+  registerEngineRoutes(
+    app,
+    deps.engineHealth,
+    new EngineUpdateService({
+      enginesDir: path.join(deps.config.dataDir, "engines"),
+      manifestRef: deps.config.engineManifest ?? DEFAULT_MANIFEST_URL,
+      // The owner's existing Settings → Engine switch; no store = no consent.
+      consent: () => deps.settingsStore?.get("engine").downloadConsent === true,
+    }),
+  );
   registerTabRoutes(app, deps.lifecycle);
   registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));
   registerCookieRoutes(app, deps.lifecycle, {

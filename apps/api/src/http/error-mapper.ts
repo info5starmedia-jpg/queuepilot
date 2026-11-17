@@ -44,7 +44,8 @@ export function toHttpError(err: unknown): {
             ? 503
             : err.code === ErrorCodes.TEAM_UNAUTHORIZED
               ? 401
-              : err.code === ErrorCodes.FORBIDDEN
+              : err.code === ErrorCodes.FORBIDDEN ||
+                  err.code === ErrorCodes.ENGINE_DOWNLOAD_REQUIRES_CONSENT
                 ? 403
               : err.code === ErrorCodes.TABS_UNSUPPORTED ||
                 err.code === ErrorCodes.ATTESTATION_UNSUPPORTED
