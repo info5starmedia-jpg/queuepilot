@@ -29,13 +29,10 @@ export function registerTabRoutes(
     const states = ids.map((id) => {
       try {
         const listed = lifecycle.listTabs(id);
-        return {
-          id,
-          drift: lifecycle.identityDrift(id),
-          tabCount: listed.tabs.length,
-          // Adopted proxied run whose relay died with the old API (D-002).
-          relay: lifecycle.relayState(id),
-        };
+        // drift + relay (adopted run whose relay died with the old API)
+        // from one snapshot read.
+        const { drift, relay } = lifecycle.gridState(id);
+        return { id, drift, tabCount: listed.tabs.length, relay };
       } catch {
         return { id, drift: null, tabCount: 0, relay: null };
       }

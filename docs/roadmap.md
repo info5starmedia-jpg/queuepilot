@@ -1361,7 +1361,7 @@ the scratch instance, PID read from the 50477 listener; the live API on
 phase 4b goes RED on Stop, Delete and recipe Delete; on this branch GREEN
 (headless fury qp.4, Chrome/157).
 
-**Found, not fixed (outside this item — proposed separately):** launch
+**Found, not fixed (outside this item — recorded, not yet scheduled):** launch
 snapshots under `<dataDir>/snapshots/` store the launch proxy URL with
 its password in plain text (`launch-identity.service.ts` writes
 `args.proxyUrl` verbatim), although proxy passwords have lived in DPAPI

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   DomainError,
   ErrorCodes,
+  computeIdentityDrift,
   TempProxyInputSchema,
   type AttestationResult,
   type BrowserRun,
@@ -812,6 +813,28 @@ export class BrowserLifecycleService {
    * against the profile's current identity/proxy pointers. Null when the
    * profile has no active run or the run predates snapshots.
    */
+  /**
+   * Drift + relay state for the console grid in ONE snapshot read — the
+   * batch-state endpoint runs this per profile on every SSE event (audit B4
+   * removed an N+1 there; two file reads per running profile would bring a
+   * smaller one back).
+   */
+  gridState(profileId: string): {
+    drift: IdentityDrift | null;
+    relay: "live" | "lost-held" | "lost-unguarded" | null;
+  } {
+    const run = this.runs.occupyingForProfile(profileId);
+    const profile = this.profiles.get(profileId);
+    if (!run || !profile || !this.snapshots) return { drift: null, relay: null };
+    const snapshot = this.snapshots.forRun(run.id);
+    return {
+      drift: snapshot
+        ? computeIdentityDrift(snapshot, { identityId: profile.identityId, proxyId: profile.proxyId })
+        : null,
+      relay: this.relayStateFor(profileId, run, snapshot),
+    };
+  }
+
   identityDrift(profileId: string): IdentityDrift | null {
     if (!this.snapshots) return null;
     const run = this.runs.occupyingForProfile(profileId);
@@ -1060,16 +1083,9 @@ export class BrowserLifecycleService {
   }
 
   /**
-   * Proxy-relay state of the profile's active run (see egressDiagnostics):
-   * null when not running or not proxied. Cheap enough for the grid's
-   * batch-state call — one snapshot read per RUNNING profile only.
+   * Proxy-relay state of a run (see egressDiagnostics): null when not
+   * running or not proxied. Takes the snapshot so callers read it once.
    */
-  relayState(profileId: string): "live" | "lost-held" | "lost-unguarded" | null {
-    const run = this.runs.occupyingForProfile(profileId);
-    if (!run) return null;
-    return this.relayStateFor(profileId, run, this.snapshots?.forRun(run.id) ?? null);
-  }
-
   private relayStateFor(
     profileId: string,
     run: BrowserRun | null,
@@ -1089,6 +1105,9 @@ export class BrowserLifecycleService {
   /** A run whose engine is gone without the API seeing its exit. */
   private markCrashed(run: BrowserRun, lastError: string, detail: string): void {
     this.releaseRelayHold(run.id);
+    // Unreachable today (crash marking is sessionless, auto-reload needs a
+    // session) — kept so every run-ending path clears both kinds of state.
+    this.clearAutoReloadsForRun(run.id);
     this.runs.update({ ...run, status: "crashed", stoppedAt: now(), lastError });
     const profile = this.profiles.get(run.profileId);
     if (profile) this.markProfile(profile, "idle");
