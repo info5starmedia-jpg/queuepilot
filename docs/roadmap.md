@@ -1447,3 +1447,34 @@ own data dir, local auth proxy on 50492; live API on 50325 untouched):**
 
 Gates: 657/657 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
 build` clean.
+
+## Console ops — owner feedback batch (2026-11-17, branch `console-ops`)
+
+Owner could not add or remove proxies, select all profiles, create
+groups, or add Gmail accounts for the IMAP resolver from the console.
+
+- [x] **Profiles select-all + New group** (`859d597`) — header checkbox
+  selects every profile in the current view (all pages, group + search);
+  '+ New group' names a group for the selection. The batch bar's Move menu
+  already had '+ new group…', but without bulk selection it was easy never
+  to see it. Groups exist through their members (no empty groups).
+- [x] **Proxies: add, paste a list, remove, select all** (`859d597`) —
+  drawer accepts `host:port`, `host:port:user:pass` and
+  `name:host:port:user:pass` lines (optional scheme prefix; ':' allowed in
+  passwords); per-line results never echo a line back; per-row delete,
+  select-all, Test selected, Delete selected; test results show exit IP and
+  location. No API change.
+- [x] **Email accounts for the IMAP resolver** (`706d483`, form layout fix
+  `a73ac5e`) — Settings → Integrations: add several Gmail/IMAP accounts
+  (email, app password, server, port), Test login, Remove. Password only in
+  the SecretStore, write-only; `imap:you@gmail.com` resolves through a
+  stored account. Separate from `/aliases`: the scripting lock is
+  unchanged.
+
+Verified: `e2e-smoke` phase 4b clicks select-all, + New group, pastes two
+dummy loopback proxies, deletes them via select-all, and adds then removes
+an email account — GREEN. Visual check of all three screens on a scratch
+API (fake profiles, no real credentials); the email form's Add button was
+cut off at narrow widths and fixed. Gates: 661/661 API, 20/20 server, tsc
+and build clean.
+
