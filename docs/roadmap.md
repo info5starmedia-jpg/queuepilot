@@ -1069,6 +1069,16 @@ The GPT-5.4 audit is now fully actioned (findings 1–6). Finding 7's
 UX, xlsx import — remain the only open parity gaps, all owner-priority
 calls.
 
+## v0.16.2 — xlsx import (2026-11-16)
+
+✅ **The last ❌ row on the Jancy parity sheet is closed** (`3408090`).
+`POST /profiles/import-xlsx` runs the first worksheet through the same
+row pipeline as CSV (one mapping, one report shape); the dashboard file
+picker auto-routes by extension. `docs/parity.md` now has **zero missing
+rows** — every Jancy capability is ✅ or an annotated owner-approved
+deferral. Remaining optional parity polish (not gaps): tab-ops depth and
+warmup console UX.
+
 ## v0.14 — Persona fields / 2FA layer (first item)
 
 See P7 Jancy-gap item 5 above for sub-steps and goal. The v0.14 list is
