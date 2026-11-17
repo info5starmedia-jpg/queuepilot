@@ -1684,3 +1684,19 @@ foundation the agent and family rollout sit on.
   needed)? Always-on?
 - Rough team size (affects token/account design, not architecture).
 - Confirm L1 may LAUNCH profiles (stated above as yes).
+
+## P9 — Local AI agent (scoped 2026-11-17, NOT started — queued behind hosted deployment)
+
+Trigger: AliasMode materially advanced their hosted agent (beta.75,
+scan 2026-11-17). Owner decisions recorded:
+- **Brain: LOCAL model** (owner directive 2026-11-17) — runs on the
+  operator's hardware (Ollama-class, ~14B class model in 32 GB RAM),
+  free, nothing leaves the machine. Provider interface stays pluggable
+  (cloud key slot exists for later, owner-provided, off for family).
+- **Body**: agent loop over our own local API + JYL + plugins — the tools
+  already exist; no wallet, no accounts, no credits, no phone-home.
+- **Guardrails non-negotiable**: tool-allowlist, confirm-before-destructive,
+  secrets never in the prompt surface (proxy passwords stay behind the
+  relay/DPAPI), full action log.
+- Priority: AFTER the hosted team deployment track (it is the foundation
+  family rollout and the agent's audience both sit on).
