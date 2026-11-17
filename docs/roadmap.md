@@ -1762,3 +1762,52 @@ scan 2026-11-17). Owner decisions recorded:
   ashburn→us-east `{"renamed":2}`, us-east→germany
   `409 CONFLICT group "germany" already exists`. Rename is a native
   `prompt()` in the UI, so it was driven through the API, not the browser.
+- [x] **B3a — Script/zip → plugin import, API** (`b96f672`) —
+  `POST /plugins/import?filename=<name>`, raw bytes as
+  `application/octet-stream` (5 MB cap). `.mjs`/`.js` → minimal plugin
+  (package.json from the filename, entry stored as `index.mjs`); `.zip` →
+  one plugin folder (package.json at root or in one top folder; `main` must
+  exist and be a safe path). Gate: scripting opt-in + API token as an
+  `onRequest` hook (refused before the body is read) + the existing
+  origin-deny on `/plugins/*`. Own zip reader (central directory,
+  stored/deflate, CRC checked): refuses traversal, absolute/drive paths,
+  `.` segments, NUL, symlinks/special files, duplicates, encryption, ZIP64,
+  >500 entries, >20 MB expanded. Staging folder + zip-slip re-check +
+  rename; a rejection leaves nothing. Lands disabled AND unimported: the
+  registry now lists a switched-off plugin without importing it (top-level
+  code/onInit first run on enable; a failing first import reverts the
+  toggle); dot-folders never load; `addInstalled()` avoids rescanning the
+  others. Per-file result 201 / 422 `{ installed, rejected: [{file, reason}] }`.
+  11 new tests (wrap, zip, 7 hostile archives write nothing, caps/junk/dup,
+  not-imported-until-enabled, staging skipped, gate closed 403 / no token
+  401 / token-less install 403, cross-site + foreign Origin 403, 201
+  happy path, 422 loud). Gates 700/700 API, 20/20 server, tsc, build.
+  Live (scratch API 50477 in token mode with a throwaway token):
+  `gate closed 403 FORBIDDEN … enable Settings → Automation → Scripting
+  endpoints first`; `no token 401`; `browser origin 403 cross-origin
+  requests to scripting endpoints are refused`; `import .mjs 201
+  {"id":"greet","enabled":false}`; `import .zip 201 {"id":"zip-tool"}`;
+  `traversal zip 422 path traversal rejected: ../../owned.mjs` (no file
+  written outside plugins/, no staging leftovers); `duplicate 422 already
+  installed`; list → both `enabled:false, loaded:false`;
+  `plugin.greet.greet` → `#NO RESOLVER` until enable, then
+  `hello from an imported script`.
+- [ ] **B3b — Import UI ("Import plugin" button, "Save as plugin")** —
+  BLOCKED on an owner decision, not built. Two facts: (1) the dashboard
+  has no Plugins view and no script runner today (plugins appear only as
+  two Settings → Automation fields), so "Save as plugin" has nothing to
+  attach to; (2) the scripting gate requires `SPECTRA_API_TOKEN`, and with
+  a token set the bearer hook covers every route except `/health` — the
+  dashboard page itself answers **401** (measured live above), and its
+  `api()` sends no Authorization header. So a dashboard button can never
+  reach `/plugins/import` under the gate this brief makes non-negotiable.
+  Options for the owner: (a) keep import CLI/API-only (works today:
+  `curl -H "Authorization: Bearer $SPECTRA_API_TOKEN" --data-binary
+  @my.mjs -H "content-type: application/octet-stream"
+  "http://127.0.0.1:50325/plugins/import?filename=my.mjs"`); (b) let the
+  dashboard authenticate — serve its static assets without the token and
+  have it ask for the token once (sessionStorage) and send it as a Bearer
+  header; that changes the auth boundary, needs its own review, and also
+  makes the rest of the dashboard usable in token mode; (c) a separate
+  loopback-only "owner session" mechanism. Recommendation: (b), as its own
+  reviewed task, then the Plugins card (list, enable toggle, Import).
