@@ -1740,3 +1740,25 @@ scan 2026-11-17). Owner decisions recorded:
   `{"added":2,"skipped":1,"errors":[]}`; no `password` field in any list
   response. The browser file picker itself was not driven by automation
   (it reads the file with `File.text()` and posts the same JSON).
+- [x] **B2 — Proxy groups** (`46f1404`) — profile-groups model on proxies.
+  Migration `011-proxy-groups` adds `proxies.grp` (NOT NULL, default
+  `'default'`); test rolls a DB back to pre-011, inserts a proxy, migrates →
+  `{ grp: "default" }`. Group on create/edit/import; `GET /proxies?group=`
+  (API filter; the dashboard filters its full list client-side to draw the
+  tab counts); `GET /proxy-groups` → `{ group, total, inUse }`;
+  `POST /proxy-groups/rename` (409 on merge); `POST /proxies/batch-move`
+  (ids checked first, moves go through `update()` so secrets keep their
+  handling). A proxy-provider refresh keeps each proxy's group (host+port).
+  Dashboard: group chip tabs with counts + ✎ rename, Group column, "Move to
+  group" for the selection (select-all = visible tab), Group field in the
+  Import dialog, empty-group message. 8 new tests; gates 689/689 API (one
+  rerun after the A1 worker-exit flake hit `proxy-relay.test.ts`), 20/20
+  server, tsc, build; e2e GREEN (32, incl. move-to-group and tab switch).
+  Live (scratch API 50477, dummy TEST-NET proxies): API import into
+  `ashburn` (3) + dashboard import into `germany` (2, "2 added · 0 skipped
+  · 0 errors"); germany tab showed only its 2 rows; ticked one ashburn row,
+  Move to group → germany: `/proxy-groups` →
+  `[{"group":"ashburn","total":2},{"group":"germany","total":3}]`; rename
+  ashburn→us-east `{"renamed":2}`, us-east→germany
+  `409 CONFLICT group "germany" already exists`. Rename is a native
+  `prompt()` in the UI, so it was driven through the API, not the browser.
