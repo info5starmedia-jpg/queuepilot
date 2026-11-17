@@ -54,6 +54,15 @@ These are enforced by construction, and each has a test:
    identity is never killed; the run row says the engine may still be
    running. (macOS has no `/proc`: tokens are null there, so everything is
    `unknown` until the macOS/Linux port.)
+7. **A dead relay port stays ours.** A proxied fury engine sends all its
+   traffic to `--proxy-server=127.0.0.1:<relay port>`, and the relay lives
+   in the API process. After a restart the adopted engine fails closed
+   while that port is empty — but whatever binds it next would receive the
+   profile's traffic (a new relay landing there would route one profile
+   through another's proxy). Boot therefore holds every adopted run's dead
+   relay port with a placeholder that answers 502, until the run stops or
+   crashes; `/profiles/:id/egress` reports `relay: lost-held` instead of
+   presenting the launch exit IP as current.
 
 ## Why synchronous SQLite
 

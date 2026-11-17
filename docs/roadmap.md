@@ -194,7 +194,9 @@ verification owed before calling the ENGINE done.
   selectable for A/B fallback. Remaining detection polish (warnings, not
   failures): deviceMemory↔heap coherence FIXED same day via the host-memory
   clamp in identity generation (`hostMemoryGb()`); canvas-noise cross-context
-  presentation is the one open engine-side item.
+  presentation was the one open engine-side item — closed in fury-core
+  0.5.5-qp.4 (`3c89fc9`, v0.16 item 8c), re-verified 2026-11-17 (Phase 2
+  hardening below).
 
 ## P7 — Post-engine batch (parity audit PASSED 2026-11-14 — this batch is now unblocked)
 
@@ -1301,3 +1303,66 @@ existing `detect-test` profiles were never touched.
 
 Gates on the final branch: 639/639 API tests (626 + 10 view wiring + 3 api
 helper), 20/20 server, `tsc --noEmit` clean, `npm run build` clean.
+
+## Phase 2 hardening — adopted-proxy guard, console smoke, flakes, canvas re-check (DONE 2026-11-17, branch `phase2-hardening`)
+
+Follow-ups the owner approved after the warmup console. This branch merges
+`warmup-console` (the console smoke needs its `api()` fix `04b6efd`), so
+merge `warmup-console` first or merge this branch alone — both carry it.
+Every box: code + tests + docs + live verification + the commit hash.
+
+- [x] **Adopted proxied engine: dead relay port held** (`a4a38ed`) — live
+  finding below. `holdRelayPort()` placeholder (502 to everyone, port kept
+  from any other process); `guardAdoptedRelays()` at boot; released on
+  stop/crash; `/profiles/:id/egress` gains `relay` + `note`; `/metrics`
+  gains `relaysHeld` / `relaysUnguarded`. 7 tests. Architecture invariant 7.
+- [x] **Console smoke in a real browser** (`da4349b`) — `e2e-smoke` phase 4b
+  (`scripts/console-smoke.mjs`) loads the dashboard in a headless Chromium
+  over CDP (no new dependency) and clicks Start, Stop, Delete, W → Warmups,
+  recipe Delete, checking each effect through the API and that the page
+  threw nothing. Owner lifted the `scripts/` guard for this item.
+- [x] **proxy-relay ECONNRESET flake** (`7bd8d1f`) — test fixtures, not the
+  relay: the fake upstreams' sockets had no error listener. 3/12 runs red
+  before, 0/15 after.
+- [ ] **vitest "Worker exited unexpectedly"** — NOT fixed. Seen in both
+  suites on untouched `main` too (server suite about 1 run in 6 once,
+  0/20 isolated today). No `node.exe` crash event and no Defender
+  detection in the last two days; no test kills a PID it does not own.
+  Most likely the worker process is ended from outside (endpoint AV is a
+  candidate, not proven). Left open rather than masked with retries.
+- [x] **Canvas cross-context item** — already fixed in fury-core
+  0.5.5-qp.4 (`3c89fc9`, manifest `c6553ea`); this item's docs were stale.
+  Re-verified 2026-11-17 on the installed qp.4 binary:
+  `engine/verify/verify-0030.py` **21/21 PASS**, including the putImageData
+  round-trip AliasMode checks (0 of 16384 bytes differ) and both controls.
+
+**Live verification — adopted proxied engine (2026-11-17, fury qp.4,
+SCRATCH API on 50477 with its own data dir; every API process killed was
+the scratch instance, PID read from the 50477 listener; the live API on
+50325 was never addressed).** A recording upstream proxy (basic auth) on
+127.0.0.1:50490 stood in for a real proxy.
+
+| Check | Result |
+| --- | --- |
+| Proxied launch, navigate (API alive) | page loads; upstream saw the CONNECTs |
+| Kill API, navigate a fresh URL (`main` code) | `ERR_PROXY_CONNECTION_FAILED`; upstream saw nothing — **fails closed** |
+| Credential-free proxy bound on the dead relay port, navigate | **page loads through it** — the squatter received the CONNECTs |
+| Restart API on this branch | `recovery: … held=1 unguarded=0`; a squatter bind now gets `EADDRINUSE` |
+| Navigate a fresh URL | `ERR_TUNNEL_CONNECTION_FAILED`; upstream saw nothing |
+| `GET /profiles/:id/egress` | `relay: "lost-held"` + note; `/metrics` `relaysHeld: 1` |
+| Stop the adopted run | engine gone, `lastError: null`, port released |
+
+**Console smoke control:** against the old `api()` helper (`300caca`)
+phase 4b goes RED on Stop, Delete and recipe Delete; on this branch GREEN
+(headless fury qp.4, Chrome/157).
+
+**Found, not fixed (outside this item — proposed separately):** launch
+snapshots under `<dataDir>/snapshots/` store the launch proxy URL with
+its password in plain text (`launch-identity.service.ts` writes
+`args.proxyUrl` verbatim), although proxy passwords have lived in DPAPI
+since v0.12.5. The API response redacts it; the file does not.
+
+Gates on the final branch: 646/646 API tests, 20/20 server, `tsc
+--noEmit` clean, `npm run build` clean; `node scripts/e2e-smoke.mjs` GREEN
+including phase 4b.
+
