@@ -103,6 +103,9 @@ export class BrowserLifecycleService {
    * (Browser.close, graceful kill, forced kill) before the next escalation.
    */
   private adoptedStopGraceMs = 10_000;
+  /** Adopted-run watcher (D-002 follow-up); null when nothing is adopted. */
+  private adoptedWatcher: ReturnType<typeof setInterval> | null = null;
+  private adoptedWatchIntervalMs = 15_000;
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
   /**
@@ -786,7 +789,67 @@ export class BrowserLifecycleService {
     this.recoveryCounters.runsAdopted += adopted;
     this.recoveryCounters.runsAdoptedUnverified += unverified;
     this.recoveryCounters.runsReconciledCrashed += crashed;
+    if (adopted > 0) this.startAdoptedWatcher();
     return { adopted, crashed, unverified };
+  }
+
+  /**
+   * Adopted runs have no session, so nothing tells us when their engine
+   * exits — without this they would read "running" until the next API boot.
+   * One unref'd timer re-checks them; it exists only while adopted runs do.
+   */
+  private startAdoptedWatcher(): void {
+    if (this.adoptedWatcher) return;
+    let tick = 0;
+    this.adoptedWatcher = setInterval(() => {
+      // Liveness is a cheap syscall and runs every tick. Proving identity
+      // costs a blocking OS query, so PID reuse is checked every 4th tick.
+      this.checkAdoptedRuns(++tick % 4 === 0);
+    }, this.adoptedWatchIntervalMs);
+    this.adoptedWatcher.unref?.();
+  }
+
+  /** Stop watching adopted runs (also self-invoked when none remain). */
+  stopAdoptedWatcher(): void {
+    if (this.adoptedWatcher) clearInterval(this.adoptedWatcher);
+    this.adoptedWatcher = null;
+  }
+
+  /**
+   * Re-check every sessionless running run against the OS. Dead engines are
+   * marked crashed through the same path as boot reconciliation; with
+   * `verifyIdentity` a live PID must also still carry our start token (a
+   * mismatch means the engine died and a stranger inherited the PID).
+   * "unknown" stays adopted — never a guessed death. Returns how many runs
+   * were marked crashed.
+   */
+  checkAdoptedRuns(verifyIdentity = true): number {
+    let crashed = 0;
+    let watching = 0;
+    for (const run of this.runs.listOccupying()) {
+      // Has a session → its exit promise is the watcher. "launching" → a
+      // start is in flight and the session is not registered yet.
+      if (run.status !== "running" || this.sessions.has(run.profileId)) continue;
+      const identity = checkProcessIdentity(
+        run.pid,
+        verifyIdentity ? run.processToken : null,
+      );
+      if (identity === "dead" || identity === "mismatch") {
+        this.markCrashed(
+          run,
+          identity === "mismatch"
+            ? "adopted engine exited and its PID was reused by another process"
+            : "adopted engine process exited",
+          "adopted engine gone",
+        );
+        crashed++;
+      } else {
+        watching++;
+      }
+    }
+    this.recoveryCounters.runsReconciledCrashed += crashed;
+    if (watching === 0) this.stopAdoptedWatcher();
+    return crashed;
   }
 
   /** A run whose engine is gone without the API seeing its exit. */
