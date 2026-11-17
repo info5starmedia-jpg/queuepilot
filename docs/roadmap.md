@@ -1316,6 +1316,11 @@ Every box: code + tests + docs + live verification + the commit hash.
   from any other process); `guardAdoptedRelays()` at boot; released on
   stop/crash; `/profiles/:id/egress` gains `relay` + `note`; `/metrics`
   gains `relaysHeld` / `relaysUnguarded`. 7 tests. Architecture invariant 7.
+- [x] **Console shows a lost relay** (`afee572`) — `batch-state` carries
+  `relay` per profile and the Profiles grid badges the row "proxy lost —
+  restart" (held) or "proxy port taken — stop now" (unguarded). Live:
+  proxied launch → scratch API killed and restarted → the grid row shows
+  "proxy lost — restart" → Stop closed the engine. 1 test.
 - [x] **Console smoke in a real browser** (`da4349b`) — `e2e-smoke` phase 4b
   (`scripts/console-smoke.mjs`) loads the dashboard in a headless Chromium
   over CDP (no new dependency) and clicks Start, Stop, Delete, W → Warmups,
@@ -1362,7 +1367,7 @@ its password in plain text (`launch-identity.service.ts` writes
 `args.proxyUrl` verbatim), although proxy passwords have lived in DPAPI
 since v0.12.5. The API response redacts it; the file does not.
 
-Gates on the final branch: 646/646 API tests, 20/20 server, `tsc
+Gates on the final branch: 647/647 API tests, 20/20 server, `tsc
 --noEmit` clean, `npm run build` clean; `node scripts/e2e-smoke.mjs` GREEN
 including phase 4b.
 
