@@ -40,6 +40,8 @@ export class LaunchIdentityService {
     engineKind: string;
     /** Egress facts the runtime measured at launch (relay/exit/WebRTC). */
     egress?: LaunchIdentitySnapshot["egress"];
+    /** Where the run's timezone came from (see the snapshot schema). */
+    timezoneSource?: LaunchIdentitySnapshot["timezoneSource"];
   }): LaunchIdentitySnapshot {
     const snapshot: LaunchIdentitySnapshot = {
       id: randomUUID(),
@@ -53,6 +55,7 @@ export class LaunchIdentityService {
       proxyUrl: stripProxyPassword(args.proxyUrl),
       proxySource: args.proxySource,
       ...(args.egress ? { egress: args.egress } : {}),
+      ...(args.timezoneSource ? { timezoneSource: args.timezoneSource } : {}),
       capturedAt: new Date().toISOString(),
     };
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);

@@ -1478,3 +1478,34 @@ API (fake profiles, no real credentials); the email form's Add button was
 cut off at narrow widths and fixed. Gates: 661/661 API, 20/20 server, tsc
 and build clean.
 
+## Browser timezone follows the proxy (2026-11-17, branch `proxy-timezone`)
+
+Owner testing 7 ISP proxies (Ashburn, VA) found a proxied profile ran on its
+fingerprint's default clock (UTC unless pinned) — a contradiction of the
+exit IP's location that checkers flag.
+
+- [x] **Timezone follows the proxy's exit IP** (`5634c3e`) — every launch
+  picks the browser timezone: profile pin > the proxy's own timezone field >
+  the exit IP's timezone looked up through the launch proxy (same geo echo
+  as the proxy Test, 8 s budget) > identity default. A failed lookup never
+  fails a launch. Per launch only; the snapshot records the identity the
+  engine got plus `timezoneSource`, and `/profiles/:id/egress` reports both.
+  6 tests.
+
+**Live (scratch API on 50477, fury qp.4, a local recording proxy — the
+owner's 7 proxies' passwords live only in the live app's DPAPI store):** a
+fresh profile with stored timezone `UTC` opened with the page reporting
+`America/Toronto` (GMT-0500), `/egress` `timezoneSource: exit-ip`,
+attestation `match`, stored identity still `UTC` afterwards.
+
+**Owner's proxies (69.33.225.30–36), 2026-11-17:** all 7 alive (~86 ms),
+static, no IPv4/IPv6/WebRTC/DNS leaks. Physically in Ashburn, VA (28.7 ms
+connect, same as AWS us-east-1), but their public records disagree: ARIN
+lists the /24 under a private residence in Brampton, ON (ip-api and iphey
+follow it), reverse DNS is still `*.sjc.megapath.net` (IP2Location and
+ipapi.co say San Jose), ipinfo says Leesburg, VA. Only the provider can fix
+those (ARIN record, PTR names, an RFC 8805 geofeed). Re-test on the live
+app once this branch is deployed.
+
+Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
+
