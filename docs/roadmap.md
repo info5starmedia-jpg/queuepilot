@@ -1371,3 +1371,39 @@ Gates on the final branch: 647/647 API tests, 20/20 server, `tsc
 --noEmit` clean, `npm run build` clean; `node scripts/e2e-smoke.mjs` GREEN
 including phase 4b.
 
+## Phase 2 — Tab-ops depth, slice 1 (DONE 2026-11-17, branch `tab-ops-depth`)
+
+Built on `phase2-hardening` (the console needs the `api()` fix). Merge
+order: `warmup-console` → `phase2-hardening` → `tab-ops-depth`, or this
+branch alone (it carries both).
+
+- [x] **Per-tab reload, auto-reload, duplicate, screenshot** (`16cf765`) —
+  `POST …/tabs/:tabId/reload`, `POST …/auto-reload {intervalSec: 0 | 5–3600}`,
+  `POST …/duplicate` (related tab → same session partition),
+  `GET …/screenshot` (image/png). Real engines attach to the tab's target
+  and send `Page.*` on that page session, then detach. Auto-reload is
+  in-memory and dies with the tab, the run or the engine. Console Tabs view:
+  per-row ↻ / ⎘ / 📷 / ✕ and an auto-reload picker; screenshots open in a
+  drawer. 7 tests. Parity-jancy §4 rows updated.
+- [x] **Real-process test budget** (`11cb553`) — the adopted-stop suites
+  get 60 s per test; one loaded full run pushed a relay test past 30 s.
+
+**Live verification (2026-11-17, fury qp.4, scratch API on 50477 with its
+own data dir, throwaway profile, console served by that API):**
+
+| Check | Result |
+| --- | --- |
+| Tabs view row | ↻ ⎘ 📷 ✕ actions + auto-reload picker on the open tab |
+| ↻ Reload | page `performance.timeOrigin` moved forward (a real reload) |
+| Auto-reload 15 s | listed `autoReloadSec: 15`; origin advanced by 15.0 s between reloads |
+| Auto-reload off | origin unchanged over the next 20 s |
+| ⎘ Duplicate | second open tab, same URL, same partition (`66fc37a4`) |
+| 📷 Screenshot | drawer opened with a 1334×585 capture of the page |
+
+Still open on parity-jancy §4 (not in this slice): per-tab move /
+set-color / set-profile / timezone, named windows + max tabs/window,
+closed-tab restore, Tab Studio, proxy-matched bulk-open, tab strings.
+
+Gates: 654/654 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
+build` clean.
+
