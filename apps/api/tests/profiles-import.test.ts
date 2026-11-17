@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
 import {
   importProfilesCsv,
+  importProfilesXlsx,
   parseCsv,
   parseProxySpec,
 } from "../src/application/profiles/profile-import.js";
@@ -121,6 +123,88 @@ describe("POST /profiles/import", () => {
     expect(report.succeeded).toBe(1);
     const list = await app.inject({ method: "GET", url: "/profiles" });
     expect(list.json().profiles.map((p: { name: string }) => p.name)).toContain("http-alice");
+  });
+});
+
+/** Build a real .xlsx in memory (SheetJS), the way an operator's file would. */
+function makeXlsx(rows: (string | number)[][]): Buffer {
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Profiles");
+  return XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
+describe("xlsx import (last Jancy parity row)", () => {
+  it("runs the same pipeline as CSV: creates, reuses proxies, upserts by name", () => {
+    const { profiles, proxies } = makeTestContext();
+    const xlsx = makeXlsx([
+      ["name", "proxy", "group", "timezone"],
+      ["xl-alice", "1.2.3.4:8080:u:p", "g1", "America/Toronto"],
+      ["xl-bob", "1.2.3.4:8080:u:p", "g2", ""],
+    ]);
+    const first = importProfilesXlsx(profiles, proxies, xlsx);
+    expect(first.errors).toEqual([]);
+    expect(first.succeeded).toBe(2);
+    expect(proxies.list()).toHaveLength(1); // identical proxy reused
+    expect(profiles.list()).toHaveLength(2);
+    expect(profiles.list().find((p) => p.name === "xl-alice")?.group).toBe("g1");
+
+    const again = importProfilesXlsx(profiles, proxies, xlsx);
+    expect(again.results.every((r) => r.action === "updated")).toBe(true);
+    expect(profiles.list()).toHaveLength(2);
+  });
+
+  it("dry-run writes nothing", () => {
+    const { profiles, proxies } = makeTestContext();
+    const report = importProfilesXlsx(
+      profiles,
+      proxies,
+      makeXlsx([["name"], ["ghost"]]),
+      { dryRun: true },
+    );
+    expect(report.succeeded).toBe(1);
+    expect(report.results[0]!.action).toBe("would-create");
+    expect(profiles.list()).toHaveLength(0);
+  });
+
+  it("a bad row fails only its own row", () => {
+    const { profiles, proxies } = makeTestContext();
+    const report = importProfilesXlsx(
+      profiles,
+      proxies,
+      makeXlsx([
+        ["name", "proxy"],
+        ["ok", ""],
+        ["broken", "not-a-proxy"],
+      ]),
+    );
+    expect(report.succeeded).toBe(1);
+    expect(report.errors).toHaveLength(1);
+    expect(report.errors[0]!.name).toBe("broken");
+  });
+
+  it("garbage bytes are a validation error, not a crash", () => {
+    const { profiles, proxies } = makeTestContext();
+    expect(() => importProfilesXlsx(profiles, proxies, Buffer.from("definitely not a zip"))).toThrow(
+      expect.objectContaining({ code: "VALIDATION_FAILED" }),
+    );
+  });
+
+  it("POST /profiles/import-xlsx imports over HTTP", async () => {
+    const { app } = makeTestContext();
+    const xlsx = makeXlsx([["name", "email"], ["http-xl", "xl@example.com"]]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/profiles/import-xlsx",
+      payload: { xlsx: xlsx.toString("base64") },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().succeeded).toBe(1);
+    const list = await app.inject({ method: "GET", url: "/profiles" });
+    const found = list
+      .json()
+      .profiles.find((p: { name: string; email: string }) => p.name === "http-xl");
+    expect(found.email).toBe("xl@example.com");
   });
 });
 

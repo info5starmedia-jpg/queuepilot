@@ -662,25 +662,60 @@ function renderImportResult(data, applied) {
 }
 
 async function runImport(dryRun) {
-  const csv = $("#import-csv").value.trim();
-  if (!csv) return;
-  const data = await api("/profiles/import", {
-    method: "POST",
-    body: JSON.stringify({
-      csv,
-      dryRun,
-      upsert: $("#import-upsert").checked,
-    }),
-  });
+  // An .xlsx file picked in the file input takes the workbook endpoint;
+  // otherwise the textarea text goes through the CSV pipeline. Both share
+  // the same report shape, so rendering is identical.
+  let data;
+  if (pendingXlsx) {
+    data = await api("/profiles/import-xlsx", {
+      method: "POST",
+      body: JSON.stringify({
+        xlsx: pendingXlsx,
+        dryRun,
+        upsert: $("#import-upsert").checked,
+      }),
+    });
+  } else {
+    const csv = $("#import-csv").value.trim();
+    if (!csv) return;
+    data = await api("/profiles/import", {
+      method: "POST",
+      body: JSON.stringify({
+        csv,
+        dryRun,
+        upsert: $("#import-upsert").checked,
+      }),
+    });
+  }
   renderImportResult(data, !dryRun);
   $("#import-apply").disabled = dryRun ? data.succeeded === 0 : true;
-  if (dryRun) lastImportCsv = csv;
+  if (dryRun) {
+    lastImportCsv = $("#import-csv").value.trim();
+    lastImportXlsx = pendingXlsx;
+  }
   if (!dryRun) await loadProfiles();
 }
+
+/** Base64 of the last picked .xlsx (null = CSV mode). */
+let pendingXlsx = null;
+let lastImportXlsx = null;
 
 $("#import-file").addEventListener("change", (e) => {
   const f = e.target.files?.[0];
   if (!f) return;
+  if (/\.xlsx$/i.test(f.name)) {
+    // Workbook mode: read bytes and keep them base64 for the import call.
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingXlsx = String(reader.result ?? "").split(",")[1] ?? null;
+      $("#import-csv").value = "";
+      $("#import-apply").disabled = true;
+      $("#import-result").innerHTML = `<p class="hint">${esc(f.name)} loaded — preview, then apply</p>`;
+    };
+    reader.readAsDataURL(f);
+    return;
+  }
+  pendingXlsx = null;
   const reader = new FileReader();
   reader.onload = () => {
     $("#import-csv").value = String(reader.result ?? "");
@@ -702,7 +737,12 @@ $("#import-preview").addEventListener("click", async () => {
 });
 
 $("#import-apply").addEventListener("click", async () => {
-  if ($("#import-csv").value.trim() !== lastImportCsv) {
+  // The import source must be byte-identical to what passed the dry run —
+  // text edited or a different file picked re-locks the button.
+  if (
+    $("#import-csv").value.trim() !== lastImportCsv ||
+    pendingXlsx !== lastImportXlsx
+  ) {
     $("#import-apply").disabled = true;
     return;
   }

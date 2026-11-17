@@ -12,10 +12,18 @@ import type { TotpService } from "../application/profiles/totp.service.js";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 import type { ProxyProviderService } from "../application/providers/provider.service.js";
 import { rotationLinkOf } from "../application/profiles/rotation-link.js";
-import { importProfilesCsv } from "../application/profiles/profile-import.js";
+import { importProfilesCsv, importProfilesXlsx } from "../application/profiles/profile-import.js";
 
 const ImportBodySchema = z.object({
   csv: z.string().min(1).max(2_000_000),
+  dryRun: z.boolean().default(false),
+  upsert: z.boolean().default(true),
+});
+
+/** XLSX arrives base64-encoded in the JSON body (the API takes no
+ *  multipart); ~10 MB of workbook is far beyond any real import. */
+const ImportXlsxBodySchema = z.object({
+  xlsx: z.string().min(1).max(14_000_000),
   dryRun: z.boolean().default(false),
   upsert: z.boolean().default(true),
 });
@@ -43,6 +51,16 @@ export function registerProfileRoutes(
   app.post("/profiles/import", async (req) => {
     const body = ImportBodySchema.parse(req.body);
     return importProfilesCsv(service, proxies, body.csv, {
+      dryRun: body.dryRun,
+      upsert: body.upsert,
+    });
+  });
+
+  // XLSX variant of the same import: first worksheet, same header columns,
+  // same row pipeline, same report shape (the last ❌ Jancy parity row).
+  app.post("/profiles/import-xlsx", async (req) => {
+    const body = ImportXlsxBodySchema.parse(req.body);
+    return importProfilesXlsx(service, proxies, Buffer.from(body.xlsx, "base64"), {
       dryRun: body.dryRun,
       upsert: body.upsert,
     });

@@ -106,7 +106,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | TOTP 2FA per profile | ✅ | ✅ persona TOTP field + `TotpService` + `/profiles/:id/totp` routes (v0.16) | ✅ |
 | Portable profile bundles (cross-machine) | ✅ | ✅ v0.16 — oscrypt key travels with the profile (P7.1) + session bundles v2 (tabs/proxy ref/metadata) | ✅ |
 | Cookie import/export (Netscape/JSON), profile trash/restore | ✅ | ✅ cookie formats v0.15.1 (`/profiles/:id/cookies/import|export`); trash → restore → permanent-delete-from-trash-only (v0.16) | ✅ |
-| xlsx import | ✅ | ❌ | ❌ P3 |
+| xlsx import | ✅ | ✅ `POST /profiles/import-xlsx` — first worksheet through the same row pipeline as CSV; dashboard file picker auto-routes by extension | ✅ |
 | socks5 upstream proxies | ✅ | ✅ relay speaks RFC 1928 + 1929; live `egress-via-socks5` PASS | ✅ P7.2 |
 
 ### P0 — the proxy leak (found in this audit 2026-11-10, FIXED v0.12.0)

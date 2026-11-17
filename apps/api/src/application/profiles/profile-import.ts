@@ -1,4 +1,5 @@
 import { z } from "zod";
+import * as XLSX from "xlsx";
 import { DomainError, ErrorCodes, type Profile } from "@queuepilot/contracts";
 import type { ProfileService } from "./profile.service.js";
 import type { ProxyService } from "../proxies/proxy.service.js";
@@ -203,9 +204,64 @@ export function importProfilesCsv(
   csvText: string,
   opts: { dryRun?: boolean; upsert?: boolean } = {},
 ): ImportReport {
+  return importProfileRows(profiles, proxies, parseCsv(csvText), opts);
+}
+
+/**
+ * XLSX import (the last ❌ Jancy parity row): the first worksheet is read
+ * to a string grid and run through the SAME row pipeline as CSV — one
+ * mapping, one validation story, one report shape. Cells are stringified
+ * and trimmed exactly like the CSV `col()` accessor does.
+ */
+export function parseXlsx(buffer: Buffer): string[][] {
+  // SheetJS auto-detects formats and would happily read a pasted CSV as
+  // "xlsx" — but this endpoint promises a workbook. A real .xlsx is a ZIP
+  // (local-file header PK\x03\x04); anything else is refused up front.
+  if (buffer.length < 4 || buffer.readUInt32BE(0) !== 0x504b0304) {
+    throw new DomainError(
+      ErrorCodes.VALIDATION_FAILED,
+      "file is not a .xlsx workbook (ZIP container missing)",
+    );
+  }
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(buffer, { type: "buffer" });
+  } catch {
+    throw new DomainError(
+      ErrorCodes.VALIDATION_FAILED,
+      "file is not a readable .xlsx workbook",
+    );
+  }
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) {
+    throw new DomainError(ErrorCodes.VALIDATION_FAILED, "workbook has no sheets");
+  }
+  const grid = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[sheetName]!, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: false,
+  });
+  return grid.map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? "").trim()) : []));
+}
+
+export function importProfilesXlsx(
+  profiles: ProfileService,
+  proxies: ProxyService,
+  xlsxBuffer: Buffer,
+  opts: { dryRun?: boolean; upsert?: boolean } = {},
+): ImportReport {
+  return importProfileRows(profiles, proxies, parseXlsx(xlsxBuffer), opts);
+}
+
+function importProfileRows(
+  profiles: ProfileService,
+  proxies: ProxyService,
+  rows: string[][],
+  opts: { dryRun?: boolean; upsert?: boolean } = {},
+): ImportReport {
   const dryRun = opts.dryRun ?? false;
   const upsert = opts.upsert ?? true;
-  const rows = parseCsv(csvText);
   const report: ImportReport = { dryRun, total: 0, succeeded: 0, errors: [], results: [] };
   if (rows.length === 0) {
     report.errors.push({ row: 1, name: "", message: "empty file — header row required" });
