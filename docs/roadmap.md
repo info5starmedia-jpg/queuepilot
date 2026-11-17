@@ -1811,3 +1811,56 @@ scan 2026-11-17). Owner decisions recorded:
   makes the rest of the dashboard usable in token mode; (c) a separate
   loopback-only "owner session" mechanism. Recommendation: (b), as its own
   reviewed task, then the Plugins card (list, enable toggle, Import).
+- [x] **A3 — Zero-outer-geometry window: reviewed, no code change**
+  (analysis only; no rebuild). Code review of every place our launch path
+  sizes or moves a window — none can produce a 0×0 rect:
+  `initialWindowSize` floors at 320×240 (`--window-size` is always ≥ that);
+  `claimedAvailArea` is ≥ 90% of a positive claimed screen; `fitWindow`
+  only shrinks, returns null for minimized/fullscreen/unknown bounds, and
+  `sizeAtScale` never goes below 1; `tileRects` cells are positive for any
+  realistic window count on a ≥ 800 px area; the watcher never sets bounds
+  on a window whose bounds it could not read. Measured on the bare qp.4
+  binary (fresh temp profile, `--window-size=1200,800`): normal →
+  `outer 1200×800, inner 1184×705, screenX/Y 10,10, visible`; minimized →
+  `outer 160×28, screenX/Y -32000,-32000, hidden` (Windows' minimized
+  stand-in, same as stock Chrome — not 0×0); restored → back to 1200×800;
+  a new CDP window read at +0/+50/+300 ms → `1200×800` every time; a start
+  URL's first script on 3 launches → `1200x800/1184x705/visible` (a 4th
+  launch never came up because its debug port was still held by the
+  previous instance — unrelated to geometry). Conclusion: not reproducible
+  and no branch in our code yields it; the one-off reading most likely came
+  from a page measured while its window was being created or torn down by
+  something outside the launch path. Watch item stays: if it recurs,
+  capture `Browser.getWindowBounds` for that target plus the launch args.
+- [ ] **A4 — Speech voices** — no action (owner instruction): reproducible
+  only with the owner's profile id + page. See the 2026-11-17 diagnosis
+  above (22 voices, identical to stock Chrome on this machine).
+- **D1 — Upstream scan since 2026-11-14 (report only, nothing vendored).**
+  *Fury* (`furyteamtop/fury-antidetect-browser`, our base 0.5.5): releases
+  v0.5.6 (2026-11-15) and v0.5.7 (2026-11-16). Commits: `8854023` "Real
+  HTTPS proxies: TLS to the proxy itself" — agent/src/relay.rs (+308),
+  diagnose.rs, i18n; `b03f292` a contributed macOS M5 persona JSON;
+  `2f4db0e`/`11404ec` site translations; `cc4f9c6`/`d0e5e3f` version bumps.
+  **Nothing touches `core/`**, so nothing maps onto `engine/patches`; no
+  rebuild is implied. The HTTPS-proxy fix maps to our
+  `apps/api/src/application/runtime/proxy-relay.ts`, which already dials
+  an `https` upstream with `tls.connect` (+ `secureConnect`); worth
+  borrowing only their clearer error for "a plain HTTP proxy saved as
+  https://" (`notTls`). *AliasMode* (`aliasmode/aliasmode`): release
+  v0.1.0-beta.75 (2026-11-16); 18 commits, almost all the in-app AI agent
+  (MCP host, credits, chat UI), plus Firefox add-ons/Playwright/bring-to-
+  front (`8aa62a5`, touches `launcher.ts` for Firefox profiles only) and
+  "reuse another profile's proxy (proxyFrom)" (`86ef924`). None touch the
+  files we ported (`window-fit.ts`) or the Chromium launch path. Worth
+  vendoring: nothing now; candidates for the owner: Fury's `notTls`
+  message, AliasMode's proxyFrom idea.
+- **D2 — Chromium version report (no fetch/rebase/build started).**
+  `engine/CHROMIUM_VERSION` = 157.0.8103.39. Current Chrome stable
+  (versionhistory.googleapis.com, 2026-11-18): Windows/macOS
+  **158.0.8127.37**, Linux 158.0.8127.36 (158 began serving 2026-11-17);
+  the 157 branch's latest is 157.0.8103.80; beta is 159.0.8154.6; Chrome
+  installed on this machine is 157.0.8103.51. Delta: one major behind
+  stable, and 41 patch builds behind the newest 157 (security fixes since
+  .39). The reduced UA reads `Chrome/157.0.0.0`, so pages see the major
+  only — a 157 UA is now one version behind the population as 158 rolls
+  out. A rebase to 158 needs the owner's go-ahead and an overnight build.
