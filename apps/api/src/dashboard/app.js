@@ -1620,7 +1620,7 @@ async function refreshEngineUpdate() {
     if (job?.state === "running") line += ` Installing ${esc(job.version)}…`;
     else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
     else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
-    if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" above to install.`;
+    if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" below to install.`;
     status.innerHTML = line;
     install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
     if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
