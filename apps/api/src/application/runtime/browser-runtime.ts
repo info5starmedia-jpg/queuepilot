@@ -35,6 +35,10 @@ export interface BrowserSession {
    */
   openTab?(request: OpenTabRequest): Promise<{ engineTabId: string }>;
   closeTab?(engineTabId: string): Promise<void>;
+  /** Optional per-tab ops (tab-ops depth). Absent = TABS_UNSUPPORTED. */
+  reloadTab?(engineTabId: string): Promise<void>;
+  /** PNG of the tab's current viewport. */
+  screenshotTab?(engineTabId: string): Promise<Buffer>;
   /**
    * Optional fingerprint attestation. Present = the runtime can probe a live
    * page (over CDP or equivalent) and report what the engine ACTUALLY

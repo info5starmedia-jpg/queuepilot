@@ -614,6 +614,14 @@ export class FurySession implements BrowserSession {
     return this.tabs.closeTab(engineTabId);
   }
 
+  async reloadTab(engineTabId: string): Promise<void> {
+    return this.tabs.reloadTab(engineTabId);
+  }
+
+  async screenshotTab(engineTabId: string): Promise<Buffer> {
+    return this.tabs.screenshotTab(engineTabId);
+  }
+
   async captureFingerprint(): Promise<ObservedFingerprint> {
     return captureFingerprintViaDebugPort("fury", this.debugPort, this.wsEndpoint);
   }

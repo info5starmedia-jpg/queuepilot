@@ -36,6 +36,12 @@ export const BrowserTabSchema = z.object({
   status: BrowserTabStatusSchema,
   createdAt: z.string().datetime(),
   closedAt: z.string().datetime().nullable(),
+  /**
+   * Auto-reload interval in seconds while the tab is open (Jancy's
+   * per-tab refresh for queue pages). Absent/null = off. In-memory only:
+   * it dies with the tab or the run, like every other piece of tab state.
+   */
+  autoReloadSec: z.number().int().positive().nullable().optional(),
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;
 

@@ -71,6 +71,40 @@ export class CdpTabController {
     await conn.call("Target.closeTarget", { targetId: engineTabId });
   }
 
+  /** Reload a tab (Page.reload on its attached page session). */
+  async reloadTab(engineTabId: string): Promise<void> {
+    await this.onTarget(engineTabId, (call) => call("Page.reload", {}));
+  }
+
+  /** PNG of the tab's viewport (Page.captureScreenshot). */
+  async screenshotTab(engineTabId: string): Promise<Buffer> {
+    const result = await this.onTarget(engineTabId, (call) =>
+      call<{ data: string }>("Page.captureScreenshot", { format: "png" }),
+    );
+    return Buffer.from(result.data, "base64");
+  }
+
+  /**
+   * Page-domain methods only answer on an attached page session — the
+   * browser-level socket rejects them (README "CDP session discipline").
+   * Attach (flatten), run, always detach.
+   */
+  private async onTarget<T>(
+    targetId: string,
+    fn: (call: <R>(method: string, params: Record<string, unknown>) => Promise<R>) => Promise<T>,
+  ): Promise<T> {
+    const conn = await this.ensureConnection();
+    const { sessionId } = await conn.call<{ sessionId: string }>("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    });
+    try {
+      return await fn((method, params) => conn.call(method, params, 15_000, sessionId));
+    } finally {
+      await conn.call("Target.detachFromTarget", { sessionId }).catch(() => {});
+    }
+  }
+
   /** Release every context we created and drop the connection. */
   async dispose(): Promise<void> {
     const connPromise = this.connection;

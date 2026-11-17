@@ -6,6 +6,8 @@ export interface CdpCall {
   id: number;
   method: string;
   params: Record<string, unknown>;
+  /** Set when the call was sent on an attached (flatten) target session. */
+  sessionId?: string;
 }
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -137,7 +139,7 @@ export class MockCdpServer {
     }
     if (opcode !== 0x1) return;
 
-    let msg: { id?: number; method?: string; params?: Record<string, unknown> };
+    let msg: { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string };
     try {
       msg = JSON.parse(payload.toString("utf8"));
     } catch {
@@ -148,6 +150,7 @@ export class MockCdpServer {
       id: msg.id,
       method: msg.method,
       params: msg.params ?? {},
+      ...(msg.sessionId ? { sessionId: msg.sessionId } : {}),
     };
     this.calls.push(call);
     socket.write(
@@ -191,6 +194,10 @@ export class MockCdpServer {
         };
       case "Target.closeTarget":
         return { id, result: { success: true } };
+      case "Page.reload":
+        return { id, result: {} };
+      case "Page.captureScreenshot":
+        return { id, result: { data: Buffer.from("mock-png").toString("base64") } };
       case "Target.disposeBrowserContext":
         return { id, result: {} };
       case "Network.getAllCookies":

@@ -109,6 +109,13 @@ export class BrowserLifecycleService {
    * null when the port was already taken by someone else. See holdRelayPort.
    */
   private readonly relayHolds = new Map<string, RelayPortHold | null>();
+  /** Per-tab auto-reload timers (tab id → run, interval, timer). */
+  private readonly autoReloads = new Map<
+    string,
+    { runId: string; profileId: string; sec: number; timer: ReturnType<typeof setInterval> }
+  >();
+  /** ms per auto-reload "second" — tests shrink it. */
+  private autoReloadUnitMs = 1000;
   /**
    * How long an adopted engine gets to exit after each stop request
    * (Browser.close, graceful kill, forced kill) before the next escalation.
@@ -401,6 +408,7 @@ export class BrowserLifecycleService {
       };
       this.runs.update(stopped);
       this.markProfile(profile, "idle");
+      this.clearAutoReloadsForRun(run.id);
       this.tabRegistry.clearRun(run.id); // tabs die with the run
       await this.leaseGuard?.release(profileId).catch(() => {}); // TTL reaps a lost release
       let final = stopped;
@@ -667,6 +675,7 @@ export class BrowserLifecycleService {
           // Engine may already be gone; the registry is reconciled regardless.
         }
       }
+      this.clearAutoReload(tabId);
       const closed = this.tabRegistry.markClosed(tabId);
       this.emit({
         type: "tab.closed",
@@ -687,7 +696,115 @@ export class BrowserLifecycleService {
   } {
     const run = this.runs.occupyingForProfile(profileId);
     if (!run) return { tabs: [], partitions: [] };
-    return this.tabRegistry.listForRun(run.id);
+    const listed = this.tabRegistry.listForRun(run.id);
+    return {
+      ...listed,
+      tabs: listed.tabs.map((t) => {
+        const sec = this.autoReloads.get(t.id)?.sec;
+        return sec ? { ...t, autoReloadSec: sec } : t;
+      }),
+    };
+  }
+
+  /* --------------------------- tab-ops depth --------------------------- */
+
+  /**
+   * An OPEN tab of the profile's active run plus the session that can act on
+   * it. Refuses honestly: no run, adopted run (no session), closed tab, or a
+   * runtime without the capability.
+   */
+  private requireTabOp(
+    profileId: string,
+    tabId: string,
+    capability: "reloadTab" | "screenshotTab",
+  ): { run: BrowserRun; tab: BrowserTab; session: BrowserSession; engineTabId: string } {
+    this.requireProfile(profileId);
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
+    }
+    const tab = this.tabRegistry.getForRun(run.id, tabId);
+    if (tab.status !== "open" || !tab.engineTabId) {
+      throw new DomainError(ErrorCodes.CONFLICT, `tab ${tabId} is not open`);
+    }
+    const session = this.sessions.get(profileId);
+    if (!session) {
+      throw new DomainError(
+        ErrorCodes.TABS_UNSUPPORTED,
+        `run ${run.id} was adopted after an API restart — its tab state is unknown; stop and relaunch to manage tabs`,
+      );
+    }
+    if (!session[capability]) {
+      throw new DomainError(
+        ErrorCodes.TABS_UNSUPPORTED,
+        `runtime "${this.runtime.kind}" does not implement ${capability}`,
+      );
+    }
+    return { run, tab, session, engineTabId: tab.engineTabId };
+  }
+
+  async reloadTab(profileId: string, tabId: string): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { tab, session, engineTabId } = this.requireTabOp(profileId, tabId, "reloadTab");
+      await session.reloadTab!(engineTabId);
+      return tab;
+    });
+  }
+
+  async screenshotTab(profileId: string, tabId: string): Promise<Buffer> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { session, engineTabId } = this.requireTabOp(profileId, tabId, "screenshotTab");
+      return session.screenshotTab!(engineTabId);
+    });
+  }
+
+  /**
+   * Open the tab's URL again as a RELATED tab — same session partition, so
+   * the copy shares cookies/storage (Jancy's duplicate). The URL is the one
+   * the tab was opened with; in-page navigation since is not tracked.
+   */
+  async duplicateTab(profileId: string, tabId: string): Promise<BrowserTab> {
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
+    }
+    const tab = this.tabRegistry.getForRun(run.id, tabId);
+    if (tab.status !== "open") throw new DomainError(ErrorCodes.CONFLICT, `tab ${tabId} is not open`);
+    return this.openTab(profileId, { url: tab.url ?? undefined, relatedTo: tab.id });
+  }
+
+  /**
+   * Reload a tab every `sec` seconds while it stays open (null/0 = off).
+   * In-memory: cleared when the tab closes, the run stops or the engine
+   * exits. A failed reload (page gone, engine busy) never stops the timer —
+   * the next tick tries again, like a human hitting F5.
+   */
+  async setAutoReload(profileId: string, tabId: string, sec: number | null): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { run, tab } = this.requireTabOp(profileId, tabId, "reloadTab");
+      this.clearAutoReload(tabId);
+      if (sec && sec > 0) {
+        const timer = setInterval(() => {
+          void this.reloadTab(profileId, tabId).catch(() => {});
+        }, sec * this.autoReloadUnitMs);
+        timer.unref?.();
+        this.autoReloads.set(tabId, { runId: run.id, profileId, sec, timer });
+        return { ...tab, autoReloadSec: sec };
+      }
+      return tab;
+    });
+  }
+
+  private clearAutoReload(tabId: string): void {
+    const entry = this.autoReloads.get(tabId);
+    if (entry) clearInterval(entry.timer);
+    this.autoReloads.delete(tabId);
+  }
+
+  private clearAutoReloadsForRun(runId: string): void {
+    for (const [tabId, entry] of this.autoReloads) {
+      if (entry.runId === runId) this.clearAutoReload(tabId);
+    }
   }
 
   /**
@@ -995,6 +1112,7 @@ export class BrowserLifecycleService {
       return;
     this.sessions.delete(profileId);
     this.stopLeaseRenewal(profileId);
+    this.clearAutoReloadsForRun(runId);
     this.tabRegistry.clearRun(runId); // tabs die with the engine
     const clean = code === 0;
     const final: BrowserRun = {

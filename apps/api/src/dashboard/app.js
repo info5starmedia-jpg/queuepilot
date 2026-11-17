@@ -956,6 +956,43 @@ function selectedTabIds() {
   );
 }
 
+/* tab-ops depth: per-tab reload / duplicate / screenshot / close */
+const AUTO_RELOAD_CHOICES = [[0, "off"], [15, "15 s"], [30, "30 s"], [60, "1 min"], [300, "5 min"], [900, "15 min"]];
+
+async function onTabAction(profileId, tab, act, btn) {
+  btn.disabled = true;
+  try {
+    if (act === "reload") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/reload`, { method: "POST" });
+      toast(`reloaded ${tab.url ?? tab.id}`);
+    } else if (act === "duplicate") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/duplicate`, { method: "POST" });
+    } else if (act === "close") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/close`, { method: "POST" });
+    } else if (act === "screenshot") {
+      /* fetch, not a plain <img src>: the bearer-token hook applies to images too */
+      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      }
+      const img = $("#tab-shot-img");
+      if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(await res.blob());
+      $("#tab-shot-url").textContent = tab.url ?? tab.id;
+      $("#tab-shot-modal").hidden = false;
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+  if (act === "duplicate" || act === "close") await runTabsQuery();
+}
+
+$("#tab-shot-close").addEventListener("click", () => { $("#tab-shot-modal").hidden = true; });
+$("#tab-shot-modal").addEventListener("click", (e) => { if (e.target.id === "tab-shot-modal") $("#tab-shot-modal").hidden = true; });
+
 async function runTabsQuery() {
   const profileId = $("#tabs-profile").value;
   const tbody = $("#tabs-table tbody");
@@ -988,11 +1025,25 @@ async function runTabsQuery() {
       <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">${esc(t.url ?? "—")}</td>
       <td><span class="status status-${esc(t.status)}"><span class="dot ${t.status === "open" ? "dot-on" : "dot-off"}"></span>${esc(t.status.toUpperCase())}</span></td>
       <td class="mono" style="color:var(--faint)">${esc(t.partitionId.slice(0, 8))}</td>
-      <td>${t.status === "open" ? `<button class="ghost" data-close="${esc(t.id)}">close</button>` : ""}</td>`;
-    tr.querySelector("[data-close]")?.addEventListener("click", async (ev) => {
-      ev.target.disabled = true;
-      await api(`/profiles/${profileId}/tabs/${t.id}/close`, { method: "POST" });
-      await runTabsQuery();
+      <td>${t.status === "open" ? `<select data-autoreload title="reload this tab on an interval while it stays open">${AUTO_RELOAD_CHOICES.map(([sec, label]) => `<option value="${sec}" ${Number(t.autoReloadSec ?? 0) === sec ? "selected" : ""}>${label}</option>`).join("")}</select>` : ""}</td>
+      <td>${t.status === "open" ? `<span class="row-actions">
+        <button data-tact="reload" title="reload tab">↻</button>
+        <button class="act-clone" data-tact="duplicate" title="duplicate into the same session partition">⎘</button>
+        <button class="act-edit" data-tact="screenshot" title="screenshot">📷</button>
+        <button class="act-delete" data-tact="close" title="close tab">✕</button>
+      </span>` : ""}</td>`;
+    tr.querySelectorAll("[data-tact]").forEach((b) =>
+      b.addEventListener("click", () => onTabAction(profileId, t, b.dataset.tact, b)),
+    );
+    tr.querySelector("[data-autoreload]")?.addEventListener("change", async (ev) => {
+      const intervalSec = Number(ev.target.value);
+      try {
+        await api(`/profiles/${profileId}/tabs/${t.id}/auto-reload`, { method: "POST", body: JSON.stringify({ intervalSec }) });
+        toast(intervalSec ? `auto-reload every ${intervalSec}s: ${t.url ?? t.id}` : `auto-reload off: ${t.url ?? t.id}`);
+      } catch (err) {
+        toast(err.message, "error");
+        await runTabsQuery();
+      }
     });
     tbody.appendChild(tr);
   }

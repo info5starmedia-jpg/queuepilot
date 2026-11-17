@@ -119,7 +119,7 @@
           <div class="table-wrap">
             <table class="grid" id="tabs-table">
               <thead>
-                <tr><th style="width:28px"></th><th>URL</th><th style="width:100px">Status</th><th style="width:110px">Partition</th><th style="width:80px"></th></tr>
+                <tr><th style="width:28px"></th><th>URL</th><th style="width:100px">Status</th><th style="width:110px">Partition</th><th style="width:120px">Auto-reload</th><th style="width:150px">Actions</th></tr>
               </thead>
               <tbody></tbody>
             </table>
@@ -252,6 +252,15 @@
             <span class="hint">A coherent fingerprint identity is generated automatically.</span>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- tab screenshot viewer -->
+    <div id="tab-shot-modal" class="overlay" hidden>
+      <div class="drawer" style="width:min(980px,96vw)">
+        <div class="drawer-head"><h3>Tab Screenshot</h3><button id="tab-shot-close" class="ghost">✕</button></div>
+        <div class="hint mono" id="tab-shot-url"></div>
+        <img id="tab-shot-img" alt="tab screenshot" style="max-width:100%;border:1px solid var(--border);border-radius:var(--radius)" />
       </div>
     </div>
 
