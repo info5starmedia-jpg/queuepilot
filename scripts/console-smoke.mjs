@@ -234,8 +234,44 @@ export async function runConsoleSmoke({ base, ok }) {
     ok("pasting two lines adds two proxies", Boolean(added), added ? added.map((p) => p.name).join(", ") : "");
     const named = (added ?? []).find((p) => p.name === "smoke-a");
     ok("pasted line keeps its name, user and port", Boolean(named && named.username === "user" && named.port === 9));
+    const summary = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#proxy-add-status').textContent; return t.startsWith("2 added") ? t : undefined; })()`));
+    ok("import dialog shows the added/skipped/errors summary", Boolean(summary), summary ?? "");
+    // The table reloads after the import returns; select-all acts on what is rendered.
+    await waitFor(() => page.evaluate(`document.querySelectorAll('#proxies tbody tr').length === 2`));
     await page.evaluate(`(() => {
       document.querySelector('#proxy-add-close').click();
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    // Proxy groups: move the selection into a new group via the toolbar.
+    await page.evaluate(`(() => {
+      window.prompt = () => "smoke-grp";
+      document.querySelector('#proxies-move-group').value = "__new__";
+      document.querySelector('#proxies-move').click();
+      return true;
+    })()`);
+    const grouped2 = await waitFor(async () => {
+      const list = (await api("GET", "/proxies?group=smoke-grp")).json?.proxies ?? [];
+      return list.length === 2;
+    });
+    const tabActive = await waitFor(() => page.evaluate(`document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "smoke-grp"`));
+    ok("Move to group files the selection under a new proxy group", Boolean(grouped2 && tabActive));
+    // Switching tabs keeps only selected rows the new tab still shows (All shows both).
+    await page.evaluate(`(() => {
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    await page.evaluate(`(() => { const t = document.querySelector('#proxy-tabs [data-proxy-group="all"]'); t.click(); return true; })()`);
+    const kept = await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected" && document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "all"`));
+    ok("switching to All keeps rows that are still visible selected", Boolean(kept));
+    await page.evaluate(`(() => {
+      window.prompt = () => null;
       const box = document.querySelector('#proxies-select-all');
       box.checked = true;
       box.dispatchEvent(new Event('change'));

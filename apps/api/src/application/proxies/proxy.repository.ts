@@ -17,8 +17,16 @@ interface ProxyRow {
   password: string | null;
   timezone: string | null;
   provider_id: string | null;
+  grp: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProxyGroupSummary {
+  group: string;
+  total: number;
+  /** Proxies in the group attached to at least one live profile. */
+  inUse: number;
 }
 
 function toStored(r: ProxyRow): StoredProxy {
@@ -32,6 +40,7 @@ function toStored(r: ProxyRow): StoredProxy {
     password: r.password,
     timezone: r.timezone ?? null,
     providerId: r.provider_id ?? null,
+    group: r.grp ?? "default",
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -49,10 +58,10 @@ export class ProxyRepository {
   create(p: StoredProxy): void {
     this.db
       .prepare(
-        `INSERT INTO proxies (id, name, type, host, port, username, password, timezone, provider_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO proxies (id, name, type, host, port, username, password, timezone, provider_id, grp, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.createdAt, p.updatedAt);
+      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", p.createdAt, p.updatedAt);
   }
 
   get(id: string): StoredProxy | null {
@@ -60,16 +69,42 @@ export class ProxyRepository {
     return r ? toStored(r) : null;
   }
 
-  list(): StoredProxy[] {
-    return (this.db.prepare("SELECT * FROM proxies ORDER BY created_at DESC").all() as ProxyRow[]).map(toStored);
+  /** Newest first; `group` narrows to one folder. */
+  list(group?: string): StoredProxy[] {
+    const rows =
+      group === undefined
+        ? this.db.prepare("SELECT * FROM proxies ORDER BY created_at DESC").all()
+        : this.db.prepare("SELECT * FROM proxies WHERE grp = ? ORDER BY created_at DESC").all(group);
+    return (rows as ProxyRow[]).map(toStored);
   }
 
   update(p: StoredProxy): void {
     this.db
       .prepare(
-        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, timezone=?, provider_id=?, updated_at=? WHERE id=?`,
+        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, timezone=?, provider_id=?, grp=?, updated_at=? WHERE id=?`,
       )
-      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.updatedAt, p.id);
+      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", p.updatedAt, p.id);
+  }
+
+  /** Every group with its size and how many of its proxies a live profile uses. */
+  groups(): ProxyGroupSummary[] {
+    return this.db
+      .prepare(
+        `SELECT x.grp AS "group", COUNT(*) AS total,
+                SUM(CASE WHEN EXISTS (SELECT 1 FROM profiles p WHERE p.proxy_id = x.id AND p.deleted_at IS NULL) THEN 1 ELSE 0 END) AS inUse
+           FROM proxies x GROUP BY x.grp ORDER BY x.grp ASC`,
+      )
+      .all() as ProxyGroupSummary[];
+  }
+
+  groupExists(name: string): boolean {
+    return this.db.prepare("SELECT 1 AS x FROM proxies WHERE grp = ? LIMIT 1").get(name) !== undefined;
+  }
+
+  renameGroup(from: string, to: string): number {
+    return this.db
+      .prepare("UPDATE proxies SET grp = ?, updated_at = ? WHERE grp = ?")
+      .run(to, new Date().toISOString(), from).changes;
   }
 
   delete(id: string): void {

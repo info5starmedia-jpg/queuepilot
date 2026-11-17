@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import {
   DomainError,
   EngineManifestSchema,
@@ -6,6 +5,12 @@ import {
   type EngineManifestEntry,
 } from "@queuepilot/contracts";
 import { EngineInstaller } from "../application/engine/engine-installer.js";
+import {
+  compareVersions,
+  currentPlatformTag,
+  DEFAULT_MANIFEST_URL,
+  readManifestRef,
+} from "../application/engine/engine-update.service.js";
 
 /**
  * P5.2 — `queuepilot engine update [--manifest <url|file>] [--kind k] [--yes] [--json]`
@@ -19,8 +24,7 @@ import { EngineInstaller } from "../application/engine/engine-installer.js";
  * deleting the new receipt rolls back.
  */
 
-export const DEFAULT_MANIFEST_URL =
-  "https://raw.githubusercontent.com/info5starmedia-jpg/queuepilot/main/engines.manifest.json";
+export { DEFAULT_MANIFEST_URL };
 
 export interface EngineUpdateDeps {
   enginesDir: string;
@@ -107,31 +111,9 @@ export async function runEngineUpdate(
   }
 }
 
-async function readRef(ref: string, fetchImpl: typeof fetch): Promise<string> {
-  if (/^https?:\/\//.test(ref)) {
-    const res = await fetchImpl(ref);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.text();
-  }
-  return fs.readFileSync(ref, "utf8");
-}
-
-function currentPlatformTag(): string {
-  return process.platform === "win32" ? "windows-x64" : process.platform === "darwin" ? "macos-arm64" : "linux-x64";
-}
-
-/** Segment-wise numeric compare; "-qp.N" prereleases order AFTER the base. */
-export function compareVersions(a: string, b: string): number {
-  const [ab, aq] = a.split("-qp.");
-  const [bb, bq] = b.split("-qp.");
-  const pa = ab!.split(".").map(Number);
-  const pb = bb!.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d) return d;
-  }
-  return (aq ? Number(aq) : -1) - (bq ? Number(bq) : -1);
-}
+// Shared with the dashboard's one-click update (C1).
+const readRef = readManifestRef;
+export { compareVersions };
 
 // Referenced only for typing of sorted entries.
 export type { EngineManifestEntry };

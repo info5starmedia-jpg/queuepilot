@@ -21,7 +21,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * dangerous verbs all carry one of the fingerprints above.
  */
 
-const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases"];
+// "/engine/update" (C1) installs a browser binary; a page must not be able
+// to start one either.
+const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases", "/engine/update"];
 
 function isScriptingUrl(url: string): boolean {
   const path = url.split("?")[0] ?? url;

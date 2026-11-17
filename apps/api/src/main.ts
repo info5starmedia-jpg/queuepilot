@@ -41,7 +41,7 @@ import {
   resolveFuryBinary,
 } from "./application/runtime/fury-core.runtime.js";
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
-import { buildApp } from "./app.js";
+import { buildApp, engineUpdateServiceFor } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
 import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe.js";
 import { EmailAccountService } from "./application/email/email-account.service.js";
@@ -236,7 +236,9 @@ export async function main(): Promise<void> {
     import: importCookiesViaCdp,
   }, proxies);
 
+  const engineUpdate = engineUpdateServiceFor(config, settingsService);
   const app = buildApp({
+    engineUpdate,
     config,
     profiles,
     proxies,
@@ -258,6 +260,9 @@ export async function main(): Promise<void> {
     emailAccounts,
   });
   await app.listen({ port: config.port, host: config.host });
+  // C1: version check at launch (never downloads; install is a consent-gated
+  // click). Off the startup path — a slow or unreachable server never delays boot.
+  void engineUpdate.checkAtLaunch((line) => console.log(`[queuepilot] ${line}`)).catch(() => {});
   // P7.7c: background pull sync — enabled only when Settings → Team carries
   // serverUrl + token + syncPassphrase; otherwise every tick is a no-op.
   new TeamSyncLoop({ bundles, settings: settingsService, dataDir: config.dataDir }).start();

@@ -31,6 +31,16 @@ export const EngineSettingsSchema = z.object({
   channel: z.enum(["stable", "beta"]).default("stable"),
   /** Explicit operator consent before any engine binary download. */
   downloadConsent: z.boolean().default(false),
+  /**
+   * Where the client looks for engine updates: the owner's server URL of an
+   * engines manifest (hosted-deployment track). Empty = SPECTRA_ENGINE_MANIFEST,
+   * else the repo's raw manifest. http(s) only.
+   */
+  updateUrl: z
+    .string()
+    .max(500)
+    .refine((v) => v === "" || /^https?:\/\/[^\s]+$/i.test(v), "must be an http(s) URL or empty")
+    .default(""),
 });
 export type EngineSettings = z.infer<typeof EngineSettingsSchema>;
 

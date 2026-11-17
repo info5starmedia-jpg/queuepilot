@@ -354,6 +354,11 @@ export class ProxyProviderService {
         this.secrets.delete(`proxy:${proxy.id}:password`);
       }
     }
+    // A refresh re-creates the rows; the group the owner filed each proxy
+    // under survives it (matched on host+port).
+    const priorGroup = new Map(
+      this.proxies.listByProvider(provider.id).map((p) => [`${p.host.toLowerCase()}:${p.port}`, p.group]),
+    );
     this.proxies.deleteByProvider(provider.id);
     for (const row of imported) {
       const id = randomUUID();
@@ -367,6 +372,7 @@ export class ProxyProviderService {
         password: null,
         timezone: row.timezone,
         providerId: provider.id,
+        group: priorGroup.get(`${row.host.toLowerCase()}:${row.port}`) ?? "default",
         createdAt: now,
         updatedAt: now,
       };

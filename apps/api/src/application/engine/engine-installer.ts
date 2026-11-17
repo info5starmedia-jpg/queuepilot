@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import {
   DomainError,
   ErrorCodes,
@@ -154,10 +157,10 @@ export class EngineInstaller {
       try {
         // cwd + relative name: bsdtar (Windows/macOS) would otherwise parse
         // the "C:" in an absolute path as a remote host.
-        execFileSync("tar", ["-xf", "payload.bin"], {
-          cwd: staging,
-          stdio: "pipe",
-        });
+        // Async (C1): installs now run inside the API, and a synchronous
+        // extraction of a ~280 MB engine froze every other request for its
+        // whole duration. Same tar, same args, same cwd.
+        await execFileAsync("tar", ["-xf", "payload.bin"], { cwd: staging, maxBuffer: 64 * 1024 * 1024 });
       } catch (err) {
         fs.rmSync(staging, { recursive: true, force: true });
         throw new DomainError(

@@ -1719,3 +1719,274 @@ scan 2026-11-17). Owner decisions recorded:
   relay/DPAPI), full action log.
 - Priority: AFTER the hosted team deployment track (it is the foundation
   family rollout and the agent's audience both sit on).
+
+## Phase A+B — owner gaps and watch items (2026-11-18, branch `phase-ab`)
+
+- [x] **B1 — Proxy list text import** (`dce10f2`) — `POST /proxies/import`
+  takes pasted text (JSON `{ text, type? }`) or a .txt file's bytes as
+  `text/plain` (`?type=` default scheme). Lines: `host:port`,
+  `host:port:user:pass`, optional trailing IANA timezone, `scheme://`
+  prefix, `user:pass@host:port`, the older `name:host:port:user:pass`;
+  blank lines and `#` comments ignored. Dedupes on host+port against
+  stored proxies and within the batch; response
+  `{ added, skipped, errors: [{ line, reason }] }`; one bad line never fails
+  the batch; reasons never echo the line. Dashboard: "⇪ Import proxies"
+  dialog with paste box + .txt picker and the summary. 12 new tests; gates
+  681/681 API, 20/20 server, tsc, build; e2e GREEN (30). Live (scratch API
+  50477, TEST-NET addresses, dummy creds): pasted 7 lines →
+  `3 added · 1 skipped (already listed) · 2 errors` (line 6
+  `expected host:port[:user:pass[:timezone]]`, line 7 `port out of range`);
+  timezone `America/New_York` stored and shown; .txt bytes via text/plain →
+  `{"added":2,"skipped":1,"errors":[]}`; no `password` field in any list
+  response. The browser file picker itself was not driven by automation
+  (it reads the file with `File.text()` and posts the same JSON).
+- [x] **B2 — Proxy groups** (`8725f6f`) — profile-groups model on proxies.
+  Migration `011-proxy-groups` adds `proxies.grp` (NOT NULL, default
+  `'default'`); test rolls a DB back to pre-011, inserts a proxy, migrates →
+  `{ grp: "default" }`. Group on create/edit/import; `GET /proxies?group=`
+  (API filter; the dashboard filters its full list client-side to draw the
+  tab counts); `GET /proxy-groups` → `{ group, total, inUse }`;
+  `POST /proxy-groups/rename` (409 on merge); `POST /proxies/batch-move`
+  (ids checked first, moves go through `update()` so secrets keep their
+  handling). A proxy-provider refresh keeps each proxy's group (host+port).
+  Dashboard: group chip tabs with counts + ✎ rename, Group column, "Move to
+  group" for the selection (select-all = visible tab), Group field in the
+  Import dialog, empty-group message. 8 new tests (7 in
+  `proxy-groups.test.ts`, 1 provider-refresh test in `providers.test.ts`);
+  gates 689/689 API (one
+  rerun after the A1 worker-exit flake hit `proxy-relay.test.ts`), 20/20
+  server, tsc, build; e2e GREEN (32, incl. move-to-group and tab switch).
+  Live (scratch API 50477, dummy TEST-NET proxies): API import into
+  `ashburn` (3) + dashboard import into `germany` (2, "2 added · 0 skipped
+  · 0 errors"); germany tab showed only its 2 rows; ticked one ashburn row,
+  Move to group → germany: `/proxy-groups` →
+  `[{"group":"ashburn","total":2},{"group":"germany","total":3}]`; rename
+  ashburn→us-east `{"renamed":2}`, us-east→germany
+  `409 CONFLICT group "germany" already exists`. Rename is a native
+  `prompt()` in the UI, so it was driven through the API, not the browser.
+- [x] **B3a — Script/zip → plugin import, API** (`c3161cc`) —
+  `POST /plugins/import?filename=<name>`, raw bytes as
+  `application/octet-stream` (5 MB cap). `.mjs`/`.js` → minimal plugin
+  (package.json from the filename, entry stored as `index.mjs`); `.zip` →
+  one plugin folder (package.json at root or in one top folder; `main` must
+  exist and be a safe path). Gate: scripting opt-in + API token as an
+  `onRequest` hook (refused before the body is read) + the existing
+  origin-deny on `/plugins/*`. Own zip reader (central directory,
+  stored/deflate, CRC checked): refuses traversal, absolute/drive paths,
+  `.` segments, NUL, symlinks/special files, duplicates, encryption, ZIP64,
+  >500 entries, >20 MB expanded. Staging folder + zip-slip re-check +
+  rename; a rejection leaves nothing. Lands disabled AND unimported: the
+  registry now lists a switched-off plugin without importing it (top-level
+  code/onInit first run on enable; a failing first import reverts the
+  toggle); dot-folders never load; `addInstalled()` avoids rescanning the
+  others. Per-file result 201 / 422 `{ installed, rejected: [{file, reason}] }`.
+  11 new tests (wrap, zip, 7 hostile archives write nothing, caps/junk/dup,
+  not-imported-until-enabled, staging skipped, gate closed 403 / no token
+  401 / token-less install 403, cross-site + foreign Origin 403, 201
+  happy path, 422 loud). Gates 700/700 API, 20/20 server, tsc, build.
+  Live (scratch API 50477 in token mode with a throwaway token):
+  `gate closed 403 FORBIDDEN … enable Settings → Automation → Scripting
+  endpoints first`; `no token 401`; `browser origin 403 cross-origin
+  requests to scripting endpoints are refused`; `import .mjs 201
+  {"id":"greet","enabled":false}`; `import .zip 201 {"id":"zip-tool"}`;
+  `traversal zip 422 path traversal rejected: ../../owned.mjs` (no file
+  written outside plugins/, no staging leftovers); `duplicate 422 already
+  installed`; list → both `enabled:false, loaded:false`;
+  `plugin.greet.greet` → `#NO RESOLVER` until enable, then
+  `hello from an imported script`.
+- [ ] **B3b — Import UI ("Import plugin" button, "Save as plugin")** —
+  BLOCKED on an owner decision, not built. Two facts: (1) the dashboard
+  has no Plugins view and no script runner today (plugins appear only as
+  two Settings → Automation fields), so "Save as plugin" has nothing to
+  attach to; (2) the scripting gate requires `SPECTRA_API_TOKEN`, and with
+  a token set the bearer hook covers every route except `/health` — the
+  dashboard page itself answers **401** (measured live above), and its
+  `api()` sends no Authorization header. So a dashboard button can never
+  reach `/plugins/import` under the gate this brief makes non-negotiable.
+  Options for the owner: (a) keep import CLI/API-only (works today:
+  `curl -H "Authorization: Bearer $SPECTRA_API_TOKEN" --data-binary
+  @my.mjs -H "content-type: application/octet-stream"
+  "http://127.0.0.1:50325/plugins/import?filename=my.mjs"`); (b) let the
+  dashboard authenticate — serve its static assets without the token and
+  have it ask for the token once (sessionStorage) and send it as a Bearer
+  header; that changes the auth boundary, needs its own review, and also
+  makes the rest of the dashboard usable in token mode; (c) a separate
+  loopback-only "owner session" mechanism. Recommendation: (b), as its own
+  reviewed task, then the Plugins card (list, enable toggle, Import).
+- [x] **A3 — Zero-outer-geometry window: reviewed, no code change**
+  (analysis only; no rebuild). Code review of every place our launch path
+  sizes or moves a window — none can produce a 0×0 rect:
+  `initialWindowSize` floors at 320×240 (`--window-size` is always ≥ that);
+  `claimedAvailArea` is ≥ 90% of a positive claimed screen; `fitWindow`
+  only shrinks, returns null for minimized/fullscreen/unknown bounds, and
+  `sizeAtScale` never goes below 1; `tileRects` cells are positive for any
+  realistic window count on a ≥ 800 px area; the watcher never sets bounds
+  on a window whose bounds it could not read. Measured on the bare qp.4
+  binary (fresh temp profile, `--window-size=1200,800`): normal →
+  `outer 1200×800, inner 1184×705, screenX/Y 10,10, visible`; minimized →
+  `outer 160×28, screenX/Y -32000,-32000, hidden` (Windows' minimized
+  stand-in, same as stock Chrome — not 0×0); restored → back to 1200×800;
+  a new CDP window read at +0/+50/+300 ms → `1200×800` every time; a start
+  URL's first script on 3 launches → `1200x800/1184x705/visible` (a 4th
+  launch never came up because its debug port was still held by the
+  previous instance — unrelated to geometry). Conclusion: not reproducible
+  and no branch in our code yields it; the one-off reading most likely came
+  from a page measured while its window was being created or torn down by
+  something outside the launch path. Watch item stays: if it recurs,
+  capture `Browser.getWindowBounds` for that target plus the launch args.
+- [ ] **A1 — vitest "Worker exited unexpectedly": characterised, one cause
+  fixed, the rest QUARANTINED WITH TRACKING (no test skipped or deleted).**
+  Reproduction: 8 full API runs back to back (`scratchpad/a1-loop.sh`),
+  alternating `--pool=forks` (default) and `--pool=threads`, with
+  `NODE_OPTIONS=--report-on-fatalerror --report-uncaught-exception`. Result:
+  4 green (runs 2, 4, 7, 8); **0 hard worker exits, 0 Node fatal reports**;
+  4 load-induced failures, all timing:
+  - `tests/team-lease-guard.test.ts` "renews the lease on a timer…" — 2 of 4
+    forks runs, `expected 1 to be greater than or equal to 2`: a 20 ms
+    heartbeat asserted after a fixed 70 ms sleep. **Fixed** on this branch:
+    wait (≤ 3 s) for the second renewal instead of assuming it.
+  - `tests/process-identity.test.ts` — 1 of 4 forks runs: one test took
+    35.8 s, then `Error: [vitest-worker]: Timeout calling "onTaskUpdate"`
+    ×3 and the file's 7 tests never reported. Cause: the production token
+    capture is a *synchronous* `execFileSync(powershell …)` (10 s timeout;
+    the invocation style is pinned by the endpoint-AV history), so under 8
+    parallel workers + AV scanning each fresh powershell.exe the worker's
+    event loop is blocked long enough for vitest's own worker↔main RPC to
+    time out.
+  - `tests/adopted-relay.test.ts` "releases the port when the adopted run
+    is stopped" — 1 of 4 threads runs, `expected 1 to be +0`: under load the
+    same synchronous PowerShell read timed out → identity `unknown` → the
+    code correctly refuses to kill and keeps the relay hold (fail-safe by
+    design); the test expected `match`.
+  - Earlier this session (gate run, forks, no reports enabled): one hard
+    `Error: Worker exited unexpectedly` (tinypool `ChildProcess
+    .onUnexpectedExit`) while `tests/proxy-relay.test.ts` was running; its 9
+    tests never reported; an immediate rerun was 689/689.
+  - Later the same day (17:20–17:30, untouched `apps/server`): the forked
+    worker running `tests/leases.test.ts` died **every** time for ~10
+    minutes — whole-file runs 3/3 dead after the first test, while each of
+    its 10 tests run alone passed, the same file under `--pool=threads`
+    passed 10/10, and a plain-Node replay of its lifecycle (3× build /
+    listen / request / close) exited 0. No Node report, no Windows
+    Application Error / WER event for node.exe, no Defender detection;
+    Norton AntiVirus is active (its log is not in the event log). Then it
+    stopped with no code change: 3/3 whole-file runs and the full server
+    suite 20/20. The window began right after the C1 live check extracted
+    a fresh 283 MB `chrome.exe` into the scratch data dir — consistent
+    with AV activity ending forked node processes, not proven.
+  Frequency: the hard exit 1 in ~11 full runs today, plus that 10-minute
+  window; some load-timing
+  failure in 4 of 8 loop runs (the loop ran alongside other work — A2 live
+  visits — so it is a pessimistic load). Suspected cause of the hard exit:
+  the worker process is ended from outside — a Node crash would have left a
+  report with `--report-on-fatalerror` (none in 8 runs), no test kills a PID
+  it does not own (tests only `ChildProcess.kill()` their own handles,
+  which cannot hit a reused PID), and the PowerShell-heavy files are the
+  ones running when workers misbehave. Next step if it keeps biting: run
+  the PowerShell-backed files (`process-identity`, `adopted-*`,
+  `process-inventory`) in a separate non-parallel vitest project so the
+  synchronous spawns no longer compete with 7 other workers — a test-infra
+  change, deliberately not done blind. Gate practice meanwhile: a red gate
+  whose only failure is one of the four above is rerun once, and the
+  report says so (as done for B2).
+- [ ] **A2 — iphey "whale": characterised; known behaviour, no fix
+  shipped (no concrete cause in our code).** Scratch API 50477, fury qp.4,
+  two fresh direct throwaways, 5 visits each over 31 min, a fresh tab per
+  visit (`scratchpad/a2-iphey.mjs`, results `a2-results.jsonl`):
+  `iphey-only` (nothing but iphey) → Trustworthy, whale, Trustworthy,
+  whale, whale; `busy` (a speechSynthesis read + two plain pages between
+  visits) → Trustworthy, whale, whale, whale, whale. What moves between
+  visits of ONE profile: only `Stack Overflow Counter` (4 260 … 18 980),
+  `SVG Computed Style` (flips between exactly 124.4063 and 129.5313) and
+  the derived `Fingerprint` id. What never moved (all 10 visits): UA,
+  languages, timezone, Client Rects, canvas, audio, WebGL/GPU, resolution,
+  device memory, cores, plugins, mime types, timing resolution. Whale ↔
+  `MX Score` 90 (vs 100) one-to-one. Correlates: being a returning visitor
+  (first visit of every profile was Trustworthy; later visits mostly
+  whale). Does NOT correlate: the voice list (whale with and without a
+  voices read; list already proven identical to stock), other browsing
+  (the iphey-only profile whales too), the Secure DNS switch, profile age
+  beyond the first visit. The two moving values are JS-engine/layout
+  measurements (stack depth depends on JIT tier; the SVG text metric
+  depends on font/layout timing), not anything our patches randomise.
+  Stock Chrome baseline: could not be measured by automation — 4/4 visits
+  in a fresh stock Chrome 157 session produced no iphey verdict within
+  90 s even with background throttling off (iphey stalls under CDP-driven
+  stock Chrome); the single stock reading from 2026-11-17 was Trustworthy.
+  Open question for a manual check: open iphey twice in a normal stock
+  Chrome window and see whether the second visit is also "whale".
+- [ ] **A4 — Speech voices** — no action (owner instruction): reproducible
+  only with the owner's profile id + page. See the 2026-11-17 diagnosis
+  above (22 voices, identical to stock Chrome on this machine).
+- [x] **C1 — Engine updates, one click** (`8d770e3`, async extraction
+  `b99ab0d`) — `GET /engine/update` (manifest check:
+  current/available/error + running job), `POST /engine/update` (background
+  install via the existing sha256-pinned atomic `EngineInstaller`; 403
+  without Settings → Engine → "Allow engine binary downloads", 409 while
+  one runs, 403 cross-site via origin-deny). Manifest: repo raw URL by
+  default, `SPECTRA_ENGINE_MANIFEST` override. Settings → Engine card with
+  check / Install / live status. 5 new tests. Live (scratch API 50477,
+  manifest = repo `engines.manifest.json`, the real 283 MB qp.4 tarball):
+  `GET` → `available 0.5.5-qp.4, consent:false`; `POST` →
+  `403 ENGINE_DOWNLOAD_REQUIRES_CONSENT`; cross-site `POST` → `403
+  FORBIDDEN`; ticked the consent box in the dashboard → "Install update"
+  appeared → clicked → job `installed` in 7.7 s, `install.json` sha256
+  `dda72d52…c867`, `Fury/chrome.exe` present, card "Up to date". Found
+  live: the installer's synchronous `tar -xf` froze the whole API during
+  extraction (the UI never saw "Installing…"); now async — re-run:
+  `/health` answered in ~11 ms each second while the job was `running`,
+  installed in ~4 s. Scratch engines dir removed afterwards.
+  **Hosted-track client side** (`dadad4e`, brief update 2026-11-17):
+  version check at launch (once after listen, never downloads; logged and
+  shown in the dashboard checklist via `GET /engine/update/launch`) and a
+  configurable server URL (Settings → Engine → "Update server URL",
+  http(s) only; precedence setting → `SPECTRA_ENGINE_MANIFEST` → repo raw;
+  every check reports its `source`). 2 new tests (launch check records and
+  never downloads; setting beats env, `file://` rejected 400, buildApp runs
+  no network check). Live: a local stand-in "owner server" on 50490 served
+  the repo manifest; Update server URL set to it; scratch API restarted →
+  log `[queuepilot] engine update available: fury-core 0.5.5-qp.4 (from
+  http://127.0.0.1:50490/engines.manifest.json) — Settings → Engine to
+  install`; the server logged exactly one `GET /engines.manifest.json`;
+  dashboard checklist showed "engine update 0.5.5-qp.4 available —
+  Settings → Engine to install"; consent on → `POST` 202 → `installed` at
+  t+4 s, `status=current source=http://127.0.0.1:50490/…`, sha256
+  `dda72d52…c867`. "Restart": new launches use the new engine; running
+  profiles keep theirs until restarted (nothing is killed). Not built (per
+  brief): the server publish endpoint, accounts, app self-update — see
+  `docs/family-release.md` → Owner decisions.
+- [ ] **C2 — Profiles that follow you** — proposal in
+  `docs/family-release.md` (sync folder: export bundle on stop, restore on
+  the other machine via the existing `/bundles/restore`). Not implemented:
+  unattended export needs the bundle passphrase stored per machine (a
+  security decision), bundles carry cookies only, and the conflict rule is
+  the owner's call.
+- **D1 — Upstream scan since 2026-11-14 (report only, nothing vendored).**
+  *Fury* (`furyteamtop/fury-antidetect-browser`, our base 0.5.5): releases
+  v0.5.6 (2026-11-15) and v0.5.7 (2026-11-16). Commits: `8854023` "Real
+  HTTPS proxies: TLS to the proxy itself" — agent/src/relay.rs (+308),
+  diagnose.rs, i18n; `b03f292` a contributed macOS M5 persona JSON;
+  `2f4db0e`/`11404ec` site translations; `cc4f9c6`/`d0e5e3f` version bumps.
+  **Nothing touches `core/`**, so nothing maps onto `engine/patches`; no
+  rebuild is implied. The HTTPS-proxy fix maps to our
+  `apps/api/src/application/runtime/proxy-relay.ts`, which already dials
+  an `https` upstream with `tls.connect` (+ `secureConnect`); worth
+  borrowing only their clearer error for "a plain HTTP proxy saved as
+  https://" (`notTls`). *AliasMode* (`aliasmode/aliasmode`): release
+  v0.1.0-beta.75 (2026-11-16); 18 commits, almost all the in-app AI agent
+  (MCP host, credits, chat UI), plus Firefox add-ons/Playwright/bring-to-
+  front (`8aa62a5`, touches `launcher.ts` for Firefox profiles only) and
+  "reuse another profile's proxy (proxyFrom)" (`86ef924`). None touch the
+  files we ported (`window-fit.ts`) or the Chromium launch path. Worth
+  vendoring: nothing now; candidates for the owner: Fury's `notTls`
+  message, AliasMode's proxyFrom idea.
+- **D2 — Chromium version report (no fetch/rebase/build started).**
+  `engine/CHROMIUM_VERSION` = 157.0.8103.39. Current Chrome stable
+  (versionhistory.googleapis.com, 2026-11-18): Windows/macOS
+  **158.0.8127.37**, Linux 158.0.8127.36 (158 began serving 2026-11-17);
+  the 157 branch's latest is 157.0.8103.80; beta is 159.0.8154.6; Chrome
+  installed on this machine is 157.0.8103.51. Delta: one major behind
+  stable, and 41 patch builds behind the newest 157 (security fixes since
+  .39). The reduced UA reads `Chrome/157.0.0.0`, so pages see the major
+  only — a 157 UA is now one version behind the population as 158 rolls
+  out. A rebase to 158 needs the owner's go-ahead and an overnight build.

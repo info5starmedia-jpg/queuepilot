@@ -134,6 +134,15 @@ async function loadChecklist() {
     items.push({ ok: false, label: "engine health unreachable" });
   }
   try {
+    /* C1: the version check made when the API started (no network here). */
+    const { launchCheck: lc } = await api("/engine/update/launch");
+    if (lc?.status === "available") {
+      items.push({ ok: false, label: `engine update ${lc.latest.version} available — Settings → Engine to install` });
+    }
+  } catch {
+    /* older API without the route: no item */
+  }
+  try {
     const { proxies } = await api("/proxies");
     items.push({
       ok: proxies.length > 0,
@@ -808,19 +817,79 @@ $("#create-modal").addEventListener("click", (e) => { if (e.target.id === "creat
 
 /* ============================= proxies ================================ */
 
+/* Proxy groups (B2): the profile-groups model. "all" shows every proxy. */
+let activeProxyGroup = "all";
+
+function renderProxyTabs(groups) {
+  if (activeProxyGroup !== "all" && !groups.some((g) => g.group === activeProxyGroup)) activeProxyGroup = "all";
+  const total = groups.reduce((n, g) => n + g.total, 0);
+  const bar = $("#proxy-tabs");
+  bar.innerHTML = "";
+  for (const t of [{ group: "all", label: "All", total }, ...groups.map((g) => ({ ...g, label: g.group }))]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip-tab" + (t.group === activeProxyGroup ? " active" : "");
+    b.dataset.proxyGroup = t.group;
+    b.innerHTML = `${esc(t.label)}<span class="count">${t.total}${t.inUse ? ` · <span class="run">${t.inUse} in use</span>` : ""}</span>`;
+    b.addEventListener("click", () => {
+      activeProxyGroup = t.group;
+      loadProxies();
+    });
+    if (t.group !== "all") {
+      const edit = document.createElement("span");
+      edit.className = "rename";
+      edit.title = "rename group";
+      edit.textContent = "✎";
+      edit.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const to = window.prompt(`Rename proxy group "${t.label}" to:`, t.label);
+        if (!to || to.trim() === "" || to.trim() === t.label) return;
+        try {
+          await api("/proxy-groups/rename", { method: "POST", body: JSON.stringify({ from: t.label, to: to.trim() }) });
+          if (activeProxyGroup === t.label) activeProxyGroup = to.trim();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+        await loadProxies();
+      });
+      b.appendChild(edit);
+    }
+    bar.appendChild(b);
+  }
+  const names = groups.map((g) => g.group);
+  $("#proxy-group-names").innerHTML = names.map((g) => `<option value="${esc(g)}"></option>`).join("");
+  const sel = $("#proxies-move-group");
+  const keep = sel.value;
+  sel.innerHTML = names.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("") + `<option value="__new__">+ new group…</option>`;
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+/** Proxies shown under the active group tab (select-all acts on these). */
+function visibleProxyIds() {
+  return [...proxyById.values()].filter((p) => activeProxyGroup === "all" || p.group === activeProxyGroup).map((p) => p.id);
+}
+
 async function loadProxies() {
-  const { proxies } = await api("/proxies");
+  const [{ proxies }, { groups }] = await Promise.all([api("/proxies"), api("/proxy-groups").catch(() => ({ groups: [] }))]);
   proxyById = new Map(proxies.map((p) => [p.id, p]));
-  for (const id of [...proxySelection]) if (!proxyById.has(id)) proxySelection.delete(id);
+  renderProxyTabs(groups);
+  const visible = new Set(visibleProxyIds());
+  for (const id of [...proxySelection]) if (!visible.has(id)) proxySelection.delete(id);
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
-  $("#proxies-empty").hidden = proxies.length !== 0;
+  const empty = $("#proxies-empty");
+  empty.hidden = visible.size !== 0;
+  empty.innerHTML = proxies.length === 0
+    ? `<div class="big">⇄</div>No proxies configured — profiles will use your real IP. Click <b>⇪ Import proxies</b>.`
+    : `<div class="big">⇄</div>No proxies in group <b>${esc(activeProxyGroup)}</b>.`;
   for (const p of proxies) {
+    if (!visible.has(p.id)) continue;
     const tr = document.createElement("tr");
     if (proxySelection.has(p.id)) tr.classList.add("selected");
     tr.innerHTML = `
       <td><input type="checkbox" data-proxy="${esc(p.id)}" ${proxySelection.has(p.id) ? "checked" : ""} /></td>
       <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
       <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
@@ -857,7 +926,8 @@ function updateProxySelection() {
   $("#proxies-selected").textContent = n ? `${n} selected` : "";
   $("#proxies-delete-selected").disabled = n === 0;
   $("#proxies-test-selected").disabled = n === 0;
-  const all = [...proxyById.keys()];
+  $("#proxies-move").disabled = n === 0;
+  const all = visibleProxyIds();
   const box = $("#proxies-select-all");
   box.checked = all.length > 0 && all.every((id) => proxySelection.has(id));
   box.indeterminate = n > 0 && !box.checked;
@@ -878,8 +948,28 @@ async function testProxyRow(p, tr) {
   }
 }
 
+$("#proxies-move").addEventListener("click", async () => {
+  const ids = [...proxySelection];
+  if (ids.length === 0) return;
+  let group = $("#proxies-move-group").value;
+  if (group === "__new__" || !group) {
+    const name = window.prompt(`New group name for ${ids.length} selected prox${ids.length === 1 ? "y" : "ies"}:`, "");
+    if (!name || name.trim() === "") return;
+    group = name.trim();
+  }
+  try {
+    const r = await api("/proxies/batch-move", { method: "POST", body: JSON.stringify({ ids, group }) });
+    toast(`moved ${r.moved} prox${r.moved === 1 ? "y" : "ies"} to "${group}"`);
+    proxySelection.clear();
+    activeProxyGroup = group;
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadProxies();
+});
+
 $("#proxies-select-all").addEventListener("change", (e) => {
-  for (const id of proxyById.keys()) {
+  for (const id of visibleProxyIds()) {
     if (e.target.checked) proxySelection.add(id);
     else proxySelection.delete(id);
   }
@@ -910,67 +1000,46 @@ $("#proxies-delete-selected").addEventListener("click", async () => {
   await loadProxies();
 });
 
-/* One pasted line -> proxy input. Accepts host:port, host:port:user:pass and
-   name:host:port:user:pass, with an optional scheme:// prefix. The password
-   is everything after the user (it may itself contain ':'). */
-function parseProxyLine(raw, defaultType) {
-  let line = raw.trim();
-  if (!line) return null;
-  let type = defaultType;
-  const scheme = /^(https?|socks5h?):\/\//i.exec(line);
-  if (scheme) {
-    type = scheme[1].toLowerCase().replace("socks5h", "socks5");
-    line = line.slice(scheme[0].length);
-  }
-  const parts = line.split(":");
-  let name = null;
-  if (parts.length >= 3 && !/^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) name = parts.shift();
-  const [host, port, username, ...rest] = parts;
-  if (!host || !/^\d+$/.test(port ?? "")) throw new Error("expected host:port[:user:pass]");
-  return {
-    name: name || `${host}:${port}`,
-    type,
-    host,
-    port: Number(port),
-    username: username || null,
-    password: rest.length ? rest.join(":") : null,
-  };
-}
-
 $("#proxy-add-open").addEventListener("click", () => {
   $("#proxy-add-result").innerHTML = "";
   $("#proxy-add-status").textContent = "";
+  $("#proxy-add-file").value = "";
+  $("#proxy-add-group").value = activeProxyGroup === "all" ? "" : activeProxyGroup;
   $("#proxy-add-modal").hidden = false;
   $("#proxy-add-lines").focus();
 });
 $("#proxy-add-close").addEventListener("click", () => { $("#proxy-add-modal").hidden = true; });
 $("#proxy-add-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-add-modal") $("#proxy-add-modal").hidden = true; });
 
+/* Import: the server parses, dedupes (host+port) and reports per line. A
+   chosen .txt file wins over the textarea. Errors never echo the line back:
+   it may carry a password. */
 $("#proxy-add-go").addEventListener("click", async () => {
-  const lines = $("#proxy-add-lines").value.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length === 0) return;
-  const type = $("#proxy-add-type").value;
+  const file = $("#proxy-add-file").files[0];
+  const text = file ? await file.text() : $("#proxy-add-lines").value;
+  if (!text.trim()) return;
   const btn = $("#proxy-add-go");
   btn.disabled = true;
-  const rows = [];
-  let added = 0;
-  for (const [i, raw] of lines.entries()) {
-    let input = null;
-    try {
-      input = parseProxyLine(raw, type);
-      await api("/proxies", { method: "POST", body: JSON.stringify(input) });
-      added++;
-      rows.push(`<tr><td>line ${i + 1}</td><td>${esc(input.name)} added</td></tr>`);
-    } catch (err) {
-      /* never echo the line back: it may carry a password */
-      rows.push(`<tr class="import-err"><td>line ${i + 1}</td><td>${esc(input?.name ?? "")} ${esc(err.message)}</td></tr>`);
+  try {
+    const group = $("#proxy-add-group").value.trim();
+    const r = await api("/proxies/import", {
+      method: "POST",
+      body: JSON.stringify({ text, type: $("#proxy-add-type").value, ...(group ? { group } : {}) }),
+    });
+    $("#proxy-add-status").textContent = `${r.added} added · ${r.skipped} skipped (already listed) · ${r.errors.length} error${r.errors.length === 1 ? "" : "s"}`;
+    $("#proxy-add-result").innerHTML = r.errors.length
+      ? `<table class="import-table"><tbody>${r.errors.map((e) => `<tr class="import-err"><td>line ${e.line}</td><td>${esc(e.reason)}</td></tr>`).join("")}</tbody></table>`
+      : "";
+    if (r.errors.length === 0) {
+      $("#proxy-add-lines").value = "";
+      $("#proxy-add-file").value = "";
     }
+    toast(`${r.added} prox${r.added === 1 ? "y" : "ies"} imported`);
+  } catch (err) {
+    $("#proxy-add-status").textContent = err.message;
+  } finally {
+    btn.disabled = false;
   }
-  btn.disabled = false;
-  $("#proxy-add-status").textContent = `${added}/${lines.length} added`;
-  $("#proxy-add-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
-  if (added === lines.length) $("#proxy-add-lines").value = "";
-  toast(`${added} prox${added === 1 ? "y" : "ies"} added`);
   await loadProxies();
 });
 
@@ -1437,6 +1506,7 @@ const SETTINGS_FIELDS = {
   engine: [
     { key: "channel", label: "Engine update channel", type: "select", options: [["stable", "Stable"], ["beta", "Beta"]] },
     { key: "downloadConsent", label: "Allow engine binary downloads", type: "checkbox" },
+    { key: "updateUrl", label: "Update server URL (engine manifest; empty = default)", type: "text", placeholder: "https://your-server/engines.manifest.json" },
   ],
   launch: [
     { key: "batchStaggerMs", label: "Batch start delay (ms)", type: "number", min: 0, max: 60000 },
@@ -1515,11 +1585,70 @@ function renderSettingsNav() {
   }
 }
 
+/* Settings → Engine: one-click engine update (C1). Check is free; Install
+   needs the "Allow engine binary downloads" switch above it. The install
+   runs in the API's background; this card polls its status. */
+let engineUpdatePoll = null;
+
+async function renderEngineUpdateCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="engine-update-card">
+      <h4>Engine updates</h4>
+      <p>Checks the engine manifest for a newer verified engine. Installs are checksum-pinned and atomic; the current engine stays installed, so a bad update can be rolled back.</p>
+      <div id="engine-update-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="engine-update-check">Check again</button>
+        <button type="button" class="primary" id="engine-update-install" hidden>Install update</button>
+      </div>
+    </div>`;
+  $("#engine-update-check").addEventListener("click", () => refreshEngineUpdate());
+  $("#engine-update-install").addEventListener("click", async () => {
+    try {
+      const r = await api("/engine/update", { method: "POST" });
+      toast(r.started ? `installing engine ${r.version}…` : `engine ${r.version} is already current`);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    await refreshEngineUpdate();
+  });
+  await refreshEngineUpdate();
+}
+
+async function refreshEngineUpdate() {
+  const status = $("#engine-update-status");
+  const install = $("#engine-update-install");
+  if (!status) return;
+  clearTimeout(engineUpdatePoll);
+  try {
+    const u = await api("/engine/update");
+    const job = u.job;
+    const size = u.latest?.sizeBytes ? ` (${Math.round(u.latest.sizeBytes / 1048576)} MB)` : "";
+    let line =
+      u.status === "current" ? `Up to date — ${esc(u.latest.kind)} ${esc(u.latest.version)}.`
+      : u.status === "available" ? `Update available: ${esc(u.latest.kind)} ${esc(u.latest.version)}${size}.`
+      : `Cannot check: ${esc(u.error)}`;
+    if (job?.state === "running") line += ` Installing ${esc(job.version)}…`;
+    else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
+    else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
+    if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" below to install.`;
+    status.innerHTML = `${line}<br><span style="color:var(--faint)">Checked: ${esc(u.source)}</span>`;
+    install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
+    if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
+  } catch (err) {
+    status.textContent = err.message;
+    install.hidden = true;
+  }
+}
+
 /* Integrations gets a read-only reference card for the email resolvers —
    there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
    the scripting layer. This card documents the URL shapes. */
 function renderIntegrationsInfo() {
   const box = $("#integrations-info");
+  if (settingsSection === "engine") {
+    renderEngineUpdateCard(box);
+    return;
+  }
   if (settingsSection !== "integrations") {
     box.innerHTML = "";
     return;
@@ -1656,6 +1785,7 @@ async function persistSetting(key, field) {
     settingsData[settingsSection] = updated;
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
+    if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */

@@ -4,15 +4,22 @@ import {
   ErrorCodes,
   type CreateProxyInput,
   type Proxy,
+  type ProxyType,
   type UpdateProxyInput,
 } from "@queuepilot/contracts";
-import { publicProxy, type ProxyRepository, type StoredProxy, type ProxyHealthRepository, type ProxyHealthEntry } from "./proxy.repository.js";
+import { parseProxyLine, type ProxyImportResult } from "./proxy-import.js";
+import { publicProxy, type ProxyRepository, type StoredProxy, type ProxyHealthRepository, type ProxyHealthEntry, type ProxyGroupSummary } from "./proxy.repository.js";
 import { probeProxy, DEFAULT_PROBE_URL, type ProxyGeo } from "./proxy-probe.js";
 import type { SecretStore } from "../secrets/secret-store.js";
 
 /** Secret key shape for a proxy password. */
 export function proxySecretKey(proxyId: string): string {
   return `proxy:${proxyId}:password`;
+}
+
+/** Dedupe key for imports: same host (case-insensitive) and port = same proxy. */
+function endpointKey(host: string, port: number): string {
+  return `${host.toLowerCase()}:${port}`;
 }
 
 export class ProxyService {
@@ -40,8 +47,9 @@ export class ProxyService {
       port: input.port,
       username: input.username ?? null,
       password: null,
-      timezone: null,
+      timezone: input.timezone ?? null,
       providerId: null,
+      group: input.group ?? "default",
       createdAt: now,
       updatedAt: now,
     };
@@ -54,6 +62,33 @@ export class ProxyService {
     return publicProxy(stored);
   }
 
+  /**
+   * Bulk import from text. Dedupes on host+port against what is stored and
+   * within the batch (skipped, not an error); a bad line is recorded and the
+   * rest still import — one bad line never fails the batch.
+   */
+  importText(text: string, defaultType: ProxyType, group?: string): ProxyImportResult {
+    const seen = new Set(this.proxies.list().map((p) => endpointKey(p.host, p.port)));
+    const result: ProxyImportResult = { added: 0, skipped: 0, errors: [] };
+    for (const [i, raw] of text.split(/\r?\n/).entries()) {
+      try {
+        const parsed = parseProxyLine(raw, defaultType);
+        if (!parsed) continue;
+        const key = endpointKey(parsed.host, parsed.port);
+        if (seen.has(key)) {
+          result.skipped++;
+          continue;
+        }
+        this.create({ ...parsed, group });
+        seen.add(key);
+        result.added++;
+      } catch (err) {
+        result.errors.push({ line: i + 1, reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return result;
+  }
+
   get(id: string): Proxy {
     return publicProxy(this.getStored(id));
   }
@@ -64,8 +99,34 @@ export class ProxyService {
     return this.hydrate(p);
   }
 
-  list(): Proxy[] {
-    return this.proxies.list().map(publicProxy);
+  list(group?: string): Proxy[] {
+    return this.proxies.list(group).map(publicProxy);
+  }
+
+  groups(): ProxyGroupSummary[] {
+    return this.proxies.groups();
+  }
+
+  /** Rename a group; refuses to merge into an existing one (same rule as profile groups). */
+  renameGroup(from: string, to: string): { renamed: number } {
+    if (from === to) return { renamed: 0 };
+    if (this.proxies.groupExists(to)) {
+      throw new DomainError(ErrorCodes.CONFLICT, `group "${to}" already exists — move proxies into it instead`);
+    }
+    const renamed = this.proxies.renameGroup(from, to);
+    if (renamed === 0) throw new DomainError(ErrorCodes.PROXY_NOT_FOUND, `group "${from}" not found`);
+    return { renamed };
+  }
+
+  /**
+   * Move proxies into a group (new or existing). Every id is checked before
+   * anything moves; each move goes through update(), so secrets keep their
+   * normal handling (a pre-P6 plaintext row migrates on the way).
+   */
+  moveToGroup(ids: string[], group: string): { moved: number } {
+    for (const id of ids) this.getStored(id);
+    for (const id of ids) this.update(id, { group });
+    return { moved: ids.length };
   }
 
   update(id: string, input: UpdateProxyInput): Proxy {
@@ -82,6 +143,7 @@ export class ProxyService {
       host: input.host ?? p.host,
       port: input.port ?? p.port,
       username: input.username === undefined ? p.username : input.username,
+      group: input.group ?? p.group,
       // The row never carries a password when a SecretStore is wired; the
       // store above already reflects input.password (set/delete/no-op).
       password: this.secrets ? null : input.password === undefined ? p.password : input.password,
