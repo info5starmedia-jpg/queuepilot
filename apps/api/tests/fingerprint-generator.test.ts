@@ -79,14 +79,19 @@ describe("generateIdentity host-memory clamp", () => {
     }
   });
 
-  it("an 8 GB host still samples the full fitting range", () => {
-    const seen = new Set<number>();
-    for (let seed = 1; seed < 2000; seed++) {
-      seen.add(generateIdentity("windows", "UTC", "en-US", seed, null, 8).deviceMemoryGb);
+  it("an 8+ GB host never claims 4 — the V8 heap cap makes it incoherent", () => {
+    // Measured 2026-11-16 on our build (32 GB host): "deviceMemory 4 · heap
+    // 4.09 GiB". On >= 8 GB hosts the heap cap exceeds a 4 GB claim, so the
+    // smallest coherent bucket is 8. Deterministic and stable across seeds.
+    // The Windows pool tops out at 8, so >= 8 GB hosts always claim 8; the
+    // wider non-Windows pool may draw 8 or 16 — anything above the heap cap.
+    for (let seed = 1; seed < 500; seed += 7) {
+      expect(generateIdentity("windows", "UTC", "en-US", seed, null, 8).deviceMemoryGb).toBe(8);
+      expect(generateIdentity("windows", "UTC", "en-US", seed, null, 32).deviceMemoryGb).toBe(8);
+      const mac = generateIdentity("macos", "UTC", "en-US", seed, null, 16).deviceMemoryGb;
+      expect(mac).toBeGreaterThan(4);
+      expect(mac).toBeLessThanOrEqual(16);
     }
-    expect(seen.has(4)).toBe(true);
-    expect(seen.has(8)).toBe(true);
-    expect([...seen].every((m) => m <= 8)).toBe(true);
   });
 
   it("stays deterministic for a given seed + host memory", () => {
