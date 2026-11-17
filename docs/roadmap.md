@@ -1722,7 +1722,7 @@ scan 2026-11-17). Owner decisions recorded:
 
 ## Phase A+B — owner gaps and watch items (2026-11-18, branch `phase-ab`)
 
-- [x] **B1 — Proxy list text import** (`d8688d1`) — `POST /proxies/import`
+- [x] **B1 — Proxy list text import** (`dce10f2`) — `POST /proxies/import`
   takes pasted text (JSON `{ text, type? }`) or a .txt file's bytes as
   `text/plain` (`?type=` default scheme). Lines: `host:port`,
   `host:port:user:pass`, optional trailing IANA timezone, `scheme://`
@@ -1740,7 +1740,7 @@ scan 2026-11-17). Owner decisions recorded:
   `{"added":2,"skipped":1,"errors":[]}`; no `password` field in any list
   response. The browser file picker itself was not driven by automation
   (it reads the file with `File.text()` and posts the same JSON).
-- [x] **B2 — Proxy groups** (`46f1404`) — profile-groups model on proxies.
+- [x] **B2 — Proxy groups** (`8725f6f`) — profile-groups model on proxies.
   Migration `011-proxy-groups` adds `proxies.grp` (NOT NULL, default
   `'default'`); test rolls a DB back to pre-011, inserts a proxy, migrates →
   `{ grp: "default" }`. Group on create/edit/import; `GET /proxies?group=`
@@ -1764,7 +1764,7 @@ scan 2026-11-17). Owner decisions recorded:
   ashburn→us-east `{"renamed":2}`, us-east→germany
   `409 CONFLICT group "germany" already exists`. Rename is a native
   `prompt()` in the UI, so it was driven through the API, not the browser.
-- [x] **B3a — Script/zip → plugin import, API** (`b96f672`) —
+- [x] **B3a — Script/zip → plugin import, API** (`c3161cc`) —
   `POST /plugins/import?filename=<name>`, raw bytes as
   `application/octet-stream` (5 MB cap). `.mjs`/`.js` → minimal plugin
   (package.json from the filename, entry stored as `index.mjs`); `.zip` →
@@ -1918,8 +1918,8 @@ scan 2026-11-17). Owner decisions recorded:
 - [ ] **A4 — Speech voices** — no action (owner instruction): reproducible
   only with the owner's profile id + page. See the 2026-11-17 diagnosis
   above (22 voices, identical to stock Chrome on this machine).
-- [x] **C1 — Engine updates, one click** (`c7eeb2f`, async extraction
-  `8ab0389`) — `GET /engine/update` (manifest check:
+- [x] **C1 — Engine updates, one click** (`8d770e3`, async extraction
+  `b99ab0d`) — `GET /engine/update` (manifest check:
   current/available/error + running job), `POST /engine/update` (background
   install via the existing sha256-pinned atomic `EngineInstaller`; 403
   without Settings → Engine → "Allow engine binary downloads", 409 while
@@ -1936,8 +1936,25 @@ scan 2026-11-17). Owner decisions recorded:
   extraction (the UI never saw "Installing…"); now async — re-run:
   `/health` answered in ~11 ms each second while the job was `running`,
   installed in ~4 s. Scratch engines dir removed afterwards.
-  App updates: plan only — `docs/family-release.md` (recommendation:
-  release zip; every step needs owner decisions on hosting/builds).
+  **Hosted-track client side** (`dadad4e`, brief update 2026-11-17):
+  version check at launch (once after listen, never downloads; logged and
+  shown in the dashboard checklist via `GET /engine/update/launch`) and a
+  configurable server URL (Settings → Engine → "Update server URL",
+  http(s) only; precedence setting → `SPECTRA_ENGINE_MANIFEST` → repo raw;
+  every check reports its `source`). 2 new tests (launch check records and
+  never downloads; setting beats env, `file://` rejected 400, buildApp runs
+  no network check). Live: a local stand-in "owner server" on 50490 served
+  the repo manifest; Update server URL set to it; scratch API restarted →
+  log `[queuepilot] engine update available: fury-core 0.5.5-qp.4 (from
+  http://127.0.0.1:50490/engines.manifest.json) — Settings → Engine to
+  install`; the server logged exactly one `GET /engines.manifest.json`;
+  dashboard checklist showed "engine update 0.5.5-qp.4 available —
+  Settings → Engine to install"; consent on → `POST` 202 → `installed` at
+  t+4 s, `status=current source=http://127.0.0.1:50490/…`, sha256
+  `dda72d52…c867`. "Restart": new launches use the new engine; running
+  profiles keep theirs until restarted (nothing is killed). Not built (per
+  brief): the server publish endpoint, accounts, app self-update — see
+  `docs/family-release.md` → Owner decisions.
 - [ ] **C2 — Profiles that follow you** — proposal in
   `docs/family-release.md` (sync folder: export bundle on stop, restore on
   the other machine via the existing `/bundles/restore`). Not implemented:
