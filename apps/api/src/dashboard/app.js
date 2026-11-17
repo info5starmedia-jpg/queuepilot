@@ -9,9 +9,12 @@
 const $ = (sel) => document.querySelector(sel);
 
 async function api(path, opts = {}) {
+  /* JSON content-type only when there IS a body: Fastify answers a body-less
+     request that claims application/json with a 500, which broke every
+     body-less DELETE/POST in the console (delete, stop, proxy test, …). */
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
     ...opts,
+    headers: opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers },
   });
   if (res.status === 204) return null;
   const body = await res.json();
