@@ -3,10 +3,45 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { BrowserRun } from "@queuepilot/contracts";
 import {
   captureProcessStartToken,
+  captureProcessStartTokens,
   checkProcessIdentity,
   startTokenForRun,
 } from "../src/infrastructure/process-inventory.js";
 import { makeTestContext, type TestContext } from "./helpers.js";
+
+describe("captureProcessStartTokens (one query, many PIDs)", () => {
+  it("returns the same token as the single-PID capture, and null for dead/invalid PIDs", async () => {
+    const a = spawnSleeper();
+    const b = spawnSleeper();
+    const dead = spawnSleeper();
+    const gone = new Promise((r) => dead.once("exit", r));
+    dead.kill();
+    await gone;
+
+    const tokens = captureProcessStartTokens([a.pid!, b.pid!, dead.pid!, a.pid!, -4, 1.5]);
+
+    expect([...tokens.keys()].sort()).toEqual([a.pid!, b.pid!, dead.pid!].sort());
+    expect(tokens.get(a.pid!)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(tokens.get(a.pid!)).toBe(captureProcessStartToken(a.pid!));
+    expect(tokens.get(b.pid!)).toBe(captureProcessStartToken(b.pid!));
+    expect(tokens.get(dead.pid!)).toBeNull();
+  });
+
+  it("asks the OS nothing for an empty list", () => {
+    expect(captureProcessStartTokens([]).size).toBe(0);
+    expect(captureProcessStartTokens([0, -1]).size).toBe(0);
+  });
+
+  it("feeds checkProcessIdentity without a second read", () => {
+    const child = spawnSleeper();
+    const tokens = captureProcessStartTokens([child.pid!]);
+    const token = tokens.get(child.pid!)!;
+    expect(checkProcessIdentity(child.pid!, token, tokens)).toBe("match");
+    expect(checkProcessIdentity(child.pid!, "2020-01-01T00:00:00Z", tokens)).toBe("mismatch");
+    // A batch that could not read this PID means unknown, never mismatch.
+    expect(checkProcessIdentity(child.pid!, token, new Map([[child.pid!, null]]))).toBe("unknown");
+  });
+});
 
 /**
  * D-002 follow-ups. Like process-inventory.test.ts these use REAL child

@@ -33,6 +33,8 @@ export type ProcessIdentity = "match" | "mismatch" | "unknown" | "dead";
 export function checkProcessIdentity(
   pid: number | null | undefined,
   expectedToken?: string | null,
+  /** Start tokens already read in one batch (captureProcessStartTokens). */
+  known?: ReadonlyMap<number, string | null>,
 ): ProcessIdentity {
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return "dead";
   try {
@@ -42,7 +44,7 @@ export function checkProcessIdentity(
     if ((err as NodeJS.ErrnoException).code !== "EPERM") return "dead";
   }
   if (!expectedToken) return "unknown";
-  const actual = captureProcessStartToken(pid);
+  const actual = known?.has(pid) ? (known.get(pid) ?? null) : captureProcessStartToken(pid);
   if (actual === null) return "unknown";
   return actual === expectedToken ? "match" : "mismatch";
 }
@@ -92,6 +94,52 @@ export function captureProcessStartToken(pid: number): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Start tokens for many PIDs in ONE OS query. Boot reconciliation and the
+ * adopted-run watcher would otherwise pay one blocking PowerShell spawn per
+ * run. Every requested PID gets an entry; null = not running or unreadable
+ * (same soft-failure meaning as the single-PID capture).
+ *
+ * Windows: the invocation is deliberately identical to captureWindows —
+ * `powershell.exe -NoProfile -NonInteractive -Command` via execFileSync —
+ * only the command body differs. Endpoint AV on the reference machine has
+ * killed other invocation styles before (v0.13); do not change it.
+ */
+export function captureProcessStartTokens(pids: readonly number[]): Map<number, string | null> {
+  const tokens = new Map<number, string | null>();
+  for (const pid of pids) {
+    if (Number.isInteger(pid) && pid > 0) tokens.set(pid, null);
+  }
+  if (tokens.size === 0) return tokens;
+  if (process.platform !== "win32") {
+    for (const pid of tokens.keys()) tokens.set(pid, captureProcessStartToken(pid));
+    return tokens;
+  }
+  try {
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Get-Process -Id ${[...tokens.keys()].join(",")} -ErrorAction SilentlyContinue | ForEach-Object { try { '{0}={1}' -f $_.Id, $_.StartTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ') } catch {} }; exit 0`,
+      ],
+      { encoding: "utf8", timeout: 15_000, windowsHide: true },
+    );
+    for (const line of out.split(/\r?\n/)) {
+      const m = /^(\d+)=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(line.trim());
+      if (!m) continue;
+      const pid = Number(m[1]);
+      // Same whole-second normalization as the single-PID capture, so batch
+      // and single tokens for one process are byte-identical.
+      if (tokens.has(pid)) tokens.set(pid, `${m[2]}Z`);
+    }
+  } catch {
+    // The whole query failed: every PID stays null (unknown), never a guess.
+  }
+  return tokens;
 }
 
 function captureWindows(pid: number): string | null {

@@ -17,6 +17,7 @@ import {
   type TempProxyInput,
 } from "@queuepilot/contracts";
 import {
+  captureProcessStartTokens,
   checkProcessIdentity,
   startTokenForRun,
   terminateProcess,
@@ -758,8 +759,12 @@ export class BrowserLifecycleService {
     let adopted = 0;
     let crashed = 0;
     let unverified = 0;
-    for (const run of this.runs.listOccupying()) {
-      const identity = checkProcessIdentity(run.pid, run.processToken);
+    const occupying = this.runs.listOccupying();
+    // One OS query for every tokened PID, not one blocking spawn per run —
+    // this runs before the API opens its port.
+    const tokens = captureProcessStartTokens(pidsToVerify(occupying));
+    for (const run of occupying) {
+      const identity = checkProcessIdentity(run.pid, run.processToken, tokens);
       if (identity === "match" || identity === "unknown") {
         if (run.status !== "running") {
           this.runs.update({ ...run, status: "running" });
@@ -826,13 +831,19 @@ export class BrowserLifecycleService {
   checkAdoptedRuns(verifyIdentity = true): number {
     let crashed = 0;
     let watching = 0;
-    for (const run of this.runs.listOccupying()) {
-      // Has a session → its exit promise is the watcher. "launching" → a
-      // start is in flight and the session is not registered yet.
-      if (run.status !== "running" || this.sessions.has(run.profileId)) continue;
+    // Has a session → its exit promise is the watcher. "launching" → a
+    // start is in flight and the session is not registered yet.
+    const adopted = this.runs
+      .listOccupying()
+      .filter((run) => run.status === "running" && !this.sessions.has(run.profileId));
+    const tokens = verifyIdentity
+      ? captureProcessStartTokens(pidsToVerify(adopted))
+      : undefined;
+    for (const run of adopted) {
       const identity = checkProcessIdentity(
         run.pid,
         verifyIdentity ? run.processToken : null,
+        tokens,
       );
       if (identity === "dead" || identity === "mismatch") {
         this.markCrashed(
@@ -934,6 +945,11 @@ export class BrowserLifecycleService {
   private emit(e: LifecycleEvent): void {
     this.events.emit("lifecycle", e);
   }
+}
+
+/** PIDs whose identity can be proven: the run has both a PID and a token. */
+function pidsToVerify(runs: readonly BrowserRun[]): number[] {
+  return runs.flatMap((r) => (r.pid && r.processToken ? [r.pid] : []));
 }
 
 function now(): string {
