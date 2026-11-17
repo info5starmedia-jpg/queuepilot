@@ -54,7 +54,7 @@ describe("fingerprint identity overrides", () => {
     expect(identity.deviceMemoryGb).toBe(32);
   });
 
-  it("empty body clears every pin back to seed-derived", async () => {
+  it("explicit null clears one pin back to seed-derived; empty body is a no-op", async () => {
     const ctx = makeTestContext();
     const p = ctx.profiles.create({ name: "clear", generateFingerprint: true });
     const original = ctx.profiles.identityOf(p.id)!;
@@ -68,15 +68,51 @@ describe("fingerprint identity overrides", () => {
     expect(now.locale).toBe("de-DE");
     expect(now.platform).toBe("linux");
 
-    const clear = await ctx.app.inject({
+    // MERGE semantics: an empty body must NOT wipe pins (v0.16 item 9).
+    const noop = await ctx.app.inject({
       method: "PATCH",
       url: `/profiles/${p.id}/identity`,
       payload: {},
     });
+    now = noop.json().identity;
+    expect(now.locale).toBe("de-DE");
+    expect(now.platform).toBe("linux");
+
+    // Explicit null clears exactly one pin; the other survives.
+    const clear = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { locale: null },
+    });
     now = clear.json().identity;
     expect(now.locale).toBe(original.locale);
-    expect(now.platform).toBe(original.platform);
-    expect(now.overrides ?? null).toBeNull();
+    expect(now.platform).toBe("linux");
+    expect(now.overrides).toEqual({ platform: "linux" });
+  });
+
+  it("PATCHes merge — a second PATCH must not drop earlier pins (regression)", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "merge", generateFingerprint: true });
+
+    const first = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { timezone: "America/Toronto" },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().identity.overrides).toEqual({ timezone: "America/Toronto" });
+
+    // The old replace-everything code silently dropped the timezone pin here.
+    const second = await ctx.app.inject({
+      method: "PATCH",
+      url: `/profiles/${p.id}/identity`,
+      payload: { deviceMemoryGb: 8 },
+    });
+    expect(second.statusCode).toBe(200);
+    const identity = second.json().identity;
+    expect(identity.overrides).toEqual({ timezone: "America/Toronto", deviceMemoryGb: 8 });
+    expect(identity.timezone).toBe("America/Toronto");
+    expect(identity.deviceMemoryGb).toBe(8);
   });
 
   it("seed is not pin-able — overriding it is a validation error", async () => {

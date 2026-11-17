@@ -4,6 +4,7 @@ import {
   ErrorCodes,
   type CreateProfileInput,
   type FingerprintIdentityOverrides,
+  type FingerprintIdentityPatch,
   type FingerprintPlatform,
   type Profile,
   type RotationLink,
@@ -215,12 +216,15 @@ export class ProfileService {
 
   /**
    * Operator-pinned fingerprint fields (v0.15.1, Jancy's "edit fingerprint"
-   * gap — until now only full regenerate existed). The body REPLACES the pin
-   * bag: pass a partial to pin those fields, {} to drop every pin back to
-   * seed-derived. Applies at next start like regenerate — the running engine
-   * keeps its launch snapshot, and drift says so.
+   * gap — until now only full regenerate existed). MERGE semantics since
+   * v0.16 item 9: a field present in the patch sets/clears that pin, an
+   * absent field keeps its existing pin — the old replace-the-bag behavior
+   * silently dropped earlier pins (found live: pinning deviceMemory erased a
+   * pinned timezone). Explicit null clears one pin back to seed-derived;
+   * regenerate clears them all. Applies at next start like regenerate — the
+   * running engine keeps its launch snapshot, and drift says so.
    */
-  updateIdentity(id: string, overrides: FingerprintIdentityOverrides) {
+  updateIdentity(id: string, patch: FingerprintIdentityPatch) {
     const p = this.get(id);
     if (!p.identityId) {
       throw new DomainError(
@@ -228,7 +232,17 @@ export class ProfileService {
         "profile has no fingerprint identity — regenerate one first",
       );
     }
-    this.identities.setOverrides(p.identityId, overrides);
+    const current = this.identities.get(p.identityId)?.overrides ?? {};
+    const merged: FingerprintIdentityOverrides = { ...current };
+    const bag = merged as Record<string, unknown>;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) {
+        delete bag[key];
+      } else {
+        bag[key] = value;
+      }
+    }
+    this.identities.setOverrides(p.identityId, merged);
     return this.identities.get(p.identityId);
   }
 

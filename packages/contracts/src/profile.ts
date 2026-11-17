@@ -66,6 +66,36 @@ export const FingerprintIdentityOverridesSchema = FingerprintIdentitySchema.pick
   .strict();
 export type FingerprintIdentityOverrides = z.infer<typeof FingerprintIdentityOverridesSchema>;
 
+/**
+ * Body of PATCH /profiles/:id/identity (v0.16 item 9 — MERGE semantics).
+ *
+ * The original handler replaced the whole pin bag, so one PATCH silently
+ * dropped every pin the operator had set before (found live: pinning
+ * deviceMemory erased a pinned timezone). Now:
+ *   - a field ABSENT from the body keeps its existing pin (if any);
+ *   - a field present with a VALUE pins it;
+ *   - a field present as NULL clears that one pin back to seed-derived.
+ * An empty body is therefore a no-op; to clear everything, regenerate the
+ * fingerprint or null each pinned field explicitly.
+ */
+export const FingerprintIdentityPatchSchema = z
+  .object({
+    platform: FingerprintIdentitySchema.shape.platform.nullable().optional(),
+    screenWidth: FingerprintIdentitySchema.shape.screenWidth.nullable().optional(),
+    screenHeight: FingerprintIdentitySchema.shape.screenHeight.nullable().optional(),
+    hardwareConcurrency: FingerprintIdentitySchema.shape.hardwareConcurrency.nullable().optional(),
+    deviceMemoryGb: FingerprintIdentitySchema.shape.deviceMemoryGb.nullable().optional(),
+    timezone: FingerprintIdentitySchema.shape.timezone.nullable().optional(),
+    locale: FingerprintIdentitySchema.shape.locale.nullable().optional(),
+    userAgent: EnginePinFields.userAgent.nullable().optional(),
+    fonts: EnginePinFields.fonts.nullable().optional(),
+    fontsHidden: EnginePinFields.fontsHidden.nullable().optional(),
+    webglVendor: EnginePinFields.webglVendor.nullable().optional(),
+    webglRenderer: EnginePinFields.webglRenderer.nullable().optional(),
+  })
+  .strict();
+export type FingerprintIdentityPatch = z.infer<typeof FingerprintIdentityPatchSchema>;
+
 export const FingerprintIdentityWithOverridesSchema = FingerprintIdentitySchema.extend(
   EnginePinFields,
 ).extend({

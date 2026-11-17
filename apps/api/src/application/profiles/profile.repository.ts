@@ -240,7 +240,9 @@ export class FingerprintIdentityRepository {
     return { ...base, ...overrides, overrides: pinned ? overrides : null } as FingerprintIdentityWithOverrides;
   }
 
-  /** Replace the whole pin bag ({} clears every pin back to seed-derived). */
+  /** Replace the whole pin bag. The SERVICE merges into the current bag
+   *  before calling this (v0.16 item 9); an empty bag reads back as
+   *  overrides:null (every pin seed-derived). */
   setOverrides(id: string, overrides: FingerprintIdentityOverrides): void {
     this.db
       .prepare("UPDATE fingerprint_identities SET overrides = ? WHERE id = ?")

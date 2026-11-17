@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { CreateProfileInputSchema, UpdateProfileInputSchema, FingerprintIdentityOverridesSchema, RotationLinkSchema } from "@queuepilot/contracts";
+import { CreateProfileInputSchema, UpdateProfileInputSchema, FingerprintIdentityPatchSchema, RotationLinkSchema } from "@queuepilot/contracts";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import { maskCard, personaFieldsOf } from "../application/profiles/persona-fields.js";
 import {
@@ -130,12 +130,14 @@ export function registerProfileRoutes(
     return { identity: service.identityOf(id) };
   });
 
-  // Pin fingerprint fields (v0.15.1): the body REPLACES the pin bag —
-  // partial pins those fields, {} clears back to seed-derived.
+  // Pin fingerprint fields (v0.15.1; MERGE semantics since v0.16 item 9):
+  // fields present in the body set that pin, explicit null clears one pin
+  // back to seed-derived, absent fields are untouched. An empty body is a
+  // no-op — regenerate the fingerprint to clear everything at once.
   app.patch("/profiles/:id/identity", async (req) => {
     const { id } = req.params as { id: string };
-    const overrides = FingerprintIdentityOverridesSchema.parse(req.body ?? {});
-    return { identity: service.updateIdentity(id, overrides) };
+    const patch = FingerprintIdentityPatchSchema.parse(req.body ?? {});
+    return { identity: service.updateIdentity(id, patch) };
   });
 
   // Proxy rotation link (D-003): at launch, when nothing more specific
