@@ -6,105 +6,97 @@
     <title>QueuePilot</title>
     <link rel="stylesheet" href="/dashboard/styles.css" />
   </head>
-  <body>
-    <header>
-      <h1>QueuePilot</h1>
-      <div class="chips">
-        <span id="engine" class="chip" title="engine health">engine…</span>
-        <span id="google" class="chip" title="google connection">google…</span>
-        <span id="sse" class="chip chip-off" title="live event stream"
-          >offline</span
-        >
+  <body data-density="comfortable">
+    <!-- ============================ sidebar ============================ -->
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="logo">▦</span><span class="name">QueuePilot</span>
+        <span class="ver">v0.16</span>
       </div>
-    </header>
+      <nav id="nav">
+        <button data-view="profiles" class="active"><span class="ico">▦</span><span class="lbl">Profiles</span><kbd>P</kbd></button>
+        <button data-view="proxies"><span class="ico">⇄</span><span class="lbl">Proxies</span><kbd>X</kbd></button>
+        <button data-view="tabs"><span class="ico">⊞</span><span class="lbl">Tabs</span><kbd>T</kbd></button>
+        <button data-view="cookies"><span class="ico">◈</span><span class="lbl">Cookies</span><kbd>C</kbd></button>
+        <button data-view="providers"><span class="ico">⇶</span><span class="lbl">Providers</span><kbd>V</kbd></button>
+        <button data-view="events"><span class="ico">≡</span><span class="lbl">Events</span><kbd>E</kbd></button>
+        <button data-view="settings"><span class="ico">⚙</span><span class="lbl">Settings</span><kbd>G</kbd></button>
+      </nav>
+      <div class="side-status">
+        <div><span id="engine-dot" class="dot dot-off"></span><span id="engine">engine…</span></div>
+        <div><span id="google-dot" class="dot dot-off"></span><span id="google">google …</span></div>
+        <div><span id="sse-dot" class="dot dot-off"></span><span id="sse">offline</span></div>
+        <div class="plan">LOCAL · FAMILY USE</div>
+      </div>
+    </aside>
 
-    <main>
-      <section id="setup">
-        <div class="section-head">
-          <h2>Setup checklist</h2>
-          <span class="hint">first-run sanity</span>
-        </div>
-        <ul id="checklist" class="checklist"></ul>
-      </section>
+    <!-- ============================= main ============================== -->
+    <div id="main">
+      <header id="topbar">
+        <h2 id="view-title">Profiles</h2>
+        <div id="view-stats"></div>
+        <div id="topbar-actions"></div>
+      </header>
 
-      <section>
-        <div class="section-head">
-          <h2>Profiles</h2>
-          <form id="create-profile">
-            <input id="new-name" placeholder="name" required maxlength="120" />
-            <input
-              id="new-group"
-              placeholder="group (optional)"
-              maxlength="120"
-            />
-            <button type="submit">Create</button>
-          </form>
-          <input id="profile-search" placeholder="search profiles" maxlength="120" title="filter by name, email, or group" />
-        </div>
-        <div id="profile-tabs" class="folder-tabs"></div>
-        <div id="profiles" class="grid"></div>
-        <div id="batch-bar" class="batch-bar" hidden>
-          <span id="batch-count"></span>
-          <button id="batch-start">Start selected</button>
-          <button id="batch-stop" class="danger">Stop selected</button>
-          <button id="tile-cascade" class="secondary">Tile cascade</button>
-          <button id="tile-grid" class="secondary">Tile grid</button>
-          <select id="batch-move-group" class="secondary" title="move selected to group"></select>
-          <button id="batch-move" class="secondary">Move</button>
-          <button id="batch-clear" class="secondary">Clear</button>
-          <span class="hint">start delay from Settings → Launch; tiling arranges the selected profiles' windows</span>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <h2>Import profiles (CSV)</h2>
-          <span class="hint">dry-run first, then apply</span>
-        </div>
-        <div id="import">
-          <div class="import-controls">
-            <input type="file" id="import-file" accept=".csv,.xlsx,text/csv" />
-            <textarea
-              id="import-csv"
-              rows="5"
-              placeholder="name,group,proxyType,proxyHost,proxyPort,proxyUsername,proxyPassword,tags,notes"
-            ></textarea>
-            <label><input type="checkbox" id="import-upsert" /> update existing profiles with the same name</label>
-            <div class="actions">
-              <button id="import-preview" class="secondary">Preview (dry run)</button>
-              <button id="import-apply" disabled>Apply import</button>
+      <div id="content">
+        <!-- ========================== profiles ========================== -->
+        <section class="view" id="view-profiles">
+          <div id="checklist-banner" hidden>
+            <ul id="checklist"></ul>
+            <button id="checklist-close" class="ghost" title="dismiss for this session">✕</button>
+          </div>
+          <div class="toolbar">
+            <div id="profile-tabs" class="filter-chips"></div>
+            <div class="spacer"></div>
+            <input type="search" id="profile-search" placeholder="Search profiles…  ( / )" maxlength="120" title="filter by name, email, or group" />
+          </div>
+          <div class="table-wrap">
+            <table class="grid" id="profiles-table">
+              <thead>
+                <tr>
+                  <th style="width:28px"></th>
+                  <th style="width:44px">#</th>
+                  <th>Name</th>
+                  <th style="width:110px">Status</th>
+                  <th>Proxy</th>
+                  <th>Group</th>
+                  <th style="width:56px">Tabs</th>
+                  <th style="width:190px">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="profiles-empty" hidden>
+              <div class="big">▦</div>
+              No profiles here yet — create one with <b>+ New Profile</b> or import a CSV.
             </div>
           </div>
-          <div id="import-result"></div>
-        </div>
-      </section>
+          <div id="pagination"></div>
+        </section>
 
-      <section>
-        <div class="section-head"><h2>Proxies</h2></div>
-        <table id="proxies">
-          <thead>
-            <tr>
-              <th>name</th>
-              <th>type</th>
-              <th>endpoint</th>
-              <th>timezone</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </section>
+        <!-- ========================== proxies =========================== -->
+        <section class="view" id="view-proxies" hidden>
+          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Add them via a <b>provider</b> (Providers view) or a CSV/xlsx profile import.</div>
+          <div class="table-wrap">
+            <table class="grid" id="proxies">
+              <thead>
+                <tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:220px">Liveness</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="proxies-empty" hidden>
+              <div class="big">⇄</div>
+              No proxies configured — profiles will use your real IP.
+            </div>
+          </div>
+        </section>
 
-      <section>
-        <div class="section-head">
-          <h2>Tabs</h2>
-          <span class="hint">Tab Thinger: <code>status:open url:*shop*</code> ·
-            bare word = url match · <code>!</code> negates · <code>*</code> wildcard</span>
-        </div>
-        <div id="tabs-panel">
-          <div class="import-controls">
-            <select id="tabs-profile"><option value="">(running profiles…)</option></select>
-            <input id="tabs-query" placeholder="tab query — empty = all tabs" maxlength="500" />
+        <!-- ============================ tabs ============================ -->
+        <section class="view" id="view-tabs" hidden>
+          <div class="view-hint">Tab query syntax: <code>status:open url:*shop*</code> · bare word = url match · <code>!</code> negates · <code>*</code> wildcard</div>
+          <div class="toolbar">
+            <select id="tabs-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>
+            <input id="tabs-query" placeholder="tab query — empty = all tabs" maxlength="500" style="min-width:260px" />
             <select id="tabs-sort" title="sort order">
               <option value="">(no sort)</option>
               <option value="newest">newest</option>
@@ -114,57 +106,149 @@
               <option value="status">status</option>
               <option value="partition">partition</option>
             </select>
-            <button id="tabs-run" class="secondary">Query</button>
-            <label><input type="checkbox" id="tabs-select-all" /> all selected</label>
+            <button id="tabs-run" class="primary">Query</button>
+            <div class="spacer"></div>
+            <label style="color:var(--muted);font-size:12px"><input type="checkbox" id="tabs-select-all" /> all</label>
             <button id="tabs-close" class="danger">Close selected</button>
           </div>
-          <div class="import-controls">
-            <input id="tabs-open-urls" placeholder="bulk-open URLs, one per line" />
-            <button id="tabs-open" class="secondary">Open all</button>
+          <div class="toolbar">
+            <input id="tabs-open-urls" placeholder="bulk-open URLs, one per line" style="flex:1;min-width:300px" />
+            <button id="tabs-open">Open all</button>
           </div>
-          <table id="tabs-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>url</th>
-                <th>status</th>
-                <th>partition</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <div id="tabs-summary" class="hint"></div>
-        </div>
-      </section>
+          <div class="table-wrap">
+            <table class="grid" id="tabs-table">
+              <thead>
+                <tr><th style="width:28px"></th><th>URL</th><th style="width:100px">Status</th><th style="width:110px">Partition</th><th style="width:80px"></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="tabs-empty" hidden>
+              <div class="big">⊞</div>
+              Start a profile, then query its tabs here.
+            </div>
+          </div>
+          <div id="tabs-summary" class="view-hint" style="margin-top:8px"></div>
+        </section>
 
-      <section>
-        <div class="section-head">
-          <h2>Events</h2>
-          <span class="hint">live via SSE</span>
-        </div>
-        <ul id="events" class="events"></ul>
-      </section>
+        <!-- =========================== cookies ========================== -->
+        <section class="view" id="view-cookies" hidden>
+          <div class="view-hint">Cookie surgery runs on a <b>running</b> profile over CDP. Values are redacted unless this install runs with <code>SPECTRA_API_TOKEN</code>.</div>
+          <div class="toolbar">
+            <select id="cookies-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>
+            <button id="cookies-refresh" class="primary">Load jar</button>
+            <div class="spacer"></div>
+            <select id="cookies-export-format"><option value="netscape">Netscape .txt</option><option value="json">JSON</option></select>
+            <button id="cookies-export">Export</button>
+          </div>
+          <div class="toolbar">
+            <select id="cookies-import-format"><option value="netscape">Netscape</option><option value="json">JSON</option></select>
+            <input type="file" id="cookies-file" accept=".txt,.json,text/plain,application/json" />
+            <button id="cookies-import">Import into jar</button>
+            <div class="spacer"></div>
+            <input id="cookies-clear-filter" placeholder="domain filter, e.g. .example.com" style="min-width:220px" />
+            <button id="cookies-clear" class="danger">Clear matching</button>
+          </div>
+          <div class="table-wrap">
+            <table class="grid" id="cookies-table">
+              <thead>
+                <tr><th>Name</th><th>Domain</th><th>Path</th><th>Expires</th><th style="width:56px">Sec</th><th style="width:56px">Http</th><th>Value</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="cookies-empty" hidden>
+              <div class="big">◈</div>
+              No cookies loaded — start a profile, pick it above, then <b>Load jar</b>.
+            </div>
+          </div>
+          <div id="cookies-status" class="view-hint" style="margin-top:8px"></div>
+        </section>
 
-      <section>
-        <div class="section-head">
-          <h2>Settings</h2>
-          <span class="hint">saved automatically on change</span>
-        </div>
-        <div id="settings-panel">
-          <div id="settings-nav" class="settings-nav"></div>
-          <form id="settings-form" class="settings-form"></form>
-          <div id="settings-status" class="hint"></div>
-        </div>
-      </section>
-    </main>
+        <!-- ========================== providers ========================= -->
+        <section class="view" id="view-providers" hidden>
+          <div class="view-hint">★ = default provider — new profile imports draw proxies from it. Profile imports (CSV/xlsx) live on the Profiles page under <b>Import</b>.</div>
+          <div class="table-wrap">
+            <table class="grid" id="proxy-providers">
+              <thead>
+                <tr><th style="width:40px"></th><th>Name</th><th>Type</th><th>Distribution</th><th style="width:220px">Refresh</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="providers-empty" hidden>
+              <div class="big">⇶</div>
+              No proxy providers yet — add a delimited file or Google Sheet provider over the API.
+            </div>
+          </div>
+        </section>
 
-    <!-- v0.14.20 profile panel: slide-over editor for one profile.
-         Opened from the "Edit" button on a card (or clicking the name). -->
-    <div id="profile-panel" class="profile-panel" hidden>
+        <!-- =========================== events =========================== -->
+        <section class="view" id="view-events" hidden>
+          <ul id="events" class="events"></ul>
+        </section>
+
+        <!-- ========================== settings ========================== -->
+        <section class="view" id="view-settings" hidden>
+          <div class="settings-layout">
+            <div id="settings-nav" class="settings-nav"></div>
+            <div style="flex:1;min-width:0">
+              <div id="integrations-info"></div>
+              <form id="settings-form" class="settings-form"></form>
+              <div id="settings-status" class="settings-status"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- floating batch action bar -->
+    <div id="batch-bar" hidden>
+      <span id="batch-count"></span>
+      <button id="batch-start" class="primary">Start</button>
+      <button id="batch-stop" class="danger">Stop</button>
+      <button id="batch-delete" class="danger">Delete</button>
+      <span style="width:1px;height:18px;background:var(--border)"></span>
+      <button id="tile-cascade" title="arrange the selected profiles' windows in a cascade">Tile cascade</button>
+      <button id="tile-grid" title="arrange the selected profiles' windows in a grid">Tile grid</button>
+      <select id="batch-move-group" title="move selected to group"></select>
+      <button id="batch-move">Move</button>
+      <button id="batch-clear" class="ghost">Clear</button>
+    </div>
+
+    <!-- new-profile modal -->
+    <div id="create-modal" class="overlay" hidden>
+      <div class="drawer" style="width:380px">
+        <div class="drawer-head"><h3>New Profile</h3><button id="create-close" class="ghost">✕</button></div>
+        <form id="create-profile" style="display:flex;flex-direction:column;gap:13px">
+          <label>Name <input id="new-name" required maxlength="120" placeholder="account-1" /></label>
+          <label>Group <input id="new-group" maxlength="120" placeholder="(optional)" /></label>
+          <div class="actions">
+            <button type="submit" class="primary">Create profile</button>
+            <span class="hint">A coherent fingerprint identity is generated automatically.</span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- import drawer -->
+    <div id="import-modal" class="overlay" hidden>
+      <div class="drawer">
+        <div class="drawer-head"><h3>Import Profiles</h3><button id="import-close" class="ghost">✕</button></div>
+        <div class="hint">Dry-run first, then apply. <b>.xlsx</b> files and CSV text are both accepted; column spec: <code>name, group, proxyType, proxyHost, proxyPort, proxyUsername, proxyPassword, tags, notes, …</code></div>
+        <input type="file" id="import-file" accept=".csv,.xlsx,text/csv" />
+        <textarea id="import-csv" rows="8" placeholder="…or paste CSV rows here"></textarea>
+        <label class="check"><input type="checkbox" id="import-upsert" /> update existing profiles with the same name</label>
+        <div class="actions">
+          <button id="import-preview" class="primary">Preview (dry run)</button>
+          <button id="import-apply" disabled>Apply import</button>
+        </div>
+        <div id="import-result"></div>
+      </div>
+    </div>
+
+    <!-- v0.14.20 profile editor: slide-over for one profile -->
+    <div id="profile-panel" hidden>
       <div class="panel-head">
         <h3 id="panel-title">Profile</h3>
-        <button id="panel-close" class="secondary" title="close">✕</button>
+        <button id="panel-close" class="ghost" title="close">✕</button>
       </div>
       <form id="panel-form">
         <fieldset>
@@ -185,11 +269,11 @@
           <label>address line 1 <input id="pf-address1" maxlength="200" /></label>
           <label>SMS numbers <textarea id="pf-sms" rows="2" placeholder="one per line"></textarea></label>
           <label>start pages <textarea id="pf-starturls" rows="2" placeholder="one URL per line, opened at launch"></textarea></label>
-          <label>tab color <input id="pf-tabcolor" type="color" /> <button type="button" id="pf-clearcolor" class="secondary">clear</button></label>
+          <label class="inline">tab color <input id="pf-tabcolor" type="color" /> <button type="button" id="pf-clearcolor" class="ghost">clear</button></label>
           <label class="check"><input id="pf-favorite" type="checkbox" /> favorite</label>
         </fieldset>
         <div class="panel-actions">
-          <button type="submit">Save</button>
+          <button type="submit" class="primary">Save</button>
           <button type="button" id="pf-delete" class="danger">Delete profile</button>
           <span id="panel-status" class="hint"></span>
         </div>

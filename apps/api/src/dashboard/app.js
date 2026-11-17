@@ -1,6 +1,9 @@
 /* QueuePilot dashboard — zero-build, zero-dependency, talks only to the API
    on this origin (loopback). All state comes from the REST API; live updates
-   arrive over the SSE stream. */
+   arrive over the SSE stream.
+
+   Ops-console layout: sidebar views (Profiles/Proxies/Tabs/Cookies/
+   Providers/Events/Settings), top action bar, single scrolling table. */
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -26,35 +29,92 @@ const esc = (s) =>
       ],
   );
 
-/* ---------------- engine + google chips ---------------- */
+function toast(detail, type = "info") {
+  pushEvent({ type, detail, at: new Date().toISOString() });
+}
+
+/* ============================ view switching ============================ */
+
+const VIEWS = ["profiles", "proxies", "tabs", "cookies", "providers", "events", "settings"];
+let activeView = "profiles";
+
+function setView(name) {
+  if (!VIEWS.includes(name)) return;
+  activeView = name;
+  for (const v of VIEWS) {
+    $(`#view-${v}`).hidden = v !== name;
+    document.querySelector(`#nav button[data-view="${v}"]`)?.classList.toggle("active", v === name);
+  }
+  $("#view-title").textContent = name.charAt(0).toUpperCase() + name.slice(1);
+  renderTopbarActions();
+  renderStats();
+  if (name === "cookies") refreshCookiesProfiles();
+}
+
+document.querySelectorAll("#nav button").forEach((b) =>
+  b.addEventListener("click", () => setView(b.dataset.view)),
+);
+
+window.addEventListener("keydown", (e) => {
+  const tag = e.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  const k = e.key.toLowerCase();
+  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", v: "providers", e: "events", g: "settings" };
+  if (map[k]) setView(map[k]);
+  if (k === "/" && activeView === "profiles") {
+    e.preventDefault();
+    $("#profile-search")?.focus();
+  }
+});
+
+/* per-view topbar actions */
+function renderTopbarActions() {
+  const bar = $("#topbar-actions");
+  bar.innerHTML = "";
+  if (activeView === "profiles") {
+    bar.innerHTML = `
+      <button id="tb-new" class="primary">+ New Profile</button>
+      <button id="tb-import">Import</button>
+      <button id="tb-export" title="download the visible profiles as CSV">Export</button>
+      <span class="sep"></span>
+      <button id="tb-start" title="start selected profiles">▶ Start</button>
+      <button id="tb-stop" class="danger" title="stop selected profiles">■ Stop</button>
+      <button id="tb-delete" class="danger" title="delete selected profiles">Delete</button>`;
+    $("#tb-new").addEventListener("click", () => { $("#create-modal").hidden = false; $("#new-name").focus(); });
+    $("#tb-import").addEventListener("click", () => { $("#import-modal").hidden = false; });
+    $("#tb-export").addEventListener("click", exportVisibleCsv);
+    $("#tb-start").addEventListener("click", startSelected);
+    $("#tb-stop").addEventListener("click", stopSelected);
+    $("#tb-delete").addEventListener("click", deleteSelected);
+  }
+}
+
+/* ======================= engine + google + sse status =================== */
 
 async function refreshHealth() {
   try {
     const h = await api("/engine/health");
-    const el = $("#engine");
-    el.textContent = h.binaryPresent
-      ? `engine: ${h.runtime}`
-      : `engine binary missing`;
-    el.className = "chip " + (h.binaryPresent ? "chip-on" : "chip-off");
+    $("#engine").textContent = h.binaryPresent ? `engine: ${h.runtime}` : "engine binary missing";
+    $("#engine-dot").className = "dot " + (h.binaryPresent ? "dot-on" : "dot-warn");
   } catch {
     $("#engine").textContent = "engine: ?";
+    $("#engine-dot").className = "dot dot-off";
   }
   try {
     const g = await api("/google/auth/status");
-    const el = $("#google");
-    el.textContent = g.connected ? "google connected" : "google not connected";
-    el.className = "chip " + (g.connected ? "chip-on" : "");
+    $("#google").textContent = g.connected ? "google connected" : "google not connected";
+    $("#google-dot").className = "dot " + (g.connected ? "dot-on" : "dot-off");
   } catch {
     /* chip stays muted */
   }
 }
 
-/* ---------------- setup checklist (P5.5 first-run) ---------------- */
+/* ========================= setup checklist (P5.5) ======================= */
+
+let checklistDismissed = false;
 
 async function loadChecklist() {
-  const ul = $("#checklist");
   const items = [];
-  // 1. engine binary present
   try {
     const h = await api("/engine/health");
     items.push({
@@ -62,14 +122,10 @@ async function loadChecklist() {
       label: h.binaryPresent
         ? `engine installed (${h.installs.length} verified install${h.installs.length === 1 ? "" : "s"})`
         : "engine binary missing — run setup.ps1 from the engine package",
-      action: h.binaryPresent
-        ? null
-        : { text: "AV notes", href: "https://github.com/info5starmedia-jpg/queuepilot/blob/main/docs/av-notes.md" },
     });
   } catch {
     items.push({ ok: false, label: "engine health unreachable" });
   }
-  // 2. proxies configured
   try {
     const { proxies } = await api("/proxies");
     items.push({
@@ -81,40 +137,43 @@ async function loadChecklist() {
   } catch {
     items.push({ ok: false, label: "proxy list unreachable" });
   }
-  // 3. profiles exist
   try {
     const { profiles } = await api("/profiles");
     items.push({
       ok: profiles.length > 0,
       label: profiles.length
         ? `${profiles.length} profile${profiles.length === 1 ? "" : "s"} ready`
-        : "no profiles yet — create one above or import a CSV",
+        : "no profiles yet — create one or import a CSV",
     });
   } catch {
     items.push({ ok: false, label: "profile list unreachable" });
   }
-  ul.innerHTML = "";
-  for (const it of items) {
-    const li = document.createElement("li");
-    li.className = it.ok ? "check-ok" : "check-warn";
-    li.innerHTML = `<span class="mark">${it.ok ? "✓" : "!"}</span> ${esc(it.label)}${
-      it.action ? ` <a href="${esc(it.action.href)}" target="_blank" rel="noreferrer">${esc(it.action.text)}</a>` : ""
-    }`;
-    ul.appendChild(li);
+  const allOk = items.every((i) => i.ok);
+  const banner = $("#checklist-banner");
+  if (allOk || checklistDismissed) {
+    banner.hidden = true;
+    return;
   }
+  banner.hidden = false;
+  $("#checklist").innerHTML = items
+    .map((it) => `<li class="${it.ok ? "ok" : "warn"}"><span class="mark">${it.ok ? "✓" : "!"}</span>${esc(it.label)}</li>`)
+    .join("");
 }
 
-/* ---------------- profiles ---------------- */
+$("#checklist-close").addEventListener("click", () => {
+  checklistDismissed = true;
+  $("#checklist-banner").hidden = true;
+});
 
-/* A2 batch selection — survives card re-renders (SSE run.* events reload
-   the grid constantly, so selection lives here, not in the DOM). */
+/* ============================= profiles ================================ */
+
+/* Batch selection survives re-renders (SSE run.* events reload the table
+   constantly, so selection lives here, not in the DOM). */
 const batchSelection = new Set();
 
 function updateBatchBar() {
-  const bar = $("#batch-bar");
-  if (!bar) return;
   const n = batchSelection.size;
-  bar.hidden = n === 0;
+  $("#batch-bar").hidden = n === 0;
   $("#batch-count").textContent = `${n} selected`;
 }
 
@@ -122,64 +181,115 @@ async function startSelected() {
   const ids = [...batchSelection];
   if (ids.length === 0) return;
   const staggerMs = settingsData?.launch?.batchStaggerMs ?? 0;
-  const btn = $("#batch-start");
-  btn.disabled = true;
   try {
     const r = await api("/profiles/batch-start", {
       method: "POST",
       body: JSON.stringify({ ids, staggerMs }),
     });
     const failed = r.results.filter((x) => x.status === "failed").length;
-    pushEvent({
-      type: "info",
-      detail: `batch-start: ${r.results.length - failed}/${r.results.length} started${failed ? `, ${failed} failed` : ""}`,
-      at: new Date().toISOString(),
-    });
+    toast(`batch-start: ${r.results.length - failed}/${r.results.length} started${failed ? `, ${failed} failed` : ""}`);
     for (const x of r.results.filter((x) => x.status === "failed")) {
-      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
+      toast(`${x.id}: ${x.error?.message ?? "failed"}`, "error");
     }
     batchSelection.clear();
     updateBatchBar();
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
-  } finally {
-    btn.disabled = false;
+    toast(err.message, "error");
   }
   await loadProfiles();
 }
 
-/* v0.14.16 folder tabs — "All" plus one tab per group (GoLogin pattern).
-   All profiles are fetched once and filtered client-side so switching tabs
-   is instant; SSE reloads refresh both the tabs and the grid. */
+async function stopSelected() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  try {
+    const r = await api("/profiles/batch-stop", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    const failed = r.results.filter((x) => x.status === "failed").length;
+    toast(`batch-stop: ${r.results.length - failed}/${r.results.length} stopped${failed ? `, ${failed} failed` : ""}`);
+    for (const x of r.results.filter((x) => x.status === "failed")) {
+      toast(`${x.id}: ${x.error?.message ?? "failed"}`, "error");
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadProfiles();
+}
+
+async function deleteSelected() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  if (!window.confirm(`Delete ${ids.length} profile${ids.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+  let okCount = 0;
+  for (const id of ids) {
+    try {
+      await api(`/profiles/${id}`, { method: "DELETE" });
+      okCount++;
+    } catch (err) {
+      toast(`${id}: ${err.message}`, "error");
+    }
+  }
+  toast(`deleted ${okCount}/${ids.length} profiles`);
+  batchSelection.clear();
+  updateBatchBar();
+  await loadProfiles();
+}
+
+async function tileSelected(preset) {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  try {
+    const r = await api("/profiles/batch-tile", {
+      method: "POST",
+      body: JSON.stringify({ ids, preset }),
+    });
+    const failed = r.results.filter((x) => x.status === "failed").length;
+    toast(`tile ${preset}: ${r.results.length - failed}/${r.results.length} placed${failed ? `, ${failed} failed` : ""}`);
+    for (const x of r.results.filter((x) => x.status === "failed")) {
+      toast(`${x.id}: ${x.error?.message ?? "failed"}`, "error");
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+/* Group filter chips — "All" plus one chip per group (GoLogin pattern).
+   All profiles are fetched once and filtered client-side. */
 let allProfiles = [];
 let activeGroup = "all";
-/* v0.14.19 search box — client-side filter over the already-fetched list. */
 let profileQuery = "";
+let proxyById = new Map();
+/* pagination */
+let page = 1;
+let pageSize = Number(localStorage.getItem("qp.pageSize")) || 20;
 
 function renderProfileTabs(groups) {
-  const bar = $("#profile-tabs");
   const total = groups.reduce((n, g) => n + g.total, 0);
   const running = groups.reduce((n, g) => n + g.running, 0);
   const tabs = [
     { key: "all", label: "All", total, running },
     ...groups.map((g) => ({ key: g.group, label: g.group, total: g.total, running: g.running })),
   ];
+  const bar = $("#profile-tabs");
   bar.innerHTML = "";
   for (const t of tabs) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "folder-tab" + (t.key === activeGroup ? " active" : "");
-    b.innerHTML = `${esc(t.label)} <span class="folder-count">${t.total}${t.running ? ` · ${t.running}▶` : ""}</span>`;
+    b.className = "chip-tab" + (t.key === activeGroup ? " active" : "");
+    b.innerHTML = `${esc(t.label)}<span class="count">${t.total}${t.running ? ` · <span class="run">${t.running}▶</span>` : ""}</span>`;
     b.addEventListener("click", () => {
       activeGroup = t.key;
+      page = 1;
       renderProfileTabs(groups);
-      renderProfileGrid();
+      renderProfileTable();
     });
     if (t.key !== "all") {
       const edit = document.createElement("span");
-      edit.className = "tab-edit";
+      edit.className = "rename";
       edit.title = "rename group";
-      edit.textContent = " ✎";
+      edit.textContent = "✎";
       edit.addEventListener("click", async (ev) => {
         ev.stopPropagation();
         const to = window.prompt(`Rename group "${t.label}" to:`, t.label);
@@ -192,20 +302,17 @@ function renderProfileTabs(groups) {
           if (activeGroup === t.label) activeGroup = to.trim();
           await loadProfiles();
         } catch (err) {
-          pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+          toast(err.message, "error");
         }
       });
       b.appendChild(edit);
     }
     bar.appendChild(b);
   }
-  // populate the batch-bar move dropdown with the current groups
   const moveSel = $("#batch-move-group");
-  if (moveSel) {
-    moveSel.innerHTML =
-      groups.map((g) => `<option value="${esc(g.group)}">${esc(g.group)}</option>`).join("") +
-      `<option value="__new__">+ new group…</option>`;
-  }
+  moveSel.innerHTML =
+    groups.map((g) => `<option value="${esc(g.group)}">${esc(g.group)}</option>`).join("") +
+    `<option value="__new__">+ new group…</option>`;
 }
 
 function visibleProfiles() {
@@ -224,6 +331,26 @@ function visibleProfiles() {
   return list;
 }
 
+function renderStats() {
+  const stats = $("#view-stats");
+  if (activeView !== "profiles") {
+    stats.innerHTML = "";
+    return;
+  }
+  const buckets = { running: 0, idle: 0, stopped: 0, error: 0 };
+  for (const p of allProfiles) {
+    const s = String(p.status ?? "idle").toLowerCase();
+    if (s in buckets) buckets[s]++;
+    else buckets.idle++;
+  }
+  stats.innerHTML = `
+    <span>PROFILES <b>${allProfiles.length}</b></span>
+    <span class="st-running">RUNNING <b>${buckets.running}</b></span>
+    <span class="st-idle">IDLE <b>${buckets.idle}</b></span>
+    <span>STOPPED <b>${buckets.stopped}</b></span>
+    <span class="st-error">ERROR <b>${buckets.error}</b></span>`;
+}
+
 async function loadProfiles() {
   const [{ profiles }, groupData] = await Promise.all([
     api("/profiles"),
@@ -231,19 +358,26 @@ async function loadProfiles() {
   ]);
   allProfiles = profiles;
   renderProfileTabs(groupData.groups ?? []);
-  renderProfileGrid();
+  renderProfileTable();
+  renderStats();
+  loadChecklist();
 }
 
-async function renderProfileGrid() {
-  const grid = $("#profiles");
-  grid.innerHTML = "";
-  const profiles = visibleProfiles();
+async function renderProfileTable() {
+  const tbody = $("#profiles-table tbody");
+  tbody.innerHTML = "";
+  const list = visibleProfiles();
+  $("#profiles-empty").hidden = list.length !== 0;
 
-  // ONE batch request for every running profile's drift + tab count — the
-  // old per-card /drift + /tabs pair was 2N requests per grid refresh and
-  // buckled past a few dozen running profiles (audit B4).
+  const pageCount = Math.max(1, Math.ceil(list.length / pageSize));
+  if (page > pageCount) page = pageCount;
+  const start = (page - 1) * pageSize;
+  const rows = list.slice(start, start + pageSize);
+
+  /* ONE batch request for every running profile's drift + tab count —
+     per-row polling buckled past a few dozen running profiles (audit B4). */
   const stateById = new Map();
-  const runningIds = profiles.filter((p) => p.status === "running").map((p) => p.id);
+  const runningIds = rows.filter((p) => p.status === "running").map((p) => p.id);
   if (runningIds.length > 0) {
     try {
       const { states } = await api("/profiles/batch-state", {
@@ -256,44 +390,89 @@ async function renderProfileGrid() {
     }
   }
 
-  for (const p of profiles) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.dataset.id = p.id;
+  rows.forEach((p, i) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = p.id;
+    if (batchSelection.has(p.id)) tr.classList.add("selected");
 
-    let driftBadge = "";
-    let tabsInfo = "";
     const state = stateById.get(p.id);
-    if (state) {
-      if (state.drift?.stale)
-        driftBadge = `<span class="badge badge-drift" title="${esc(state.drift.message)}">applies at next start</span>`;
-      tabsInfo = `${state.tabCount} tab${state.tabCount === 1 ? "" : "s"}`;
-    }
-
+    const driftBadge = state?.drift?.stale
+      ? `<span class="tag tag-drift" title="${esc(state.drift.message)}">applies at next start</span>`
+      : "";
     const favorite = p.extra?.favorite === true;
     const tabColor = typeof p.extra?.tabColor === "string" ? p.extra.tabColor : null;
+    const proxy = p.proxyId ? proxyById.get(p.proxyId) : null;
+    const proxyText = proxy ? `${proxy.host}:${proxy.port}` : "—";
+    const status = String(p.status ?? "idle").toLowerCase();
+    const running = status === "running";
+    const tabCount = state ? state.tabCount : null;
 
-    card.innerHTML = `
-      <div><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select for batch" ${batchSelection.has(p.id) ? "checked" : ""} /> <span class="name">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}${esc(p.name)}</span><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span>${driftBadge}</div>
-      <div class="meta">${esc(p.group)}${p.email ? " · " + esc(p.email) : ""}${tabsInfo ? " · " + tabsInfo : ""}</div>
-      <div class="actions">
-        <button class="secondary" data-act="edit" title="open profile editor">Edit</button>
-        <button class="secondary" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</button>
-        ${
-          p.status === "running"
-            ? `<button class="danger" data-act="stop">Stop</button>`
-            : `<button data-act="start">Start</button>`
-        }
-        <button class="secondary" data-act="regen" title="regenerate fingerprint">New fingerprint</button>
-        <button class="secondary" data-act="clone" title="duplicate this profile with a fresh fingerprint">Clone</button>
-      </div>`;
-    card
-      .querySelectorAll("button")
-      .forEach((b) =>
-        b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act, p)),
-      );
-    grid.appendChild(card);
+    tr.innerHTML = `
+      <td><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select" ${batchSelection.has(p.id) ? "checked" : ""} /></td>
+      <td class="mono" style="color:var(--faint)">${String(start + i + 1).padStart(4, "0")}</td>
+      <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}</td>
+      <td><span class="status status-${esc(status)}"><span class="dot ${running ? "dot-on" : status === "error" ? "dot-warn" : "dot-off"}"></span>${esc(status.toUpperCase())}</span></td>
+      <td class="mono">${esc(proxyText)}</td>
+      <td><span class="tag">${esc(p.group ?? "default")}</span></td>
+      <td class="mono" style="color:var(--faint)">${tabCount ?? "—"}</td>
+      <td><span class="row-actions">
+        <button class="act-${running ? "stop" : "start"}" data-act="${running ? "stop" : "start"}" title="${running ? "stop" : "start"}">${running ? "■" : "▶"}</button>
+        <button class="act-edit" data-act="edit" title="edit profile">✎</button>
+        <button class="act-clone" data-act="clone" title="duplicate with a fresh fingerprint">⎘</button>
+        <button data-act="regen" title="regenerate fingerprint">↻</button>
+        <button class="act-delete" data-act="delete" title="delete profile">🗑</button>
+      </span></td>`;
+    tr.querySelectorAll("[data-act]").forEach((b) =>
+      b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act, p)),
+    );
+    tbody.appendChild(tr);
+  });
+
+  renderPagination(list.length, pageCount);
+}
+
+function renderPagination(total, pageCount) {
+  const el = $("#pagination");
+  if (total === 0) {
+    el.innerHTML = "";
+    return;
   }
+  const pages = [];
+  const push = (n) => pages[pages.length - 1] !== n && pages.push(n);
+  push(1);
+  for (let n = page - 1; n <= page + 1; n++) if (n > 1 && n < pageCount) push(n);
+  push(pageCount);
+  let pagesHtml = `<button data-page="prev" ${page === 1 ? "disabled" : ""}>‹</button>`;
+  let last = 0;
+  for (const n of pages) {
+    if (n - last > 1) pagesHtml += `<button disabled>…</button>`;
+    pagesHtml += `<button data-page="${n}" class="${n === page ? "cur" : ""}">${n}</button>`;
+    last = n;
+  }
+  pagesHtml += `<button data-page="next" ${page === pageCount ? "disabled" : ""}>›</button>`;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  el.innerHTML = `
+    <div class="pages">${pagesHtml}</div>
+    <label style="margin-left:14px">SHOW <select id="page-size">
+      ${[20, 50, 100].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n}</option>`).join("")}
+    </select></label>
+    <span class="range">${from}–${to} of ${total}</span>`;
+  el.querySelectorAll("[data-page]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const v = b.dataset.page;
+      if (v === "prev") page = Math.max(1, page - 1);
+      else if (v === "next") page = Math.min(pageCount, page + 1);
+      else page = Number(v);
+      renderProfileTable();
+    }),
+  );
+  $("#page-size").addEventListener("change", (e) => {
+    pageSize = Number(e.target.value);
+    localStorage.setItem("qp.pageSize", String(pageSize));
+    page = 1;
+    renderProfileTable();
+  });
 }
 
 async function onProfileAction(id, act, profile) {
@@ -306,10 +485,7 @@ async function onProfileAction(id, act, profile) {
       await api(`/profiles/${id}/start`, { method: "POST", body: "{}" });
     if (act === "stop") await api(`/profiles/${id}/stop`, { method: "POST" });
     if (act === "regen")
-      await api(`/profiles/${id}/fingerprint/regenerate`, {
-        method: "POST",
-        body: "{}",
-      });
+      await api(`/profiles/${id}/fingerprint/regenerate`, { method: "POST", body: "{}" });
     if (act === "clone") {
       const name = window.prompt("Name for the copy (blank = auto):", `${profile?.name ?? ""} copy`);
       const payload = name && name.trim() !== "" ? { name: name.trim() } : {};
@@ -322,21 +498,90 @@ async function onProfileAction(id, act, profile) {
         body: JSON.stringify({ favorite: next }),
       });
     }
+    if (act === "delete") {
+      if (!window.confirm(`Delete profile "${profile?.name ?? id}"? This cannot be undone.`)) return;
+      await api(`/profiles/${id}`, { method: "DELETE" });
+      batchSelection.delete(id);
+      updateBatchBar();
+    }
   } catch (err) {
-    pushEvent({
-      type: "error",
-      detail: err.message,
-      at: new Date().toISOString(),
-    });
+    toast(err.message, "error");
   }
   await loadProfiles();
 }
 
-/* ---------------- v0.14.20 profile panel ----------------
-   Slide-over editor for one profile: identity fields + the Jancy persona
-   columns (phone/dob/address/SMS/start pages/tab color/favorite), proxy
-   assignment, and delete. Reads GET /profiles/:id, saves PATCH
-   /profiles/:id + PATCH /profiles/:id/persona. */
+/* selection: delegated on the table so it survives re-renders */
+$("#profiles-table").addEventListener("change", (e) => {
+  const cb = e.target.closest?.(".batch-check");
+  if (!cb) return;
+  if (cb.checked) batchSelection.add(cb.dataset.batch);
+  else batchSelection.delete(cb.dataset.batch);
+  updateBatchBar();
+  const tr = cb.closest("tr");
+  if (tr) tr.classList.toggle("selected", cb.checked);
+});
+
+$("#profile-search").addEventListener("input", (e) => {
+  profileQuery = e.target.value.trim().toLowerCase();
+  page = 1;
+  renderProfileTable();
+});
+
+$("#batch-start").addEventListener("click", startSelected);
+$("#batch-stop").addEventListener("click", stopSelected);
+$("#batch-delete").addEventListener("click", deleteSelected);
+$("#tile-cascade").addEventListener("click", () => tileSelected("cascade"));
+$("#tile-grid").addEventListener("click", () => tileSelected("grid"));
+$("#batch-clear").addEventListener("click", () => {
+  batchSelection.clear();
+  updateBatchBar();
+  renderProfileTable();
+});
+$("#batch-move").addEventListener("click", async () => {
+  const ids = [...batchSelection];
+  if (ids.length === 0) return;
+  let group = $("#batch-move-group").value;
+  if (group === "__new__") {
+    const name = window.prompt("New group name:", "");
+    if (!name || name.trim() === "") return;
+    group = name.trim();
+  }
+  try {
+    const r = await api("/profiles/batch-move", {
+      method: "POST",
+      body: JSON.stringify({ ids, group }),
+    });
+    toast(`moved ${r.moved} profile${r.moved === 1 ? "" : "s"} to "${group}"`);
+    batchSelection.clear();
+    updateBatchBar();
+    await loadProfiles();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+});
+
+/* client-side CSV export of the visible profiles */
+function exportVisibleCsv() {
+  const list = visibleProfiles();
+  if (list.length === 0) return;
+  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [
+    ["name", "group", "email", "status", "tags", "notes"].join(","),
+    ...list.map((p) =>
+      [cell(p.name), cell(p.group), cell(p.email), cell(p.status), cell((p.tags ?? []).join(";")), cell(p.notes)]
+        .join(","),
+    ),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `queuepilot-profiles-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`exported ${list.length} profiles to CSV`);
+}
+
+/* ========================= profile editor panel ========================= */
 
 let panelProfileId = null;
 let panelExtra = {};
@@ -386,7 +631,7 @@ async function openProfilePanel(id) {
     $("#panel-status").textContent = "";
     $("#profile-panel").hidden = false;
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
 }
 
@@ -397,38 +642,26 @@ function closeProfilePanel() {
   $("#profile-panel").hidden = true;
 }
 
-$("#panel-close")?.addEventListener("click", closeProfilePanel);
+$("#panel-close").addEventListener("click", closeProfilePanel);
 
-$("#pf-clearcolor")?.addEventListener("click", () => {
+$("#pf-clearcolor").addEventListener("click", () => {
   panelTabColor = null;
   $("#panel-status").textContent = "tab color cleared — save to apply";
 });
 
-$("#panel-form")?.addEventListener("submit", async (e) => {
+$("#panel-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!panelProfileId) return;
   const id = panelProfileId;
   const tags = $("#pf-tags")
-    .value.split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 24);
+    .value.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 24);
   const email = $("#pf-email").value.trim();
-  const sms = $("#pf-sms")
-    .value.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 50);
-  const startUrls = $("#pf-starturls")
-    .value.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 25);
+  const sms = $("#pf-sms").value.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  const startUrls = $("#pf-starturls").value.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 25);
   const phone = $("#pf-phone").value.trim();
   const dob = $("#pf-dob").value.trim();
   const address1 = $("#pf-address1").value.trim();
   const colorInput = $("#pf-tabcolor").value;
-  // Color travels only if it changed from the loaded state or was cleared.
   const tabColor = panelTabColor === null ? null : /^#[0-9a-fA-F]{6}$/.test(colorInput) ? colorInput : null;
 
   try {
@@ -452,24 +685,19 @@ $("#panel-form")?.addEventListener("submit", async (e) => {
         phone: phone === "" ? null : phone,
         dob: dob === "" ? null : dob,
         tabColor,
-        // preserve the rest of the address object; line1 follows the input
         address: { ...(panelExtra.address ?? {}), line1: address1 === "" ? null : address1 },
       }),
     });
     $("#panel-status").textContent = "saved";
-    pushEvent({
-      type: "info",
-      detail: `profile "${$("#pf-name").value.trim()}" saved`,
-      at: new Date().toISOString(),
-    });
+    toast(`profile "${$("#pf-name").value.trim()}" saved`);
   } catch (err) {
     $("#panel-status").textContent = err.message;
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
   await loadProfiles();
 });
 
-$("#pf-delete")?.addEventListener("click", async () => {
+$("#pf-delete").addEventListener("click", async () => {
   if (!panelProfileId) return;
   const id = panelProfileId;
   const name = $("#pf-name").value.trim();
@@ -479,14 +707,17 @@ $("#pf-delete")?.addEventListener("click", async () => {
     batchSelection.delete(id);
     updateBatchBar();
     closeProfilePanel();
-    pushEvent({ type: "info", detail: `profile "${name}" deleted`, at: new Date().toISOString() });
+    toast(`profile "${name}" deleted`);
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
   await loadProfiles();
 });
 
-$("#create-profile").addEventListener("submit", async (e) => {  e.preventDefault();
+/* ========================= create profile modal ========================= */
+
+$("#create-profile").addEventListener("submit", async (e) => {
+  e.preventDefault();
   const name = $("#new-name").value.trim();
   const group = $("#new-group").value.trim();
   if (!name) return;
@@ -497,153 +728,53 @@ $("#create-profile").addEventListener("submit", async (e) => {  e.preventDefault
     });
     $("#new-name").value = "";
     $("#new-group").value = "";
+    $("#create-modal").hidden = true;
   } catch (err) {
-    pushEvent({
-      type: "error",
-      detail: err.message,
-      at: new Date().toISOString(),
-    });
+    toast(err.message, "error");
   }
   await loadProfiles();
 });
 
-// A2 batch selection: delegated so it survives grid re-renders.
-$("#profiles").addEventListener("change", (e) => {
-  const cb = e.target.closest?.(".batch-check");
-  if (!cb) return;
-  if (cb.checked) batchSelection.add(cb.dataset.batch);
-  else batchSelection.delete(cb.dataset.batch);
-  updateBatchBar();
-});
+$("#create-close").addEventListener("click", () => { $("#create-modal").hidden = true; });
+$("#create-modal").addEventListener("click", (e) => { if (e.target.id === "create-modal") $("#create-modal").hidden = true; });
 
-$("#batch-start")?.addEventListener("click", startSelected);
-
-/* v0.14.19 search box — re-render only; data is already client-side. */
-$("#profile-search")?.addEventListener("input", (e) => {
-  profileQuery = e.target.value.trim().toLowerCase();
-  renderProfileGrid();
-});
-
-/* v0.14.19 batch stop — mirror of startSelected; stop is idempotent, so
-   already-stopped profiles still count as success. Selection is kept. */
-async function stopSelected() {
-  const ids = [...batchSelection];
-  if (ids.length === 0) return;
-  const btn = $("#batch-stop");
-  btn.disabled = true;
-  try {
-    const r = await api("/profiles/batch-stop", {
-      method: "POST",
-      body: JSON.stringify({ ids }),
-    });
-    const failed = r.results.filter((x) => x.status === "failed").length;
-    pushEvent({
-      type: "info",
-      detail: `batch-stop: ${r.results.length - failed}/${r.results.length} stopped${failed ? `, ${failed} failed` : ""}`,
-      at: new Date().toISOString(),
-    });
-    for (const x of r.results.filter((x) => x.status === "failed")) {
-      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
-    }
-  } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
-  } finally {
-    btn.disabled = false;
-  }
-  await loadProfiles();
-}
-
-$("#batch-stop")?.addEventListener("click", stopSelected);
-
-async function tileSelected(preset) {
-  const ids = [...batchSelection];
-  if (ids.length === 0) return;
-  try {
-    const r = await api("/profiles/batch-tile", {
-      method: "POST",
-      body: JSON.stringify({ ids, preset }),
-    });
-    const failed = r.results.filter((x) => x.status === "failed").length;
-    pushEvent({
-      type: "info",
-      detail: `tile ${preset}: ${r.results.length - failed}/${r.results.length} placed${failed ? `, ${failed} failed` : ""}`,
-      at: new Date().toISOString(),
-    });
-    for (const x of r.results.filter((x) => x.status === "failed")) {
-      pushEvent({ type: "error", detail: `${x.id}: ${x.error?.message ?? "failed"}`, at: new Date().toISOString() });
-    }
-  } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
-  }
-}
-
-$("#tile-cascade")?.addEventListener("click", () => tileSelected("cascade"));
-$("#tile-grid")?.addEventListener("click", () => tileSelected("grid"));
-
-$("#batch-move")?.addEventListener("click", async () => {
-  const ids = [...batchSelection];
-  if (ids.length === 0) return;
-  let group = $("#batch-move-group").value;
-  if (group === "__new__") {
-    const name = window.prompt("New group name:", "");
-    if (!name || name.trim() === "") return;
-    group = name.trim();
-  }
-  try {
-    const r = await api("/profiles/batch-move", {
-      method: "POST",
-      body: JSON.stringify({ ids, group }),
-    });
-    pushEvent({
-      type: "info",
-      detail: `moved ${r.moved} profile${r.moved === 1 ? "" : "s"} to "${group}"`,
-      at: new Date().toISOString(),
-    });
-    batchSelection.clear();
-    updateBatchBar();
-    await loadProfiles();
-  } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
-  }
-});
-
-$("#batch-clear")?.addEventListener("click", () => {
-  batchSelection.clear();
-  updateBatchBar();
-  loadProfiles();
-});
-
-/* ---------------- proxies ---------------- */
+/* ============================= proxies ================================ */
 
 async function loadProxies() {
   const { proxies } = await api("/proxies");
+  proxyById = new Map(proxies.map((p) => [p.id, p]));
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
+  $("#proxies-empty").hidden = proxies.length !== 0;
   for (const p of proxies) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${esc(p.name)}</td>
-      <td>${esc(p.type)}</td>
+      <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="tag">${esc(p.type)}</span></td>
       <td class="mono">${esc(p.host)}:${esc(p.port)}</td>
-      <td>${esc(p.timezone ?? "")}</td>
-      <td><button class="secondary" data-act="test">test</button> <span class="meta"></span></td>`;
-    tr.querySelector("button").addEventListener("click", async (ev) => {
-      const out = ev.target.parentElement.querySelector(".meta");
+      <td class="mono">${esc(p.timezone ?? "—")}</td>
+      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>`;
+    tr.querySelector("[data-act='test']").addEventListener("click", async (ev) => {
+      const out = tr.querySelector("[data-out]");
       out.textContent = "…";
       try {
         const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
         out.textContent = r.ok ? `ok · ${r.latencyMs}ms` : `fail: ${r.error}`;
+        out.style.color = r.ok ? "var(--green)" : "var(--red)";
       } catch (err) {
         out.textContent = err.message;
+        out.style.color = "var(--red)";
       }
     });
     tbody.appendChild(tr);
   }
 }
 
-/* ---------------- CSV import ---------------- */
+/* ========================= CSV / xlsx import ============================ */
 
-let lastImportCsv = null; // csv text that passed a dry run
+let pendingXlsx = null;
+let lastImportCsv = null;
+let lastImportXlsx = null;
 
 function renderImportResult(data, applied) {
   const box = $("#import-result");
@@ -662,29 +793,18 @@ function renderImportResult(data, applied) {
 }
 
 async function runImport(dryRun) {
-  // An .xlsx file picked in the file input takes the workbook endpoint;
-  // otherwise the textarea text goes through the CSV pipeline. Both share
-  // the same report shape, so rendering is identical.
   let data;
   if (pendingXlsx) {
     data = await api("/profiles/import-xlsx", {
       method: "POST",
-      body: JSON.stringify({
-        xlsx: pendingXlsx,
-        dryRun,
-        upsert: $("#import-upsert").checked,
-      }),
+      body: JSON.stringify({ xlsx: pendingXlsx, dryRun, upsert: $("#import-upsert").checked }),
     });
   } else {
     const csv = $("#import-csv").value.trim();
     if (!csv) return;
     data = await api("/profiles/import", {
       method: "POST",
-      body: JSON.stringify({
-        csv,
-        dryRun,
-        upsert: $("#import-upsert").checked,
-      }),
+      body: JSON.stringify({ csv, dryRun, upsert: $("#import-upsert").checked }),
     });
   }
   renderImportResult(data, !dryRun);
@@ -693,18 +813,16 @@ async function runImport(dryRun) {
     lastImportCsv = $("#import-csv").value.trim();
     lastImportXlsx = pendingXlsx;
   }
-  if (!dryRun) await loadProfiles();
+  if (!dryRun) {
+    $("#import-modal").hidden = true;
+    await loadProfiles();
+  }
 }
-
-/** Base64 of the last picked .xlsx (null = CSV mode). */
-let pendingXlsx = null;
-let lastImportXlsx = null;
 
 $("#import-file").addEventListener("change", (e) => {
   const f = e.target.files?.[0];
   if (!f) return;
   if (/\.xlsx$/i.test(f.name)) {
-    // Workbook mode: read bytes and keep them base64 for the import call.
     const reader = new FileReader();
     reader.onload = () => {
       pendingXlsx = String(reader.result ?? "").split(",")[1] ?? null;
@@ -732,62 +850,47 @@ $("#import-preview").addEventListener("click", async () => {
   try {
     await runImport(true);
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
 });
 
 $("#import-apply").addEventListener("click", async () => {
-  // The import source must be byte-identical to what passed the dry run —
-  // text edited or a different file picked re-locks the button.
-  if (
-    $("#import-csv").value.trim() !== lastImportCsv ||
-    pendingXlsx !== lastImportXlsx
-  ) {
+  /* The import source must be byte-identical to what passed the dry run. */
+  if ($("#import-csv").value.trim() !== lastImportCsv || pendingXlsx !== lastImportXlsx) {
     $("#import-apply").disabled = true;
     return;
   }
   try {
     await runImport(false);
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
 });
 
-/* ---------------- proxy providers (star = default) ---------------- */
+$("#import-close").addEventListener("click", () => { $("#import-modal").hidden = true; });
+$("#import-modal").addEventListener("click", (e) => { if (e.target.id === "import-modal") $("#import-modal").hidden = true; });
+
+/* ========================= proxy providers ============================== */
 
 async function loadProxyProviders() {
   let data;
   try {
     data = await api("/proxy-providers");
   } catch {
-    return; // providers surface optional
+    return; /* providers surface optional */
   }
-  let section = $("#proxy-providers");
-  if (!section) {
-    // Build the section lazily after the Proxies table.
-    const proxiesSection = $("#proxies")?.closest("section");
-    if (!proxiesSection) return;
-    section = document.createElement("section");
-    section.innerHTML = `
-      <div class="section-head"><h2>Proxy providers</h2>
-        <span class="hint">★ = default provider</span></div>
-      <table id="proxy-providers">
-        <thead><tr><th></th><th>name</th><th>type</th><th>distribution</th><th>proxies</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>`;
-    proxiesSection.after(section);
-  }
-  const tbody = section.querySelector("tbody");
+  const tbody = $("#proxy-providers tbody");
   tbody.innerHTML = "";
-  for (const p of data.providers ?? []) {
+  const providers = data.providers ?? [];
+  $("#providers-empty").hidden = providers.length !== 0;
+  for (const p of providers) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><button class="secondary" data-star title="star as default">${p.starred ? "★" : "☆"}</button></td>
-      <td>${esc(p.name)}</td>
-      <td>${esc(p.type)}</td>
-      <td>${esc(p.distribution)}</td>
-      <td class="meta" data-count>…</td>
-      <td><button class="secondary" data-act="refresh">refresh</button> <span class="meta" data-msg></span></td>`;
+      <td><button class="ghost" data-star title="star as default">${p.starred ? "★" : "☆"}</button></td>
+      <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="tag">${esc(p.type)}</span></td>
+      <td class="mono">${esc(p.distribution)}</td>
+      <td><button class="ghost" data-act="refresh">refresh</button> <span class="mono" style="color:var(--faint)" data-msg></span></td>`;
     tr.querySelector("[data-star]").addEventListener("click", async (ev) => {
       ev.target.disabled = true;
       try {
@@ -797,29 +900,30 @@ async function loadProxyProviders() {
         });
         await loadProxyProviders();
       } catch (err) {
-        pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+        toast(err.message, "error");
         ev.target.disabled = false;
       }
     });
-    tr.querySelector("[data-act='refresh']").addEventListener("click", async (ev) => {
+    tr.querySelector("[data-act='refresh']").addEventListener("click", async () => {
       const msg = tr.querySelector("[data-msg]");
       msg.textContent = "…";
       try {
         await api(`/proxy-providers/${p.id}/refresh`, { method: "POST" });
         msg.textContent = "ok";
+        msg.style.color = "var(--green)";
         await loadProxies();
-        await loadProxyProviders();
       } catch (err) {
         msg.textContent = err.message;
+        msg.style.color = "var(--red)";
       }
     });
     tbody.appendChild(tr);
   }
 }
 
-/* ---------------- tabs (Tab Thinger + mass select) ---------------- */
+/* ============================ tabs (Tab Thinger) ======================== */
 
-let lastTabs = []; // last query result, for the selection model
+let lastTabs = [];
 
 async function refreshTabsProfiles() {
   const sel = $("#tabs-profile");
@@ -843,6 +947,7 @@ async function runTabsQuery() {
   const tbody = $("#tabs-table tbody");
   if (!profileId) {
     tbody.innerHTML = "";
+    $("#tabs-empty").hidden = false;
     $("#tabs-summary").textContent = "start a profile to see its tabs";
     lastTabs = [];
     return;
@@ -861,14 +966,15 @@ async function runTabsQuery() {
   }
   lastTabs = data.tabs;
   tbody.innerHTML = "";
+  $("#tabs-empty").hidden = data.tabs.length !== 0;
   for (const t of data.tabs) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><input type="checkbox" data-tab="${esc(t.id)}" ${t.status === "closed" ? "disabled" : ""} /></td>
-      <td class="mono">${esc(t.url ?? "—")}</td>
-      <td><span class="badge badge-${esc(t.status)}">${esc(t.status)}</span></td>
-      <td class="mono">${esc(t.partitionId.slice(0, 8))}</td>
-      <td>${t.status === "open" ? `<button class="secondary" data-close="${esc(t.id)}">close</button>` : ""}</td>`;
+      <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">${esc(t.url ?? "—")}</td>
+      <td><span class="status status-${esc(t.status)}"><span class="dot ${t.status === "open" ? "dot-on" : "dot-off"}"></span>${esc(t.status.toUpperCase())}</span></td>
+      <td class="mono" style="color:var(--faint)">${esc(t.partitionId.slice(0, 8))}</td>
+      <td>${t.status === "open" ? `<button class="ghost" data-close="${esc(t.id)}">close</button>` : ""}</td>`;
     tr.querySelector("[data-close]")?.addEventListener("click", async (ev) => {
       ev.target.disabled = true;
       await api(`/profiles/${profileId}/tabs/${t.id}/close`, { method: "POST" });
@@ -884,13 +990,11 @@ $("#tabs-run").addEventListener("click", runTabsQuery);
 $("#tabs-query").addEventListener("keydown", (e) => {
   if (e.key === "Enter") runTabsQuery();
 });
-
 $("#tabs-select-all").addEventListener("change", (e) => {
   document
     .querySelectorAll("#tabs-table tbody input[data-tab]:not(:disabled)")
     .forEach((c) => (c.checked = e.target.checked));
 });
-
 $("#tabs-close").addEventListener("click", async () => {
   const profileId = $("#tabs-profile").value;
   const tabIds = selectedTabIds();
@@ -901,25 +1005,17 @@ $("#tabs-close").addEventListener("click", async () => {
       body: JSON.stringify({ tabIds }),
     });
     const failed = r.results.filter((x) => !x.closed).length;
-    pushEvent({
-      type: "info",
-      detail: `bulk-close: ${r.results.length - failed}/${r.results.length} closed`,
-      at: new Date().toISOString(),
-    });
+    toast(`bulk-close: ${r.results.length - failed}/${r.results.length} closed`);
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
   $("#tabs-select-all").checked = false;
   await runTabsQuery();
   await loadProfiles();
 });
-
 $("#tabs-open").addEventListener("click", async () => {
   const profileId = $("#tabs-profile").value;
-  const urls = $("#tabs-open-urls")
-    .value.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const urls = $("#tabs-open-urls").value.split("\n").map((s) => s.trim()).filter(Boolean);
   if (!profileId || urls.length === 0) return;
   try {
     const r = await api(`/profiles/${profileId}/tabs/bulk-open`, {
@@ -927,22 +1023,152 @@ $("#tabs-open").addEventListener("click", async () => {
       body: JSON.stringify({ urls }),
     });
     const failed = r.results.filter((x) => x.tab === null).length;
-    pushEvent({
-      type: "info",
-      detail: `bulk-open: ${r.results.length - failed}/${r.results.length} opened`,
-      at: new Date().toISOString(),
-    });
+    toast(`bulk-open: ${r.results.length - failed}/${r.results.length} opened`);
     $("#tabs-open-urls").value = "";
   } catch (err) {
-    pushEvent({ type: "error", detail: err.message, at: new Date().toISOString() });
+    toast(err.message, "error");
   }
   await runTabsQuery();
   await loadProfiles();
 });
-
 $("#tabs-profile").addEventListener("change", runTabsQuery);
 
-/* ---------------- settings (console Settings section) ---------------- */
+/* ============================== cookies ================================ */
+
+async function refreshCookiesProfiles() {
+  const sel = $("#cookies-profile");
+  const current = sel.value;
+  const { profiles } = await api("/profiles");
+  const running = profiles.filter((p) => p.status === "running");
+  sel.innerHTML =
+    `<option value="">(${running.length} running — pick one)</option>` +
+    running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  if (running.some((p) => p.id === current)) sel.value = current;
+}
+
+function cookieStatus(msg, isErr = false) {
+  const el = $("#cookies-status");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--faint)";
+}
+
+async function loadCookieJar() {
+  const profileId = $("#cookies-profile").value;
+  const tbody = $("#cookies-table tbody");
+  if (!profileId) {
+    tbody.innerHTML = "";
+    $("#cookies-empty").hidden = false;
+    cookieStatus("start a profile, pick it above, then Load jar");
+    return;
+  }
+  cookieStatus("loading…");
+  try {
+    const data = await api(`/profiles/${profileId}/cookies`);
+    tbody.innerHTML = "";
+    $("#cookies-empty").hidden = (data.cookies ?? []).length !== 0;
+    for (const c of data.cookies ?? []) {
+      const tr = document.createElement("tr");
+      const expires = c.expires && c.expires > 0
+        ? new Date(c.expires * 1000).toISOString().slice(0, 10)
+        : "session";
+      tr.innerHTML = `
+        <td style="font-weight:600">${esc(c.name)}</td>
+        <td class="mono">${esc(c.domain)}</td>
+        <td class="mono">${esc(c.path)}</td>
+        <td class="mono" style="color:var(--faint)">${esc(expires)}</td>
+        <td class="mono">${c.secure ? "✓" : ""}</td>
+        <td class="mono">${c.httpOnly ? "✓" : ""}</td>
+        <td class="mono" style="color:var(--faint)">${esc(c.value)}</td>`;
+      tbody.appendChild(tr);
+    }
+    cookieStatus(`${data.total} cookies${data.revealed ? " (raw values)" : " (values redacted)"}`);
+  } catch (err) {
+    tbody.innerHTML = "";
+    $("#cookies-empty").hidden = false;
+    cookieStatus(err.message, true);
+  }
+}
+
+$("#cookies-refresh").addEventListener("click", loadCookieJar);
+$("#cookies-profile").addEventListener("change", loadCookieJar);
+
+$("#cookies-file").addEventListener("change", (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    $("#cookies-status").dataset.pendingImport = String(reader.result ?? "");
+    cookieStatus(`${f.name} loaded — click Import into jar`);
+  };
+  reader.readAsText(f);
+});
+
+$("#cookies-import").addEventListener("click", async () => {
+  const profileId = $("#cookies-profile").value;
+  if (!profileId) return;
+  const content = $("#cookies-status").dataset.pendingImport ?? "";
+  if (!content.trim()) {
+    cookieStatus("pick a cookies.txt / .json file first", true);
+    return;
+  }
+  try {
+    const r = await api(`/profiles/${profileId}/cookies/import`, {
+      method: "POST",
+      body: JSON.stringify({ format: $("#cookies-import-format").value, content }),
+    });
+    toast(`cookie import: ${r.set}/${r.total} loaded`);
+    $("#cookies-status").dataset.pendingImport = "";
+    $("#cookies-file").value = "";
+    await loadCookieJar();
+  } catch (err) {
+    cookieStatus(err.message, true);
+  }
+});
+
+$("#cookies-export").addEventListener("click", async () => {
+  const profileId = $("#cookies-profile").value;
+  if (!profileId) return;
+  const format = $("#cookies-export-format").value;
+  try {
+    const res = await fetch(`/profiles/${profileId}/cookies/export?format=${format}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `cookies-${profileId.slice(0, 8)}.${format === "json" ? "json" : "txt"}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("cookie jar exported");
+  } catch (err) {
+    cookieStatus(err.message, true);
+  }
+});
+
+$("#cookies-clear").addEventListener("click", async () => {
+  const profileId = $("#cookies-profile").value;
+  if (!profileId) return;
+  const domain = $("#cookies-clear-filter").value.trim();
+  if (!domain) {
+    cookieStatus("type a domain filter first — refusing to wipe the whole jar blindly", true);
+    return;
+  }
+  if (!window.confirm(`Clear all cookies matching "${domain}"?`)) return;
+  try {
+    const r = await api(`/profiles/${profileId}/cookies/clear`, {
+      method: "POST",
+      body: JSON.stringify({ domain }),
+    });
+    toast(`cleared ${r.matched} cookies matching ${domain}`);
+    await loadCookieJar();
+  } catch (err) {
+    cookieStatus(err.message, true);
+  }
+});
+
+/* ============================== settings ================================ */
 
 /* Field descriptors per section — mirror packages/contracts/src/settings.ts.
    The API validates everything it receives; these drive the form only. */
@@ -997,7 +1223,7 @@ function settingsFromField(f, raw) {
   if (f.type === "number") return Number(raw);
   if (f.key === "syncGroups" || f.key === "enabledPlugins" || f.key === "enabledJyl")
     return String(raw).split(",").map((s) => s.trim()).filter(Boolean);
-  if (f.key === "serverUrl" || f.key === "token" || f.key === "googleAccount" || f.key === "syncPassphrase")
+  if (["serverUrl", "token", "googleAccount", "syncPassphrase"].includes(f.key))
     return String(raw).trim() === "" ? null : String(raw).trim();
   return raw;
 }
@@ -1009,7 +1235,13 @@ async function loadSettings() {
     $("#settings-status").textContent = `settings unavailable: ${err.message}`;
     return;
   }
+  applyDensity();
   renderSettings();
+}
+
+function applyDensity() {
+  const d = settingsData?.general?.density ?? "comfortable";
+  document.body.dataset.density = d;
 }
 
 function renderSettingsNav() {
@@ -1019,7 +1251,7 @@ function renderSettingsNav() {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = s;
-    b.className = s === settingsSection ? "" : "secondary";
+    b.className = s === settingsSection ? "active" : "";
     b.addEventListener("click", () => {
       settingsSection = s;
       renderSettings();
@@ -1028,16 +1260,36 @@ function renderSettingsNav() {
   }
 }
 
+/* Integrations gets a read-only reference card for the email resolvers —
+   there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
+   the scripting layer. This card documents the URL shapes. */
+function renderIntegrationsInfo() {
+  const box = $("#integrations-info");
+  if (settingsSection !== "integrations") {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `
+    <div class="info-card">
+      <h4>Email resolvers (Gmail / IMAP)</h4>
+      <p>Code-running endpoints resolve one-time codes from mail. IMAP uses an app password:</p>
+      <p><code>imap://imap.gmail.com:993?user=you@gmail.com&amp;pass=****&amp;query=UNSEEN</code></p>
+      <p>Options: <code>tls=false</code> (plain, testing only) · <code>query</code> = any IMAP SEARCH term.
+      Credentials reference aliases (<code>@mail-user</code>) from the alias store — never paste real passwords into provider notes.</p>
+    </div>`;
+}
+
 function renderSettings() {
   if (!settingsData) return;
   renderSettingsNav();
+  renderIntegrationsInfo();
   const form = $("#settings-form");
   const doc = settingsData[settingsSection];
   const values = settingsToForm(settingsSection, doc);
   form.innerHTML = "";
   for (const f of SETTINGS_FIELDS[settingsSection]) {
     const label = document.createElement("label");
-    label.className = "settings-field";
+    label.className = "settings-field" + (f.type === "checkbox" ? " check" : "");
     const id = `set-${settingsSection}-${f.key}`;
     let control;
     if (f.type === "select") {
@@ -1065,10 +1317,11 @@ async function persistSetting(key, field) {
       body: JSON.stringify({ [key]: value }),
     });
     settingsData[settingsSection] = updated;
+    if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
-    renderSettings(); // revert to last known-good values
+    renderSettings(); /* revert to last known-good values */
   }
 }
 
@@ -1078,13 +1331,13 @@ $("#settings-form").addEventListener("change", (e) => {
   if (field) persistSetting(key, field);
 });
 
-/* ---------------- live events (SSE) ---------------- */
+/* ============================ live events (SSE) ========================= */
 
 function pushEvent(e) {
   const li = document.createElement("li");
-  li.className = e.type.replace(".", "-");
+  li.className = "event-" + String(e.type ?? "").replace(".", "-").replace(/^run$/, "run");
   const time = (e.at ?? new Date().toISOString()).slice(11, 19);
-  li.innerHTML = `<span class="type">${esc(e.type)}</span> ${esc(e.detail ?? "")} <span>${esc(time)}</span>`;
+  li.innerHTML = `<span class="type">${esc(e.type)}</span> ${esc(e.detail ?? "")} <span class="time">${esc(time)}</span>`;
   const list = $("#events");
   list.prepend(li);
   while (list.children.length > 50) list.lastChild.remove();
@@ -1093,24 +1346,23 @@ function pushEvent(e) {
 function connectEvents() {
   const es = new EventSource("/events");
   es.onopen = () => {
-    const el = $("#sse");
-    el.textContent = "live";
-    el.className = "chip chip-on";
+    $("#sse").textContent = "live";
+    $("#sse-dot").className = "dot dot-on";
   };
   es.onerror = () => {
-    const el = $("#sse");
-    el.textContent = "offline";
-    el.className = "chip chip-off";
+    $("#sse").textContent = "offline";
+    $("#sse-dot").className = "dot dot-off";
   };
   es.onmessage = (msg) => {
     try {
       const e = JSON.parse(msg.data);
       if (e.detail === "connected") return;
       pushEvent(e);
-      // Run/tab transitions change the grids; reload lazily.
+      /* run/tab transitions change the grids; reload lazily */
       if (e.type.startsWith("run.") || e.type.startsWith("tab.")) {
         loadProfiles();
         refreshTabsProfiles();
+        if (activeView === "cookies") refreshCookiesProfiles();
         if ($("#tabs-profile").value) runTabsQuery();
       }
     } catch {
@@ -1119,10 +1371,10 @@ function connectEvents() {
   };
 }
 
-/* ---------------- boot ---------------- */
+/* ================================ boot ================================= */
 
+setView("profiles"); /* renders nav state, topbar actions, and stats */
 refreshHealth();
-loadChecklist();
 loadProfiles();
 loadProxies();
 loadProxyProviders();
