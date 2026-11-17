@@ -1,4 +1,20 @@
-# Roadmap
+### Owner answers (2026-11-17) — design inputs settled
+
+- **Team size: max 10 members.** Small-team scale: plain account rows +
+  hashed credentials on the server suffice; no org/tenant machinery.
+- **Server OS: Ubuntu.** The sync/team server (Node/Fastify) runs on it
+  under systemd behind a reverse proxy. Clients stay Windows (the engine
+  is windows-x64); the server never runs browsers.
+- **L1 = run tasks/warmups only** (refined above).
+
+### Still open
+
+- Exposure: LAN-only or internet-reachable? Team sign-in from outside the
+  house implies internet → TLS + domain (Caddy/Let's Encrypt) before any
+  member account exists. Confirm the server has a public IP or domain.
+- Always-on assumption (needed for sync + update distribution).
+
+ Roadmap
 
 ## P1 — Engine distribution & launch identity (DONE v0.2.0, health/CLI v0.4.0)
 
@@ -1623,8 +1639,11 @@ foundation the agent and family rollout sit on.
 
 ### Permission tiers (owner-specified, three levels + owner)
 
-- **L1 — read & use**: see profiles/proxies, LAUNCH and use them, change
-  nothing. (Launching mutates run state only, never profile data.)
+- **L1 — staff (automation operator)**: see profiles/proxies, RUN WARMUPS
+  and TASKS (scripts/plugins) — and nothing else: no interactive profile
+  launches, no edits. (Owner refinement 2026-11-17: level-one staff operate
+  the farm, they don't browse it. Warmup/task runs mutate run state only,
+  never profile data.)
 - **L2 — editor ("co-worker")**: edit names, notes, tags, fields,
   fingerprints; may NOT delete profiles/proxies, may NOT add new ones.
 - **L3 — manager ("team lead")**: everything L2, plus add and delete
