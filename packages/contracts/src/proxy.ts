@@ -38,8 +38,22 @@ export const CreateProxyInputSchema = z.object({
   port: z.number().int().min(1).max(65535),
   username: z.string().max(200).nullable().optional(),
   password: z.string().max(200).nullable().optional(),
+  /** IANA zone the browser should use behind this proxy (beats the exit-IP lookup). */
+  timezone: z.string().max(64).nullable().optional(),
 });
 export type CreateProxyInput = z.input<typeof CreateProxyInputSchema>;
+
+/**
+ * Bulk import: a pasted list or a .txt file's contents, one proxy per line
+ * (host:port, host:port:user:pass, optional trailing timezone, scheme://
+ * prefix, blank lines and # comments tolerated). `type` is the default for
+ * lines without a scheme.
+ */
+export const ImportProxiesInputSchema = z.object({
+  text: z.string().max(1_000_000),
+  type: ProxyTypeSchema.default("http"),
+});
+export type ImportProxiesInput = z.input<typeof ImportProxiesInputSchema>;
 
 export const UpdateProxyInputSchema = z
   .object({

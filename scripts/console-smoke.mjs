@@ -234,6 +234,10 @@ export async function runConsoleSmoke({ base, ok }) {
     ok("pasting two lines adds two proxies", Boolean(added), added ? added.map((p) => p.name).join(", ") : "");
     const named = (added ?? []).find((p) => p.name === "smoke-a");
     ok("pasted line keeps its name, user and port", Boolean(named && named.username === "user" && named.port === 9));
+    const summary = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#proxy-add-status').textContent; return t.startsWith("2 added") ? t : undefined; })()`));
+    ok("import dialog shows the added/skipped/errors summary", Boolean(summary), summary ?? "");
+    // The table reloads after the import returns; select-all acts on what is rendered.
+    await waitFor(() => page.evaluate(`document.querySelectorAll('#proxies tbody tr').length === 2`));
     await page.evaluate(`(() => {
       document.querySelector('#proxy-add-close').click();
       const box = document.querySelector('#proxies-select-all');

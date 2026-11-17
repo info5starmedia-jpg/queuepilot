@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { CreateProxyInputSchema, UpdateProxyInputSchema } from "@queuepilot/contracts";
+import { CreateProxyInputSchema, ImportProxiesInputSchema, UpdateProxyInputSchema } from "@queuepilot/contracts";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 
 export function registerProxyRoutes(app: FastifyInstance, service: ProxyService): void {
@@ -8,6 +8,17 @@ export function registerProxyRoutes(app: FastifyInstance, service: ProxyService)
   app.post("/proxies", async (req, reply) => {
     const input = CreateProxyInputSchema.parse(req.body);
     return reply.code(201).send(service.create(input));
+  });
+
+  // Bulk import: JSON { text, type? }, or a .txt file's bytes as text/plain
+  // (`?type=` for the default scheme). Always 200 with a per-line report.
+  app.post("/proxies/import", async (req) => {
+    const body =
+      typeof req.body === "string"
+        ? { text: req.body, type: (req.query as { type?: string }).type }
+        : req.body;
+    const input = ImportProxiesInputSchema.parse(body);
+    return service.importText(input.text, input.type);
   });
 
   app.get("/proxies/:id", async (req) => {

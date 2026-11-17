@@ -910,67 +910,41 @@ $("#proxies-delete-selected").addEventListener("click", async () => {
   await loadProxies();
 });
 
-/* One pasted line -> proxy input. Accepts host:port, host:port:user:pass and
-   name:host:port:user:pass, with an optional scheme:// prefix. The password
-   is everything after the user (it may itself contain ':'). */
-function parseProxyLine(raw, defaultType) {
-  let line = raw.trim();
-  if (!line) return null;
-  let type = defaultType;
-  const scheme = /^(https?|socks5h?):\/\//i.exec(line);
-  if (scheme) {
-    type = scheme[1].toLowerCase().replace("socks5h", "socks5");
-    line = line.slice(scheme[0].length);
-  }
-  const parts = line.split(":");
-  let name = null;
-  if (parts.length >= 3 && !/^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) name = parts.shift();
-  const [host, port, username, ...rest] = parts;
-  if (!host || !/^\d+$/.test(port ?? "")) throw new Error("expected host:port[:user:pass]");
-  return {
-    name: name || `${host}:${port}`,
-    type,
-    host,
-    port: Number(port),
-    username: username || null,
-    password: rest.length ? rest.join(":") : null,
-  };
-}
-
 $("#proxy-add-open").addEventListener("click", () => {
   $("#proxy-add-result").innerHTML = "";
   $("#proxy-add-status").textContent = "";
+  $("#proxy-add-file").value = "";
   $("#proxy-add-modal").hidden = false;
   $("#proxy-add-lines").focus();
 });
 $("#proxy-add-close").addEventListener("click", () => { $("#proxy-add-modal").hidden = true; });
 $("#proxy-add-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-add-modal") $("#proxy-add-modal").hidden = true; });
 
+/* Import: the server parses, dedupes (host+port) and reports per line. A
+   chosen .txt file wins over the textarea. Errors never echo the line back:
+   it may carry a password. */
 $("#proxy-add-go").addEventListener("click", async () => {
-  const lines = $("#proxy-add-lines").value.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length === 0) return;
-  const type = $("#proxy-add-type").value;
+  const file = $("#proxy-add-file").files[0];
+  const text = file ? await file.text() : $("#proxy-add-lines").value;
+  if (!text.trim()) return;
   const btn = $("#proxy-add-go");
   btn.disabled = true;
-  const rows = [];
-  let added = 0;
-  for (const [i, raw] of lines.entries()) {
-    let input = null;
-    try {
-      input = parseProxyLine(raw, type);
-      await api("/proxies", { method: "POST", body: JSON.stringify(input) });
-      added++;
-      rows.push(`<tr><td>line ${i + 1}</td><td>${esc(input.name)} added</td></tr>`);
-    } catch (err) {
-      /* never echo the line back: it may carry a password */
-      rows.push(`<tr class="import-err"><td>line ${i + 1}</td><td>${esc(input?.name ?? "")} ${esc(err.message)}</td></tr>`);
+  try {
+    const r = await api("/proxies/import", { method: "POST", body: JSON.stringify({ text, type: $("#proxy-add-type").value }) });
+    $("#proxy-add-status").textContent = `${r.added} added · ${r.skipped} skipped (already listed) · ${r.errors.length} error${r.errors.length === 1 ? "" : "s"}`;
+    $("#proxy-add-result").innerHTML = r.errors.length
+      ? `<table class="import-table"><tbody>${r.errors.map((e) => `<tr class="import-err"><td>line ${e.line}</td><td>${esc(e.reason)}</td></tr>`).join("")}</tbody></table>`
+      : "";
+    if (r.errors.length === 0) {
+      $("#proxy-add-lines").value = "";
+      $("#proxy-add-file").value = "";
     }
+    toast(`${r.added} prox${r.added === 1 ? "y" : "ies"} imported`);
+  } catch (err) {
+    $("#proxy-add-status").textContent = err.message;
+  } finally {
+    btn.disabled = false;
   }
-  btn.disabled = false;
-  $("#proxy-add-status").textContent = `${added}/${lines.length} added`;
-  $("#proxy-add-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
-  if (added === lines.length) $("#proxy-add-lines").value = "";
-  toast(`${added} prox${added === 1 ? "y" : "ies"} added`);
   await loadProxies();
 });
 

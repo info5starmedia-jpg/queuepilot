@@ -77,9 +77,9 @@
 
         <!-- ========================== proxies =========================== -->
         <section class="view" id="view-proxies" hidden>
-          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Add them here (one, or paste a list), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
+          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Import them here (paste a list or choose a .txt file), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
           <div class="toolbar">
-            <button id="proxy-add-open" class="primary">+ Add proxies</button>
+            <button id="proxy-add-open" class="primary">⇪ Import proxies</button>
             <div class="spacer"></div>
             <span id="proxies-selected" class="hint" style="color:var(--faint)"></span>
             <button id="proxies-test-selected" title="test every selected proxy">Test selected</button>
@@ -94,7 +94,7 @@
             </table>
             <div class="empty-state" id="proxies-empty" hidden>
               <div class="big">⇄</div>
-              No proxies configured — profiles will use your real IP. Click <b>+ Add proxies</b>.
+              No proxies configured — profiles will use your real IP. Click <b>⇪ Import proxies</b>.
             </div>
           </div>
         </section>
@@ -266,16 +266,19 @@
     <!-- add-proxies drawer -->
     <div id="proxy-add-modal" class="overlay" hidden>
       <div class="drawer" style="width:520px">
-        <div class="drawer-head"><h3>Add Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
+        <div class="drawer-head"><h3>Import Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
         <label>Type
           <select id="proxy-add-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
         </label>
         <label>Paste one proxy per line
-          <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;name:host:port:username:password&#10;host:port"></textarea>
+          <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;host:port:username:password:America/New_York&#10;host:port"></textarea>
         </label>
-        <div class="hint">Lines without a name are named <code>host:port</code>. A <code>socks5://</code> or <code>http://</code> prefix on a line overrides the type above.</div>
+        <label>…or choose a .txt file
+          <input type="file" id="proxy-add-file" accept=".txt,text/plain" />
+        </label>
+        <div class="hint">One per line: <code>host:port</code>, <code>host:port:user:pass</code>, optional timezone as a 5th field. A <code>socks5://</code> or <code>http://</code> prefix overrides the type above; blank lines and <code>#</code> comments are ignored. Proxies already in the list (same host and port) are skipped.</div>
         <div class="actions">
-          <button id="proxy-add-go" class="primary">Add</button>
+          <button id="proxy-add-go" class="primary">Import</button>
           <span class="hint" id="proxy-add-status"></span>
         </div>
         <div id="proxy-add-result"></div>
