@@ -1181,33 +1181,76 @@ boot bug found by the visual pass (topbar actions never rendered at boot —
 guard green, 605/605 API tests, build clean.
 
 
-## Phase 2 — D-002 PID-reuse hardening follow-ups (branch `d002-followups`)
+## Phase 2 — D-002 PID-reuse hardening follow-ups (DONE 2026-11-17, branch `d002-followups`)
 
-D-002 (P7 item 8a) checks the process-start token exactly once, in
+D-002 (P7 item 8a) checked the process-start token exactly once, in
 `reconcileOnBoot`. Runs adopted after an API restart have no in-memory
-session, which leaves the gaps below. Windows only for now; macOS has no
+session, which left the gaps below. Windows only for now; macOS has no
 `/proc`, so its token is always null (plain liveness) until the
-macOS/Linux port phase. Standing rule applies: a box is ticked only with
-code + tests + docs + live verification + the commit hash.
+macOS/Linux port phase. Every box: code + tests + docs + live verification
++ commit hash.
 
-- [ ] **Three-way identity result** — `checkProcessIdentity` answers
-  `match` / `mismatch` / `unknown` / `dead` instead of a boolean, so an
-  unreadable start time is no longer indistinguishable from a proven
-  match. Unverified adoptions are logged and counted in `/metrics`. Launch
+- [x] **Three-way identity result** (`bdf006b`) — `checkProcessIdentity`
+  answers `match` / `mismatch` / `unknown` / `dead` instead of a boolean,
+  so an unreadable start time is no longer indistinguishable from a proven
+  match. Unverified adoptions are logged and counted in `/metrics`
+  (`runsAdopted`, `runsAdoptedUnverified`, `runsReconciledCrashed`). Launch
   capture rejects a token that predates the run's own `startedAt` (a
   stranger that inherited the PID between spawn and capture).
-- [ ] **Identity-safe stop for adopted runs** — `stop()` on a run with no
-  session used to mark the row stopped and leave the engine running. Now:
-  CDP `Browser.close` on the stored endpoint first; kill by PID only when
-  the token re-verifies as `match` immediately beforehand; otherwise never
-  kill, and say so in `lastError`. Behavior change (owner-approved): Stop
-  on an adopted profile closes its browser window.
-- [ ] **Adopted-run watcher** — sessionless occupying runs are re-checked
-  on a timer; a dead or PID-reused engine is marked crashed through the
-  same path as boot reconciliation instead of reading "running" until the
-  next API boot.
-- [ ] **Batched boot capture** — one start-token read for all occupying
-  PIDs at boot instead of one blocking PowerShell spawn per run. Same
-  invocation style as the single-PID capture.
-- [ ] **Docs** — `docs/architecture.md` invariant 5 and the
-  `docs/parity.md` process-identity row describe the shipped behavior.
+- [x] **Identity-safe stop for adopted runs** (`8b71646`, hardened in
+  `adb0b32`) — `stop()` on a run with no session used to mark the row
+  stopped and leave the engine running. Now: CDP `Browser.close` on the
+  stored endpoint first; kill by PID only when the token proves the process
+  is ours, re-proven immediately before every kill; otherwise never kill,
+  and say so in `lastError`. Behavior change (owner-approved): Stop on an
+  adopted profile closes its browser window.
+- [x] **Adopted-run watcher** (`85f192e`) — sessionless running runs are
+  re-checked on an unref'd timer (liveness every 15 s, start-token identity
+  every 4th tick); a dead or PID-reused engine is marked crashed through
+  the same path as boot reconciliation instead of reading "running" until
+  the next API boot. The timer exists only while adopted runs do.
+- [x] **Batched boot capture** (`1fea755`) — one start-token read for all
+  occupying PIDs at boot (and per watcher identity pass) instead of one
+  blocking PowerShell spawn per run. Same invocation style as the
+  single-PID capture, which is untouched.
+- [x] **Docs** (`1fea755`) — `docs/architecture.md` invariant 5 rewritten
+  and invariant 6 added; `docs/parity.md` process-identity row updated.
+
+**Live verification, 2026-11-17, fury-core 0.5.5-qp.4.** Run against a
+SCRATCH API (this branch, port 50477, its own data dir). Every API process
+killed was the scratch instance, its PID read from the port-50477 listener
+before each kill; the live API on 50325 was never addressed and answered
+`/health` 200 afterwards.
+
+| Check | Result |
+| --- | --- |
+| Start → kill API → restart | `recovery: adopted=1 (unverified=0) crashed=0`; `/metrics` `runsAdopted: 1`; profile `running` |
+| Stop the adopted run | engine PID gone in 1.5 s (CDP `Browser.close`), `lastError: null`, profile `idle` |
+| Start → kill API → tamper `process_token` → restart | `adopted=0 crashed=1`, `lastError` "engine PID was reused by another process (start token mismatch) at API startup", profile `idle`; engine still alive 162 s later — nothing killed |
+| Adopted run, engine closed out-of-band | watcher marked it `crashed` ("adopted engine process exited") 13 s later |
+| Start → kill API → `process_token` NULL → restart | `adopted=1 (unverified=1)` + the per-run warning line; Stop closed it over CDP, `lastError: null` |
+| Adopted run with its CDP endpoint made unreachable → Stop | token-proven PID path: engine gone in 13 s (graceful request timed out, forced kill finished it) |
+
+Notes from the run, recorded honestly:
+- In the first tampered-token run the un-adopted engine exited by itself
+  about a minute after boot, cause not determined; the rerun (the row
+  above) stayed alive for the full 162 s watch. No kill exists on that
+  code path.
+- On the PID path the graceful `taskkill` (WM_CLOSE) did not close the
+  adopted engine within the 10 s grace, so the forced kill ended it. That
+  path only runs when the DevTools endpoint is unreachable while the
+  process is alive.
+- A second-opinion review (GPT-4o) found one real gap — the graceful kill
+  ran on identity proven before the CDP wait — fixed in `adb0b32`.
+
+Gates on the final branch (run in an NTFS worktree; the `D:` volume is
+FAT32 and cannot hold npm workspace links): 626/626 API tests, 20/20
+server tests, `tsc --noEmit` clean, `npm run build` clean. Known flakes on
+this machine, both present on untouched `main`: an intermittent
+`ECONNRESET` in `tests/proxy-relay.test.ts`, and vitest workers
+occasionally dying with "Worker exited unexpectedly" (seen in the untouched
+server suite about 1 run in 6). The `window-tiling` ECONNRESET flake had
+the same shape and is fixed by the mock-CDP-server change in `adb0b32`.
+
+Open after this item: Phase 2 continues with warmup console UX, tab-ops
+depth, and the canvas cross-context engine item.
