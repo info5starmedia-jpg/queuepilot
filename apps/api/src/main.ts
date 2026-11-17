@@ -179,6 +179,15 @@ export async function main(): Promise<void> {
     );
   }
 
+  const snapshots = new LaunchIdentityService(config.dataDir);
+  // Older snapshots stored the launch proxy password in plain text.
+  const stripped = snapshots.stripStoredProxyPasswords();
+  if (stripped.rewritten || stripped.skipped) {
+    console.log(
+      `[queuepilot] snapshots: proxy passwords stripped from ${stripped.rewritten} file(s), ${stripped.skipped} unreadable`,
+    );
+  }
+
   const lifecycle = new BrowserLifecycleService(
     profileRepo,
     identityRepo,
@@ -186,7 +195,7 @@ export async function main(): Promise<void> {
     runRepo,
     runtime,
     config.dataDir,
-    new LaunchIdentityService(config.dataDir),
+    snapshots,
     // P7.7b: when Settings → Team is configured, every launch takes a
     // cross-machine lease first (fail closed); unconfigured = no-op.
     new TeamLeaseGuard(settingsService),

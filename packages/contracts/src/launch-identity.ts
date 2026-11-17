@@ -20,7 +20,10 @@ export const LaunchIdentitySnapshotSchema = z.object({
   identityId: z.string().uuid().nullable(),
   identity: FingerprintIdentitySchema.nullable(),
   proxyId: z.string().uuid().nullable(),
-  /** Prebuilt --proxy-server value captured at launch (credentials included). */
+  /**
+   * Launch proxy URL with the password stripped (scheme, username, host,
+   * port). The password stays in the SecretStore — never on disk here.
+   */
   proxyUrl: z.string().nullable(),
   /**
    * Where the launched proxy came from. "temporary" means a one-shot temp
