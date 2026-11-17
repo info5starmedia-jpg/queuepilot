@@ -18,6 +18,7 @@
         <button data-view="proxies"><span class="ico">⇄</span><span class="lbl">Proxies</span><kbd>X</kbd></button>
         <button data-view="tabs"><span class="ico">⊞</span><span class="lbl">Tabs</span><kbd>T</kbd></button>
         <button data-view="cookies"><span class="ico">◈</span><span class="lbl">Cookies</span><kbd>C</kbd></button>
+        <button data-view="warmups"><span class="ico">♨</span><span class="lbl">Warmups</span><kbd>W</kbd></button>
         <button data-view="providers"><span class="ico">⇶</span><span class="lbl">Providers</span><kbd>V</kbd></button>
         <button data-view="events"><span class="ico">≡</span><span class="lbl">Events</span><kbd>E</kbd></button>
         <button data-view="settings"><span class="ico">⚙</span><span class="lbl">Settings</span><kbd>G</kbd></button>
@@ -163,6 +164,32 @@
           <div id="cookies-status" class="view-hint" style="margin-top:8px"></div>
         </section>
 
+        <!-- =========================== warmups ========================== -->
+        <section class="view" id="view-warmups" hidden>
+          <div class="view-hint"><b>Record</b> watches the tabs QueuePilot opens in a <b>running</b> profile (Tabs view or API) and saves them as a recipe of URLs + dwell times; <b>Run</b> replays a recipe on any profile to warm its cookies.</div>
+          <div class="toolbar">
+            <select id="warmup-record-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>
+            <input id="warmup-record-name" placeholder="recipe name" maxlength="120" style="min-width:200px" />
+            <label style="color:var(--muted);font-size:12px">record for <input id="warmup-record-seconds" type="number" min="1" max="600" step="1" value="30" style="width:72px" title="recording window in seconds (1–600)" /> s</label>
+            <button id="warmup-record" class="primary" title="record the selected running profile">● Record</button>
+            <div class="spacer"></div>
+            <button id="warmups-refresh" title="reload the recipe list">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="grid" id="warmups-table">
+              <thead>
+                <tr><th>Name</th><th style="width:80px">Steps</th><th style="width:120px">Total dwell</th><th style="width:170px">Created</th><th style="width:90px">Actions</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="warmups-empty" hidden>
+              <div class="big">♨</div>
+              No warmup recipes yet — start a profile, open some tabs in it, then <b>Record</b>.
+            </div>
+          </div>
+          <div id="warmups-status" class="view-hint" style="margin-top:8px"></div>
+        </section>
+
         <!-- ========================== providers ========================= -->
         <section class="view" id="view-providers" hidden>
           <div class="view-hint">★ = default provider — new profile imports draw proxies from it. Profile imports (CSV/xlsx) live on the Profiles page under <b>Import</b>.</div>
@@ -225,6 +252,22 @@
             <span class="hint">A coherent fingerprint identity is generated automatically.</span>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- run-warmup modal -->
+    <div id="warmup-run-modal" class="overlay" hidden>
+      <div class="drawer" style="width:460px">
+        <div class="drawer-head"><h3>Run Warmup</h3><button id="warmup-run-close" class="ghost">✕</button></div>
+        <div class="hint" id="warmup-run-recipe"></div>
+        <label>Profile <select id="warmup-run-profile"></select></label>
+        <label class="check"><input type="checkbox" id="warmup-run-stop" /> stop the profile when the recipe finishes</label>
+        <div class="hint">An idle profile is started for the run. Stop-after only applies to a profile this run started — one that was already running stays up.</div>
+        <div class="actions">
+          <button id="warmup-run-go" class="primary">Run</button>
+          <span class="hint" id="warmup-run-status"></span>
+        </div>
+        <div id="warmup-run-result"></div>
       </div>
     </div>
 

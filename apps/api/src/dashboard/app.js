@@ -3,7 +3,8 @@
    arrive over the SSE stream.
 
    Ops-console layout: sidebar views (Profiles/Proxies/Tabs/Cookies/
-   Providers/Events/Settings), top action bar, single scrolling table. */
+   Warmups/Providers/Events/Settings), top action bar, single scrolling
+   table. */
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -35,7 +36,7 @@ function toast(detail, type = "info") {
 
 /* ============================ view switching ============================ */
 
-const VIEWS = ["profiles", "proxies", "tabs", "cookies", "providers", "events", "settings"];
+const VIEWS = ["profiles", "proxies", "tabs", "cookies", "warmups", "providers", "events", "settings"];
 let activeView = "profiles";
 
 function setView(name) {
@@ -49,6 +50,7 @@ function setView(name) {
   renderTopbarActions();
   renderStats();
   if (name === "cookies") refreshCookiesProfiles();
+  if (name === "warmups") loadWarmups();
 }
 
 document.querySelectorAll("#nav button").forEach((b) =>
@@ -59,7 +61,7 @@ window.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   const k = e.key.toLowerCase();
-  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", v: "providers", e: "events", g: "settings" };
+  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", w: "warmups", v: "providers", e: "events", g: "settings" };
   if (map[k]) setView(map[k]);
   if (k === "/" && activeView === "profiles") {
     e.preventDefault();
@@ -87,6 +89,8 @@ function renderTopbarActions() {
     $("#tb-stop").addEventListener("click", stopSelected);
     $("#tb-delete").addEventListener("click", deleteSelected);
   }
+  /* Every other view (Warmups included) keeps its controls in its own
+     toolbar — the topbar stays empty there. */
 }
 
 /* ======================= engine + google + sse status =================== */
@@ -1331,6 +1335,217 @@ $("#settings-form").addEventListener("change", (e) => {
   if (field) persistSetting(key, field);
 });
 
+/* ============================== warmups ================================ */
+
+/* Record and Run both hold their HTTP request open for the whole window
+   (the recording duration / the recipe's total dwell), so each has an
+   explicit in-progress state: the button is disabled and a ticking status
+   line shows the elapsed time until the request returns. */
+
+let warmupRecipes = [];
+let warmupRunRecipe = null; /* recipe shown in the run modal */
+let warmupRunning = false; /* a run request is in flight */
+
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+function warmupStatus(msg, isErr = false) {
+  const el = $("#warmups-status");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--faint)";
+}
+
+async function refreshWarmupProfiles() {
+  const sel = $("#warmup-record-profile");
+  const current = sel.value;
+  const { profiles } = await api("/profiles");
+  const running = profiles.filter((p) => p.status === "running");
+  sel.innerHTML =
+    `<option value="">(${running.length} running — pick one)</option>` +
+    running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  if (running.some((p) => p.id === current)) sel.value = current;
+}
+
+async function loadWarmups() {
+  refreshWarmupProfiles().catch(() => {});
+  const tbody = $("#warmups-table tbody");
+  try {
+    const { recipes } = await api("/warmups");
+    warmupRecipes = recipes ?? [];
+  } catch (err) {
+    warmupRecipes = [];
+    warmupStatus(err.message, true);
+  }
+  tbody.innerHTML = "";
+  $("#warmups-empty").hidden = warmupRecipes.length !== 0;
+  for (const r of warmupRecipes) {
+    const steps = r.steps ?? [];
+    const total = steps.reduce((sum, s) => sum + (Number(s.dwellMs) || 0), 0);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="font-weight:600" title="${esc(steps.map((s) => s.url).join("\n"))}">${esc(r.name)}</td>
+      <td class="mono">${steps.length}</td>
+      <td class="mono">${esc(fmtDuration(total))}</td>
+      <td class="mono" style="color:var(--faint)">${esc(String(r.createdAt ?? "").slice(0, 16).replace("T", " "))}</td>
+      <td><span class="row-actions">
+        <button class="act-start" data-act="run" title="run this recipe on a profile">▶</button>
+        <button class="act-delete" data-act="delete" title="delete recipe">🗑</button>
+      </span></td>`;
+    tr.querySelector('[data-act="run"]').addEventListener("click", () => openWarmupRun(r));
+    tr.querySelector('[data-act="delete"]').addEventListener("click", () => deleteWarmup(r));
+    tbody.appendChild(tr);
+  }
+}
+
+async function deleteWarmup(recipe) {
+  if (!window.confirm(`Delete warmup recipe "${recipe.name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/warmups/${recipe.id}`, { method: "DELETE" });
+    toast(`warmup "${recipe.name}" deleted`);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadWarmups();
+}
+
+async function recordWarmup() {
+  const profileId = $("#warmup-record-profile").value;
+  const name = $("#warmup-record-name").value.trim();
+  const seconds = Number($("#warmup-record-seconds").value);
+  if (!profileId) return warmupStatus("pick a running profile to record", true);
+  if (!name) return warmupStatus("give the recipe a name", true);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+    return warmupStatus("duration must be a whole number of seconds, 1–600", true);
+  }
+  const btn = $("#warmup-record");
+  const started = Date.now();
+  const tick = () => {
+    const left = Math.max(0, seconds - Math.floor((Date.now() - started) / 1000));
+    btn.textContent = `● Recording… ${left}s`;
+    warmupStatus(`recording "${name}" — open tabs in the profile now (${left}s left)`);
+  };
+  btn.disabled = true;
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const recipe = await api(`/profiles/${profileId}/warmup/record`, {
+      method: "POST",
+      body: JSON.stringify({ name, durationMs: seconds * 1000 }),
+    });
+    $("#warmup-record-name").value = "";
+    warmupStatus(`recorded "${recipe.name}" — ${recipe.steps.length} step${recipe.steps.length === 1 ? "" : "s"}`);
+    toast(`warmup "${recipe.name}" recorded (${recipe.steps.length} steps)`);
+  } catch (err) {
+    warmupStatus(err.message, true);
+    toast(err.message, "error");
+  } finally {
+    clearInterval(timer);
+    btn.disabled = false;
+    btn.textContent = "● Record";
+  }
+  await loadWarmups();
+}
+
+async function openWarmupRun(recipe) {
+  warmupRunRecipe = recipe;
+  const steps = recipe.steps ?? [];
+  const total = steps.reduce((sum, s) => sum + (Number(s.dwellMs) || 0), 0);
+  $("#warmup-run-recipe").textContent =
+    `"${recipe.name}" — ${steps.length} step${steps.length === 1 ? "" : "s"}, about ${fmtDuration(total)} (dwell varies ±20% per step)`;
+  $("#warmup-run-result").innerHTML = "";
+  $("#warmup-run-status").textContent = "";
+  $("#warmup-run-stop").checked = false;
+  $("#warmup-run-go").disabled = warmupRunning;
+  const sel = $("#warmup-run-profile");
+  sel.innerHTML = `<option value="">(loading profiles…)</option>`;
+  $("#warmup-run-modal").hidden = false;
+  try {
+    const { profiles } = await api("/profiles");
+    sel.innerHTML =
+      `<option value="">(pick a profile)</option>` +
+      profiles
+        .map((p) => `<option value="${esc(p.id)}">${esc(p.name)} — ${esc(String(p.status ?? "idle"))}</option>`)
+        .join("");
+  } catch (err) {
+    sel.innerHTML = `<option value="">(could not load profiles)</option>`;
+    $("#warmup-run-status").textContent = err.message;
+  }
+}
+
+function closeWarmupRun() {
+  $("#warmup-run-modal").hidden = true;
+}
+
+function renderWarmupRunResult(data) {
+  const results = data.results ?? [];
+  const ok = results.filter((r) => r.ok).length;
+  const rows = results
+    .map((r) =>
+      r.ok
+        ? `<tr><td>✓</td><td class="mono">${esc(r.url)}</td><td class="mono">${esc(fmtDuration(r.dwellMs))}</td></tr>`
+        : `<tr class="import-err"><td>✗</td><td class="mono">${esc(r.url)}</td><td>${esc(r.error ?? "failed")}</td></tr>`,
+    )
+    .join("");
+  $("#warmup-run-result").innerHTML = `
+    <p class="hint">${ok}/${results.length} steps ok — ${data.startedByRun ? "profile was started by this run" : "profile was already running"}</p>
+    <table class="import-table"><tbody>${rows}</tbody></table>`;
+}
+
+async function runWarmup() {
+  const recipe = warmupRunRecipe;
+  const profileId = $("#warmup-run-profile").value;
+  const status = $("#warmup-run-status");
+  if (!recipe || warmupRunning) return;
+  if (!profileId) {
+    status.textContent = "pick a profile";
+    return;
+  }
+  const stopAfter = $("#warmup-run-stop").checked;
+  const btn = $("#warmup-run-go");
+  const started = Date.now();
+  const tick = () => {
+    status.textContent = `running… ${fmtDuration(Date.now() - started)} elapsed — this stays open until the recipe finishes`;
+  };
+  warmupRunning = true;
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  $("#warmup-run-result").innerHTML = "";
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const data = await api(`/warmups/${recipe.id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ profileId, stopAfter }),
+    });
+    const results = data.results ?? [];
+    const ok = results.filter((r) => r.ok).length;
+    toast(`warmup "${recipe.name}" finished: ${ok}/${results.length} steps ok`, ok === results.length ? "info" : "error");
+    /* the modal may have been closed or re-opened on another recipe meanwhile */
+    if (warmupRunRecipe === recipe) {
+      status.textContent = `finished in ${fmtDuration(Date.now() - started)}`;
+      renderWarmupRunResult(data);
+    }
+  } catch (err) {
+    toast(err.message, "error");
+    if (warmupRunRecipe === recipe) status.textContent = err.message;
+  } finally {
+    clearInterval(timer);
+    warmupRunning = false;
+    btn.disabled = false;
+    btn.textContent = "Run";
+  }
+  await loadProfiles();
+  if (activeView === "warmups") refreshWarmupProfiles().catch(() => {});
+}
+
+$("#warmup-record").addEventListener("click", recordWarmup);
+$("#warmups-refresh").addEventListener("click", loadWarmups);
+$("#warmup-run-go").addEventListener("click", runWarmup);
+$("#warmup-run-close").addEventListener("click", closeWarmupRun);
+$("#warmup-run-modal").addEventListener("click", (e) => { if (e.target.id === "warmup-run-modal") closeWarmupRun(); });
+
 /* ============================ live events (SSE) ========================= */
 
 function pushEvent(e) {
@@ -1363,6 +1578,7 @@ function connectEvents() {
         loadProfiles();
         refreshTabsProfiles();
         if (activeView === "cookies") refreshCookiesProfiles();
+        if (activeView === "warmups") refreshWarmupProfiles().catch(() => {});
         if ($("#tabs-profile").value) runTabsQuery();
       }
     } catch {
