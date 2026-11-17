@@ -406,6 +406,13 @@ async function renderProfileTable() {
     const driftBadge = state?.drift?.stale
       ? `<span class="tag tag-drift" title="${esc(state.drift.message)}">applies at next start</span>`
       : "";
+    /* Adopted after an API restart: the proxy relay died with the old API. */
+    const relayBadge =
+      state?.relay === "lost-held"
+        ? `<span class="tag tag-drift" title="The proxy relay died with the previous API process. Every page in this browser fails (nothing leaks). Stop and restart the profile to browse again.">proxy lost — restart</span>`
+        : state?.relay === "lost-unguarded"
+          ? `<span class="tag" style="color:var(--red);border-color:var(--red)" title="The proxy relay port is owned by another process: this browser's traffic may NOT go through its proxy. Stop this profile now.">proxy port taken — stop now</span>`
+          : "";
     const favorite = p.extra?.favorite === true;
     const tabColor = typeof p.extra?.tabColor === "string" ? p.extra.tabColor : null;
     const proxy = p.proxyId ? proxyById.get(p.proxyId) : null;
@@ -417,7 +424,7 @@ async function renderProfileTable() {
     tr.innerHTML = `
       <td><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select" ${batchSelection.has(p.id) ? "checked" : ""} /></td>
       <td class="mono" style="color:var(--faint)">${String(start + i + 1).padStart(4, "0")}</td>
-      <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}</td>
+      <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}${relayBadge}</td>
       <td><span class="status status-${esc(status)}"><span class="dot ${running ? "dot-on" : status === "error" ? "dot-warn" : "dot-off"}"></span>${esc(status.toUpperCase())}</span></td>
       <td class="mono">${esc(proxyText)}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>

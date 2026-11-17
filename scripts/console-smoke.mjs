@@ -197,8 +197,18 @@ export async function runConsoleSmoke({ base, ok }) {
     ok("no uncaught exceptions in the console page", page.exceptions.length === 0, page.exceptions.slice(0, 3).join(" | "));
   } finally {
     page?.close();
-    browser.kill();
-    await new Promise((r) => (browser.exitCode !== null ? r() : browser.once("exit", r)));
+    // Whole tree: Chromium's renderer/GPU/network children are separate
+    // processes, and one left alive would also pin the temp profile dir.
+    if (process.platform === "win32" && browser.pid) {
+      await new Promise((r) => {
+        const t = spawn("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        t.once("exit", r);
+        t.once("error", r);
+      });
+    } else {
+      browser.kill();
+    }
+    await new Promise((r) => (browser.exitCode !== null || browser.signalCode !== null ? r() : browser.once("exit", r)));
     rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }

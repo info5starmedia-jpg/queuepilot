@@ -133,6 +133,27 @@ describe("adopted proxied runs after an API restart", () => {
     expect(metrics).toMatchObject({ relaysHeld: 1, relaysUnguarded: 0 });
   });
 
+  it("batch-state carries the relay state so the console grid can badge it", async () => {
+    const ctx = context();
+    const port = await freePort();
+    const { profileId } = await adoptedProxiedRun(ctx, port);
+    const direct = ctx.profiles.create({ name: "direct-live", generateFingerprint: true });
+    await ctx.lifecycle.start(direct.id);
+    ctx.lifecycle.reconcileOnBoot();
+    await ctx.lifecycle.guardAdoptedRelays();
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/profiles/batch-state",
+      payload: { ids: [profileId, direct.id] },
+    });
+    const states = Object.fromEntries(
+      (res.json().states as { id: string; relay: string | null }[]).map((s) => [s.id, s.relay]),
+    );
+    expect(states[profileId]).toBe("lost-held");
+    expect(states[direct.id]).toBeNull();
+  });
+
   it("reports an unguarded relay loudly when another process already owns the port", async () => {
     const ctx = context();
     const squatter = net.createServer((s) => s.end());

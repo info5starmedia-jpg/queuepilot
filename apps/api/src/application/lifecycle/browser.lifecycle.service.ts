@@ -736,12 +736,7 @@ export class BrowserLifecycleService {
   } | null {
     const run = this.runs.occupyingForProfile(profileId);
     const snapshot = run && this.snapshots ? this.snapshots.forRun(run.id) : null;
-    const proxied = Boolean(snapshot?.proxyUrl && snapshot.egress?.relayPort);
-    let relay: "live" | "lost-held" | "lost-unguarded" | null = null;
-    if (run && proxied) {
-      if (this.sessions.has(profileId)) relay = "live";
-      else relay = this.relayHolds.get(run.id) ? "lost-held" : "lost-unguarded";
-    }
+    const relay = this.relayStateFor(profileId, run, snapshot);
     const note =
       relay === "lost-held"
         ? "adopted after an API restart: the proxy relay died with the old API, so every request from this browser fails (nothing leaks). The egress below is the launch measurement. Stop and restart the profile to browse again."
@@ -945,6 +940,27 @@ export class BrowserLifecycleService {
     this.recoveryCounters.relaysHeld += held;
     this.recoveryCounters.relaysUnguarded += unguarded;
     return { held, unguarded };
+  }
+
+  /**
+   * Proxy-relay state of the profile's active run (see egressDiagnostics):
+   * null when not running or not proxied. Cheap enough for the grid's
+   * batch-state call — one snapshot read per RUNNING profile only.
+   */
+  relayState(profileId: string): "live" | "lost-held" | "lost-unguarded" | null {
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) return null;
+    return this.relayStateFor(profileId, run, this.snapshots?.forRun(run.id) ?? null);
+  }
+
+  private relayStateFor(
+    profileId: string,
+    run: BrowserRun | null,
+    snapshot: LaunchIdentitySnapshot | null,
+  ): "live" | "lost-held" | "lost-unguarded" | null {
+    if (!run || !snapshot?.proxyUrl || !snapshot.egress?.relayPort) return null;
+    if (this.sessions.has(profileId)) return "live";
+    return this.relayHolds.get(run.id) ? "lost-held" : "lost-unguarded";
   }
 
   private releaseRelayHold(runId: string): void {
