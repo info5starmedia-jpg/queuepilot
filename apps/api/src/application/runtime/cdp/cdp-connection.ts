@@ -30,12 +30,51 @@ export class CdpConnection {
 
   private constructor(private readonly ws: WebSocket) {}
 
-  static connect(url: string, timeoutMs = 10_000): Promise<CdpConnection> {
+  /**
+   * Concrete browser-target WebSocket URL for engines that publish a bare
+   * `ws://host:port` endpoint. Real Chromium (and the Firefox CDP-compat
+   * surface) only upgrades WebSocket on `/devtools/browser/<id>` — the bare
+   * root gets a rejected upgrade with an empty reason, which surfaces as the
+   * unhelpful "CDP connection error on ws://…: ". Resolving via
+   * `/json/version` first fixes every consumer (cookies, autofill, tab
+   * tiling, bundles) at the connection layer. Any failure falls back to the
+   * original URL so behaviour against non-conforming endpoints is unchanged.
+   */
+  private static async resolveEndpoint(url: string, timeoutMs: number): Promise<string> {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return url;
+    }
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (path) return url; // already a concrete target path (e.g. /devtools/browser/…)
+    const httpVersion = `http://${parsed.host}/json/version`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, 5_000));
+    try {
+      const res = await fetch(httpVersion, { signal: ctrl.signal });
+      if (res.ok) {
+        const info = (await res.json()) as { webSocketDebuggerUrl?: string };
+        if (typeof info.webSocketDebuggerUrl === "string" && info.webSocketDebuggerUrl) {
+          return info.webSocketDebuggerUrl;
+        }
+      }
+    } catch {
+      /* not a DevTools HTTP endpoint — use the URL as given */
+    } finally {
+      clearTimeout(timer);
+    }
+    return url;
+  }
+
+  static async connect(url: string, timeoutMs = 10_000): Promise<CdpConnection> {
+    const resolved = await CdpConnection.resolveEndpoint(url, timeoutMs);
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(resolved);
       const conn = new CdpConnection(ws);
       const timer = setTimeout(() => {
-        reject(new Error(`CDP connect timeout after ${timeoutMs}ms: ${url}`));
+        reject(new Error(`CDP connect timeout after ${timeoutMs}ms: ${resolved}`));
         try {
           ws.close();
         } catch {
@@ -50,7 +89,7 @@ export class CdpConnection {
       ws.addEventListener("error", (ev) => {
         clearTimeout(timer);
         const err = new Error(
-          `CDP connection error on ${url}: ${(ev as { message?: string }).message ?? "unknown"}`,
+          `CDP connection error on ${resolved}: ${(ev as { message?: string }).message ?? "unknown"}`,
         );
         if (!conn.closed && conn.pending.size === 0) reject(err);
         conn.failAll(err);

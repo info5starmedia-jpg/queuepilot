@@ -1,4 +1,5 @@
 import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
+import { attachPageSession } from "../runtime/cdp/cdp-page-session.js";
 
 /**
  * Cookie Thinger — programmable cookie surgery over CDP.
@@ -91,32 +92,66 @@ async function contextsForTabs(
   return out;
 }
 
+/**
+ * Every cookie visible to a page session. `Network.getAllCookies` /
+ * `Network.getCookies` are page-domain methods — the browser-level socket
+ * rejects them ("wasn't found") — so this attaches to the first open page
+ * (or a transient `about:blank` only when the browser has no page at all)
+ * and issues the call on that session. `browserContextId: null` marks the
+ * store attribution as unknown at this layer; partition attribution comes
+ * from which tab's context answered.
+ */
+async function listViaPageSession(
+  conn: CdpConnection,
+  method: "Network.getAllCookies" | "Network.getCookies",
+): Promise<CookieRecord[]> {
+  const session = await attachPageSession(conn);
+  try {
+    const r = await conn.call<{ cookies: CookieRecord[] }>(method, {}, 15_000, session.sessionId);
+    return (r.cookies ?? []).map((c) => ({ ...c, browserContextId: null }));
+  } finally {
+    await session.release();
+  }
+}
+
 /** Every cookie in the run (all partitions), with context attribution. */
 export async function listAllCookies(wsEndpoint: string): Promise<CookieRecord[]> {
   const conn = await CdpConnection.connect(wsEndpoint, 10_000);
   try {
-    const r = await conn.call<{ cookies: CookieRecord[] }>("Network.getAllCookies");
-    return (r.cookies ?? []).map((c) => ({ ...c, browserContextId: null }));
+    return await listViaPageSession(conn, "Network.getAllCookies");
   } finally {
     conn.close();
   }
 }
 
-/** Cookies of specific browser contexts (partitions). */
+/**
+ * Cookies of specific browser contexts (partitions). `Network.getCookies`
+ * is a page-domain method, so it goes out on one page session (attached to
+ * a partition tab when there is one); the `browserContextId` param scopes
+ * each call to its context, so a single session can read every partition.
+ */
 async function listContextCookies(
   conn: CdpConnection,
-  browserContextIds: Set<string>,
+  engineTabIds: Set<string>,
 ): Promise<CookieRecord[]> {
-  const out: CookieRecord[] = [];
-  for (const browserContextId of browserContextIds) {
-    const r = await conn.call<{ cookies: CookieRecord[] }>(
-      "Network.getCookies",
-      { browserContextId },
-      15_000,
-    );
-    for (const c of r.cookies ?? []) out.push({ ...c, browserContextId });
+  const browserContextIds = await contextsForTabs(conn, engineTabIds);
+  const preferTargetId = [...engineTabIds][0];
+  const session = await attachPageSession(conn, preferTargetId ? { preferTargetId } : {});
+  try {
+    const out: CookieRecord[] = [];
+    for (const browserContextId of browserContextIds) {
+      const r = await conn.call<{ cookies: CookieRecord[] }>(
+        "Network.getCookies",
+        { browserContextId },
+        15_000,
+        session.sessionId,
+      );
+      for (const c of r.cookies ?? []) out.push({ ...c, browserContextId });
+    }
+    return out;
+  } finally {
+    await session.release();
   }
-  return out;
 }
 
 export interface ListCookiesOptions {
@@ -131,14 +166,10 @@ export async function listCookies(
 ): Promise<CookieRecord[]> {
   const conn = await CdpConnection.connect(wsEndpoint, 10_000);
   try {
-    let cookies: CookieRecord[];
-    if (opts.engineTabIds && opts.engineTabIds.size > 0) {
-      const contexts = await contextsForTabs(conn, opts.engineTabIds);
-      cookies = await listContextCookies(conn, contexts);
-    } else {
-      const r = await conn.call<{ cookies: CookieRecord[] }>("Network.getAllCookies");
-      cookies = (r.cookies ?? []).map((c) => ({ ...c, browserContextId: null }));
-    }
+    const cookies =
+      opts.engineTabIds && opts.engineTabIds.size > 0
+        ? await listContextCookies(conn, opts.engineTabIds)
+        : await listViaPageSession(conn, "Network.getAllCookies");
     return cookies.filter((c) => matches(c, filter));
   } finally {
     conn.close();
@@ -162,21 +193,17 @@ export async function setCookie(
   };
   const conn = await CdpConnection.connect(wsEndpoint, 10_000);
   try {
-    if (opts.engineTabId) {
-      // Partition store: set through a page attached to that context.
-      const attached = await conn.call<{ sessionId: string }>("Target.attachToTarget", {
-        targetId: opts.engineTabId,
-        flatten: true,
-      });
-      try {
-        await conn.call("Network.setCookie", params, 10_000, attached.sessionId);
-      } finally {
-        await conn
-          .call("Target.detachFromTarget", { sessionId: attached.sessionId }, 5_000)
-          .catch(() => {});
-      }
-    } else {
-      await conn.call("Network.setCookie", params, 10_000);
+    // `Network.setCookie` is a page-domain method: always send it on a
+    // session attached to a page — the partition's page when known, else
+    // the first open page of the run.
+    const session = await attachPageSession(
+      conn,
+      opts.engineTabId ? { preferTargetId: opts.engineTabId } : {},
+    );
+    try {
+      await conn.call("Network.setCookie", params, 10_000, session.sessionId);
+    } finally {
+      await session.release();
     }
   } finally {
     conn.close();
@@ -196,25 +223,14 @@ export async function clearCookies(
 ): Promise<number> {
   const conn = await CdpConnection.connect(wsEndpoint, 10_000);
   try {
-    let cookies: CookieRecord[];
-    if (opts.engineTabIds && opts.engineTabIds.size > 0) {
-      const contexts = await contextsForTabs(conn, opts.engineTabIds);
-      cookies = await listContextCookies(conn, contexts);
-    } else {
-      const r = await conn.call<{ cookies: CookieRecord[] }>("Network.getAllCookies");
-      cookies = (r.cookies ?? []).map((c) => ({ ...c, browserContextId: null }));
-    }
+    const cookies =
+      opts.engineTabIds && opts.engineTabIds.size > 0
+        ? await listContextCookies(conn, opts.engineTabIds)
+        : await listViaPageSession(conn, "Network.getAllCookies");
     const targets = cookies.filter((c) => matches(c, filter));
 
-    let sessionId: string | null = null;
     const tabId = opts.engineTabIds ? [...opts.engineTabIds][0] : undefined;
-    if (tabId) {
-      const attached = await conn.call<{ sessionId: string }>("Target.attachToTarget", {
-        targetId: tabId,
-        flatten: true,
-      });
-      sessionId = attached.sessionId;
-    }
+    const session = await attachPageSession(conn, tabId ? { preferTargetId: tabId } : {});
     try {
       for (const c of targets) {
         // deleteCookies matches on name+domain+path regardless of expiry;
@@ -224,14 +240,10 @@ export async function clearCookies(
           path: c.path || "/",
         };
         if (c.domain) params.domain = c.domain;
-        await conn.call("Network.deleteCookies", params, 10_000, sessionId ?? undefined).catch(() => {});
+        await conn.call("Network.deleteCookies", params, 10_000, session.sessionId).catch(() => {});
       }
     } finally {
-      if (sessionId) {
-        await conn
-          .call("Target.detachFromTarget", { sessionId }, 5_000)
-          .catch(() => {});
-      }
+      await session.release();
     }
     return targets.length;
   } finally {
