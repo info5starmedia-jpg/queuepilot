@@ -115,7 +115,10 @@ describe("holdRelayPort", () => {
   });
 });
 
-describe("adopted proxied runs after an API restart", () => {
+// Real processes: each stop proves identity with several blocking OS
+// start-time reads (a PowerShell spawn each on Windows) plus the kill
+// escalation windows. ~8 s alone, but past 30 s under a loaded full run.
+describe("adopted proxied runs after an API restart", { timeout: 60_000 }, () => {
   it("holds the dead relay port, and egress stops claiming the launch exit IP is live", async () => {
     const ctx = context();
     const port = await freePort();
