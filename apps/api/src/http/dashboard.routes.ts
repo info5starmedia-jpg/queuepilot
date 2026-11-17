@@ -9,8 +9,10 @@ import type { FastifyInstance } from "fastify";
  * works offline on loopback).
  *
  * Security notes: the allowlist of servable files comes from the directory
- * listing itself, path segments are rejected outright (no traversal), and the
- * dashboard honors the same bearer-token hook as every other route.
+ * listing itself, path segments are rejected outright (no traversal). Since
+ * P9 Task 0 these static files (code, no data) are served WITHOUT the bearer
+ * token so the page can show its sign-in; every API route it calls still
+ * requires the token (app.ts → isDashboardAsset).
  */
 const DASHBOARD_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),

@@ -89,6 +89,12 @@ export function engineUpdateServiceFor(config: AppConfig, settings?: SettingsSer
   });
 }
 
+/** `/` and `/dashboard/<flat file>` — exactly what dashboard.routes serves. */
+function isDashboardAsset(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  return path === "/" || /^\/dashboard\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(path);
+}
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   // Audit GPT-5.4 finding 3: structured logging was off (`logger: false`),
   // so field failures left no trace. pino + reqIds + counters now; tests
@@ -120,6 +126,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const expected = Buffer.from(`Bearer ${token}`, "utf8");
     app.addHook("onRequest", async (req, reply) => {
       if (req.url === "/health") return;
+      // P9 Task 0: the dashboard's static files (HTML/JS/CSS, no data) load
+      // without the token so the page can show its sign-in; every API route
+      // the page then calls still requires the Bearer token below.
+      if (req.method === "GET" && isDashboardAsset(req.url)) return;
       // Constant-time compare (audit A-rec #1): a plain string !== leaks
       // the token byte-by-byte through response timing.
       const given = Buffer.from(req.headers.authorization ?? "", "utf8");
