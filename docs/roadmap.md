@@ -1719,3 +1719,24 @@ scan 2026-11-17). Owner decisions recorded:
   relay/DPAPI), full action log.
 - Priority: AFTER the hosted team deployment track (it is the foundation
   family rollout and the agent's audience both sit on).
+
+## Phase A+B — owner gaps and watch items (2026-11-18, branch `phase-ab`)
+
+- [x] **B1 — Proxy list text import** (`d8688d1`) — `POST /proxies/import`
+  takes pasted text (JSON `{ text, type? }`) or a .txt file's bytes as
+  `text/plain` (`?type=` default scheme). Lines: `host:port`,
+  `host:port:user:pass`, optional trailing IANA timezone, `scheme://`
+  prefix, `user:pass@host:port`, the older `name:host:port:user:pass`;
+  blank lines and `#` comments ignored. Dedupes on host+port against
+  stored proxies and within the batch; response
+  `{ added, skipped, errors: [{ line, reason }] }`; one bad line never fails
+  the batch; reasons never echo the line. Dashboard: "⇪ Import proxies"
+  dialog with paste box + .txt picker and the summary. 12 new tests; gates
+  681/681 API, 20/20 server, tsc, build; e2e GREEN (30). Live (scratch API
+  50477, TEST-NET addresses, dummy creds): pasted 7 lines →
+  `3 added · 1 skipped (already listed) · 2 errors` (line 6
+  `expected host:port[:user:pass[:timezone]]`, line 7 `port out of range`);
+  timezone `America/New_York` stored and shown; .txt bytes via text/plain →
+  `{"added":2,"skipped":1,"errors":[]}`; no `password` field in any list
+  response. The browser file picker itself was not driven by automation
+  (it reads the file with `File.text()` and posts the same JSON).
