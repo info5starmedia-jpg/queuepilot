@@ -1014,11 +1014,12 @@ persona v2 (UA/WebGL/font pins), or the next numbered P-roadmap item.
      was lost on the first PATCH — v0.16 item 9), and legacy profiles keep
      stored personas that predate the host clamp (one-line PATCH each, or
      regenerate).
-9. 🔲 **Identity PATCH must merge overrides** — found during the qp.4
+9. ✅ **Identity PATCH must merge overrides** — found during the qp.4
    verification: `PATCH /profiles/:id/identity {"deviceMemoryGb":8}` silently
-   dropped the existing `timezone` override (response `overrides` contained
-   only the new key). Merge, don't replace; add a regression test. Until
-   shipped, clients must send the full override set in one PATCH.
+   dropped the existing `timezone` override. Fixed in `f9398c3`: merge, don't
+   replace — absent field keeps its pin, value sets one pin, explicit `null`
+   clears one pin back to seed-derived, empty body is a no-op, regenerate
+   clears all. Regression test locks the merge behavior.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
