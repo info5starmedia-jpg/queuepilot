@@ -39,9 +39,21 @@ These are enforced by construction, and each has a test:
 4. **Idempotent stop.** Automation retries are a fact of life; stopping a stopped
    profile is a success no-op.
 5. **Reconcile before serve.** On boot, occupying runs are checked against real
-   OS processes (`process.kill(pid, 0)`): alive → adopted as running, dead →
-   marked crashed and the profile freed. (Known limit: PID reuse. See roadmap
-   D-002 — store the process start token per platform.)
+   OS processes — liveness (`process.kill(pid, 0)`) AND identity: every run
+   row carries the engine's process-start token (D-002; Windows creation
+   time, Linux `/proc` starttime), read back in one batched OS query. The
+   answer is four-way (`checkProcessIdentity`): `match` → adopted; `unknown`
+   (no token, or the OS refused the read) → adopted but logged and counted
+   as unverified; `mismatch` (PID reused by a stranger) and `dead` → marked
+   crashed and the profile freed.
+6. **A PID is only a number after a restart.** An adopted run has no session
+   handle, so (a) a timer re-checks it — a dead or PID-reused engine is
+   marked crashed instead of reading "running" until the next boot — and
+   (b) Stop asks the engine itself first (CDP `Browser.close`) and kills by
+   PID only while the start token proves the process is ours. Unprovable
+   identity is never killed; the run row says the engine may still be
+   running. (macOS has no `/proc`: tokens are null there, so everything is
+   `unknown` until the macOS/Linux port.)
 
 ## Why synchronous SQLite
 

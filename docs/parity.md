@@ -93,7 +93,7 @@ trust in the binary — acceptable short-term, tracked below to close.
 | Edit-while-running + drift report | ✅ | ✅ | ✅ |
 | Fingerprint attestation (asked vs materialized) | ✅ | ✅ | ✅ |
 | Engine health / self-test | ✅ | ✅ | ✅ |
-| Clean teardown, process identity proof | ✅ | ✅ | ✅ |
+| Clean teardown, process identity proof | ✅ | ✅ start tokens on every run; boot reconcile is four-way (match/mismatch/unknown/dead); adopted runs are watched and Stop closes their engine (CDP first, PID kill only on a proven token) | ✅ |
 | Temporary (one-shot) proxies | ✅ | ✅ | ✅ |
 | Proxy providers (CSV/Sheets, rotation) | ✅ | ✅ | ✅ |
 | Tab/session partition isolation | ✅ | ✅ CDP browser contexts | ✅ |

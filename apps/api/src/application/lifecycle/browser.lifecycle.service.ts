@@ -16,7 +16,14 @@ import {
   type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
-import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
+import {
+  captureProcessStartTokens,
+  checkProcessIdentity,
+  startTokenForRun,
+  terminateProcess,
+  waitForProcessExit,
+} from "../../infrastructure/process-inventory.js";
+import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
@@ -83,6 +90,23 @@ export class BrowserLifecycleService {
   /** Per-run lease heartbeats (audit B1); cleared with the session. */
   private readonly leaseRenewers = new Map<string, ReturnType<typeof setInterval>>();
   readonly events = new EventEmitter();
+  /**
+   * D-002 recovery counters, surfaced by GET /metrics. "Unverified" = adopted
+   * on liveness alone (no start token, or the OS refused the read).
+   */
+  readonly recoveryCounters = {
+    runsAdopted: 0,
+    runsAdoptedUnverified: 0,
+    runsReconciledCrashed: 0,
+  };
+  /**
+   * How long an adopted engine gets to exit after each stop request
+   * (Browser.close, graceful kill, forced kill) before the next escalation.
+   */
+  private adoptedStopGraceMs = 10_000;
+  /** Adopted-run watcher (D-002 follow-up); null when nothing is adopted. */
+  private adoptedWatcher: ReturnType<typeof setInterval> | null = null;
+  private adoptedWatchIntervalMs = 15_000;
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
   /**
@@ -315,7 +339,8 @@ export class BrowserLifecycleService {
         // D-002: the anti-PID-reuse token rides the run row from here on.
         // Null (capture failed) is fine — reconciliation then falls back to
         // plain liveness, never to a guessed death.
-        processToken: captureProcessStartToken(session.pid),
+        // A token older than this run's own start is a stranger's — dropped.
+        processToken: startTokenForRun(session.pid, run.startedAt),
         debugPort: session.debugPort,
         wsEndpoint: session.wsEndpoint,
       };
@@ -368,20 +393,101 @@ export class BrowserLifecycleService {
       this.markProfile(profile, "idle");
       this.tabRegistry.clearRun(run.id); // tabs die with the run
       await this.leaseGuard?.release(profileId).catch(() => {}); // TTL reaps a lost release
-      try {
-        await session?.stop();
-      } catch {
-        // Engine may already be gone; the row is already reconciled above.
+      let final = stopped;
+      if (session) {
+        try {
+          await session.stop();
+        } catch {
+          // Engine may already be gone; the row is already reconciled above.
+        }
+      } else {
+        // Adopted after an API restart: there is no session handle, but Stop
+        // must still mean "the browser is gone" (D-002 follow-up).
+        const note = await this.stopAdoptedEngine(run);
+        if (note) {
+          final = { ...stopped, lastError: note };
+          this.runs.update(final);
+        }
       }
       this.emit({
         type: "run.stopped",
         profileId,
         runId: run.id,
         at: now(),
-        detail: "",
+        detail: final.lastError ?? "",
       });
-      return stopped;
+      return final;
     });
+  }
+
+  /**
+   * Stop the engine of a run that has no in-memory session (adopted after an
+   * API restart). The PID on the row is only a number by now, so identity
+   * decides how far we may go:
+   *
+   *  1. Ask the engine itself: CDP `Browser.close` on the stored endpoint —
+   *     a clean shutdown, and it cannot hit a non-browser stranger.
+   *  2. Kill by PID ONLY when the start token proves the process is ours
+   *     ("match"), graceful first, forced after the grace window.
+   *  3. Otherwise never kill. A tokenless or unreadable process that ignored
+   *     Browser.close is left alone and the row says so.
+   *
+   * Returns null when the engine is gone, or a note for `lastError` when it
+   * may still be running.
+   */
+  private async stopAdoptedEngine(run: BrowserRun): Promise<string | null> {
+    const pid = run.pid;
+    if (!pid) return null; // died mid-launch before a PID was recorded
+    const identity = checkProcessIdentity(pid, run.processToken);
+    if (identity === "dead") return null;
+    if (identity === "mismatch") {
+      // Our engine is long gone; this PID (and likely the debug port) is
+      // somebody else's now. Touch nothing.
+      return "engine PID was reused by another process; nothing was stopped";
+    }
+    const grace = this.adoptedStopGraceMs;
+    const unproven =
+      `engine (pid ${pid}) may still be running: its identity could not be proven ` +
+      `(${run.processToken ? "start time unreadable" : "no start token on record"}), ` +
+      "so it was not killed by PID — close the browser window manually";
+    let waited = false;
+    if (run.wsEndpoint) {
+      try {
+        const conn = await CdpConnection.connect(run.wsEndpoint, 3_000);
+        waited = true;
+        try {
+          // The socket drops as the browser exits, so a rejected call is
+          // expected — what counts is whether the process goes away.
+          await conn.call("Browser.close", {}, 3_000).catch(() => {});
+        } finally {
+          conn.close();
+        }
+        if (await waitForProcessExit(pid, grace)) return null;
+      } catch {
+        // No DevTools endpoint answering — fall through to the PID path.
+      }
+    }
+    if (identity !== "match") return unproven;
+    // Identity is re-proven immediately before EVERY kill: any wait above is
+    // long enough for the engine to exit and its PID to be handed to someone
+    // else. Gone or reused → our engine is dead, nothing to do. Unreadable →
+    // no longer provable, so no kill.
+    const reprove = (): string | null | "kill" => {
+      const again = checkProcessIdentity(pid, run.processToken);
+      if (again === "dead" || again === "mismatch") return null;
+      return again === "match" ? "kill" : unproven;
+    };
+    if (waited) {
+      const verdict = reprove();
+      if (verdict !== "kill") return verdict;
+    }
+    await terminateProcess(pid, false);
+    if (await waitForProcessExit(pid, grace)) return null;
+    const verdict = reprove();
+    if (verdict !== "kill") return verdict;
+    await terminateProcess(pid, true);
+    if (await waitForProcessExit(pid, grace)) return null;
+    return `engine (pid ${pid}) did not exit after a forced stop`;
   }
 
   activeRun(profileId: string): BrowserRun | null {
@@ -661,35 +767,126 @@ export class BrowserLifecycleService {
    * is what makes restart after a crash safe instead of corrupting profile
    * state.
    */
-  reconcileOnBoot(): { adopted: number; crashed: number } {
+  reconcileOnBoot(): { adopted: number; crashed: number; unverified: number } {
     let adopted = 0;
     let crashed = 0;
-    for (const run of this.runs.listOccupying()) {
-      if (run.pid && isProcessAlive(run.pid, run.processToken)) {
+    let unverified = 0;
+    const occupying = this.runs.listOccupying();
+    // One OS query for every tokened PID, not one blocking spawn per run —
+    // this runs before the API opens its port.
+    const tokens = captureProcessStartTokens(pidsToVerify(occupying));
+    for (const run of occupying) {
+      const identity = checkProcessIdentity(run.pid, run.processToken, tokens);
+      if (identity === "match" || identity === "unknown") {
         if (run.status !== "running") {
           this.runs.update({ ...run, status: "running" });
         }
         adopted++;
+        if (identity === "unknown") {
+          // Adopted on liveness alone: the soft-failure bias keeps a healthy
+          // session alive, but nothing proved this PID is our engine. Say so
+          // — stop() will refuse to kill it by PID.
+          unverified++;
+          console.warn(
+            `[queuepilot] recovery: run ${run.id} (pid ${run.pid}) adopted WITHOUT identity proof — ` +
+              (run.processToken ? "start time unreadable" : "no start token on record"),
+          );
+        }
       } else {
-        this.runs.update({
-          ...run,
-          status: "crashed",
-          stoppedAt: now(),
-          lastError: "engine process not found (or its PID reused) at API startup",
-        });
-        const profile = this.profiles.get(run.profileId);
-        if (profile) this.markProfile(profile, "idle");
-        this.emit({
-          type: "run.crashed",
-          profileId: run.profileId,
-          runId: run.id,
-          at: now(),
-          detail: "reconciled at boot",
-        });
+        this.markCrashed(
+          run,
+          identity === "mismatch"
+            ? "engine PID was reused by another process (start token mismatch) at API startup"
+            : "engine process not found at API startup",
+          "reconciled at boot",
+        );
         crashed++;
       }
     }
-    return { adopted, crashed };
+    this.recoveryCounters.runsAdopted += adopted;
+    this.recoveryCounters.runsAdoptedUnverified += unverified;
+    this.recoveryCounters.runsReconciledCrashed += crashed;
+    if (adopted > 0) this.startAdoptedWatcher();
+    return { adopted, crashed, unverified };
+  }
+
+  /**
+   * Adopted runs have no session, so nothing tells us when their engine
+   * exits — without this they would read "running" until the next API boot.
+   * One unref'd timer re-checks them; it exists only while adopted runs do.
+   */
+  private startAdoptedWatcher(): void {
+    if (this.adoptedWatcher) return;
+    let tick = 0;
+    this.adoptedWatcher = setInterval(() => {
+      // Liveness is a cheap syscall and runs every tick. Proving identity
+      // costs a blocking OS query, so PID reuse is checked every 4th tick.
+      this.checkAdoptedRuns(++tick % 4 === 0);
+    }, this.adoptedWatchIntervalMs);
+    this.adoptedWatcher.unref?.();
+  }
+
+  /** Stop watching adopted runs (also self-invoked when none remain). */
+  stopAdoptedWatcher(): void {
+    if (this.adoptedWatcher) clearInterval(this.adoptedWatcher);
+    this.adoptedWatcher = null;
+  }
+
+  /**
+   * Re-check every sessionless running run against the OS. Dead engines are
+   * marked crashed through the same path as boot reconciliation; with
+   * `verifyIdentity` a live PID must also still carry our start token (a
+   * mismatch means the engine died and a stranger inherited the PID).
+   * "unknown" stays adopted — never a guessed death. Returns how many runs
+   * were marked crashed.
+   */
+  checkAdoptedRuns(verifyIdentity = true): number {
+    let crashed = 0;
+    let watching = 0;
+    // Has a session → its exit promise is the watcher. "launching" → a
+    // start is in flight and the session is not registered yet.
+    const adopted = this.runs
+      .listOccupying()
+      .filter((run) => run.status === "running" && !this.sessions.has(run.profileId));
+    const tokens = verifyIdentity
+      ? captureProcessStartTokens(pidsToVerify(adopted))
+      : undefined;
+    for (const run of adopted) {
+      const identity = checkProcessIdentity(
+        run.pid,
+        verifyIdentity ? run.processToken : null,
+        tokens,
+      );
+      if (identity === "dead" || identity === "mismatch") {
+        this.markCrashed(
+          run,
+          identity === "mismatch"
+            ? "adopted engine exited and its PID was reused by another process"
+            : "adopted engine process exited",
+          "adopted engine gone",
+        );
+        crashed++;
+      } else {
+        watching++;
+      }
+    }
+    this.recoveryCounters.runsReconciledCrashed += crashed;
+    if (watching === 0) this.stopAdoptedWatcher();
+    return crashed;
+  }
+
+  /** A run whose engine is gone without the API seeing its exit. */
+  private markCrashed(run: BrowserRun, lastError: string, detail: string): void {
+    this.runs.update({ ...run, status: "crashed", stoppedAt: now(), lastError });
+    const profile = this.profiles.get(run.profileId);
+    if (profile) this.markProfile(profile, "idle");
+    this.emit({
+      type: "run.crashed",
+      profileId: run.profileId,
+      runId: run.id,
+      at: now(),
+      detail,
+    });
   }
 
   private onEngineExit(
@@ -760,6 +957,11 @@ export class BrowserLifecycleService {
   private emit(e: LifecycleEvent): void {
     this.events.emit("lifecycle", e);
   }
+}
+
+/** PIDs whose identity can be proven: the run has both a PID and a token. */
+function pidsToVerify(runs: readonly BrowserRun[]): number[] {
+  return runs.flatMap((r) => (r.pid && r.processToken ? [r.pid] : []));
 }
 
 function now(): string {

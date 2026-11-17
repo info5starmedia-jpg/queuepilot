@@ -115,7 +115,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.get("/health", async () => ({ status: "ok", service: "queuepilot" }));
-  app.get("/metrics", async () => apiLogger.snapshot());
+  app.get("/metrics", async () => ({
+    ...apiLogger.snapshot(),
+    ...deps.lifecycle.recoveryCounters, // D-002: adopted / unverified / crashed at recovery
+  }));
 
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp, deps.proxyProviders);
   registerProxyRoutes(app, deps.proxies);

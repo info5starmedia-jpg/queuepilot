@@ -98,6 +98,10 @@ export class MockCdpServer {
   private onUpgrade(req: http.IncomingMessage, socket: net.Socket): void {
     this.sockets.add(socket);
     socket.on("close", () => this.sockets.delete(socket));
+    // A client that drops the connection abruptly (ECONNRESET) is a normal
+    // close for a mock; without a listener the reset is an uncaught exception
+    // that fails the whole vitest run even though every test passed.
+    socket.on("error", () => {});
     const key = req.headers["sec-websocket-key"] ?? "";
     const accept = crypto
       .createHash("sha1")
