@@ -137,4 +137,21 @@ export class FakeSession extends EventEmitter implements BrowserSession {
   async closeTab(engineTabId: string): Promise<void> {
     this.tabs.delete(engineTabId);
   }
+
+  /** Test hook: reloads per engine tab id. */
+  readonly reloads = new Map<string, number>();
+
+  async reloadTab(engineTabId: string): Promise<void> {
+    if (!this.tabs.has(engineTabId)) throw new Error(`no such tab ${engineTabId}`);
+    this.reloads.set(engineTabId, (this.reloads.get(engineTabId) ?? 0) + 1);
+  }
+
+  async screenshotTab(engineTabId: string): Promise<Buffer> {
+    if (!this.tabs.has(engineTabId)) throw new Error(`no such tab ${engineTabId}`);
+    // A real 1x1 PNG — callers can decode what they get.
+    return Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "base64",
+    );
+  }
 }

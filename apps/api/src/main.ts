@@ -43,6 +43,7 @@ import {
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
+import { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
@@ -111,7 +112,9 @@ export async function main(): Promise<void> {
   // Plugin + resolver + parser registries (Jancy workflow layer, P7).
   const resolvers = new ResolverRegistry();
   registerBuiltinResolvers(resolvers);
-  registerImapResolver(resolvers);
+  // Email accounts (Settings → Integrations): `imap:you@gmail.com` uses them.
+  const emailAccounts = new EmailAccountService(db, secretStore);
+  registerImapResolver(resolvers, { accounts: emailAccounts });
   const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
   await parserReg.rescan();
   const pluginReg = new PluginRegistry(
@@ -179,6 +182,15 @@ export async function main(): Promise<void> {
     );
   }
 
+  const snapshots = new LaunchIdentityService(config.dataDir);
+  // Older snapshots stored the launch proxy password in plain text.
+  const stripped = snapshots.stripStoredProxyPasswords();
+  if (stripped.rewritten || stripped.skipped) {
+    console.log(
+      `[queuepilot] snapshots: proxy passwords stripped from ${stripped.rewritten} file(s), ${stripped.skipped} unreadable`,
+    );
+  }
+
   const lifecycle = new BrowserLifecycleService(
     profileRepo,
     identityRepo,
@@ -186,7 +198,7 @@ export async function main(): Promise<void> {
     runRepo,
     runtime,
     config.dataDir,
-    new LaunchIdentityService(config.dataDir),
+    snapshots,
     // P7.7b: when Settings → Team is configured, every launch takes a
     // cross-machine lease first (fail closed); unconfigured = no-op.
     new TeamLeaseGuard(settingsService),
@@ -198,6 +210,14 @@ export async function main(): Promise<void> {
   // Reconcile runs left occupying by a previous (possibly crashed) process
   // BEFORE opening the port, so the API never reports a stale "running".
   const recovered = lifecycle.reconcileOnBoot();
+  // Adopted proxied engines still point at their old relay port; hold those
+  // ports before serving so no new relay (or any other process) can take one.
+  const relays = await lifecycle.guardAdoptedRelays();
+  if (relays.held || relays.unguarded) {
+    console.log(
+      `[queuepilot] recovery: proxy relays lost with the old API — held=${relays.held} unguarded=${relays.unguarded}`,
+    );
+  }
   if (recovered.adopted || recovered.crashed) {
     console.log(
       `[queuepilot] recovery: adopted=${recovered.adopted} (unverified=${recovered.unverified}) crashed=${recovered.crashed}`,
@@ -228,6 +248,7 @@ export async function main(): Promise<void> {
     aliases: secretAliasStore(secretStore),
     settingsStore: settingsService,
     secrets: secretStore,
+    emailAccounts,
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries

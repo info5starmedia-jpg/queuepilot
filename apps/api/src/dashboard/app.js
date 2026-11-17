@@ -3,14 +3,18 @@
    arrive over the SSE stream.
 
    Ops-console layout: sidebar views (Profiles/Proxies/Tabs/Cookies/
-   Providers/Events/Settings), top action bar, single scrolling table. */
+   Warmups/Providers/Events/Settings), top action bar, single scrolling
+   table. */
 
 const $ = (sel) => document.querySelector(sel);
 
 async function api(path, opts = {}) {
+  /* JSON content-type only when there IS a body: Fastify answers a body-less
+     request that claims application/json with a 500, which broke every
+     body-less DELETE/POST in the console (delete, stop, proxy test, …). */
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
     ...opts,
+    headers: opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers },
   });
   if (res.status === 204) return null;
   const body = await res.json();
@@ -35,7 +39,7 @@ function toast(detail, type = "info") {
 
 /* ============================ view switching ============================ */
 
-const VIEWS = ["profiles", "proxies", "tabs", "cookies", "providers", "events", "settings"];
+const VIEWS = ["profiles", "proxies", "tabs", "cookies", "warmups", "providers", "events", "settings"];
 let activeView = "profiles";
 
 function setView(name) {
@@ -49,6 +53,7 @@ function setView(name) {
   renderTopbarActions();
   renderStats();
   if (name === "cookies") refreshCookiesProfiles();
+  if (name === "warmups") loadWarmups();
 }
 
 document.querySelectorAll("#nav button").forEach((b) =>
@@ -59,7 +64,7 @@ window.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   const k = e.key.toLowerCase();
-  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", v: "providers", e: "events", g: "settings" };
+  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", w: "warmups", v: "providers", e: "events", g: "settings" };
   if (map[k]) setView(map[k]);
   if (k === "/" && activeView === "profiles") {
     e.preventDefault();
@@ -87,6 +92,8 @@ function renderTopbarActions() {
     $("#tb-stop").addEventListener("click", stopSelected);
     $("#tb-delete").addEventListener("click", deleteSelected);
   }
+  /* Every other view (Warmups included) keeps its controls in its own
+     toolbar — the topbar stays empty there. */
 }
 
 /* ======================= engine + google + sse status =================== */
@@ -175,6 +182,50 @@ function updateBatchBar() {
   const n = batchSelection.size;
   $("#batch-bar").hidden = n === 0;
   $("#batch-count").textContent = `${n} selected`;
+  updateSelectAll();
+}
+
+/* Header checkbox: checked = every profile in the current view (all pages,
+   current group + search) is selected; dash = some are. */
+function updateSelectAll() {
+  const box = $("#profiles-select-all");
+  if (!box) return;
+  const ids = visibleProfiles().map((p) => p.id);
+  const picked = ids.filter((id) => batchSelection.has(id)).length;
+  box.checked = ids.length > 0 && picked === ids.length;
+  box.indeterminate = picked > 0 && picked < ids.length;
+}
+
+$("#profiles-select-all").addEventListener("change", (e) => {
+  const ids = visibleProfiles().map((p) => p.id);
+  for (const id of ids) {
+    if (e.target.checked) batchSelection.add(id);
+    else batchSelection.delete(id);
+  }
+  updateBatchBar();
+  renderProfileTable();
+});
+
+/* "+ New group": groups are a property of profiles, so a new group needs
+   its first members — the selection, or a newly created profile. */
+async function newGroupFromSelection() {
+  const ids = [...batchSelection];
+  if (ids.length === 0) {
+    toast("Tick the profiles for the new group (or the select-all box), then click + New group again — or create a profile and type a new group name.");
+    return;
+  }
+  const name = window.prompt(`New group name for ${ids.length} selected profile${ids.length === 1 ? "" : "s"}:`, "");
+  if (!name || name.trim() === "") return;
+  try {
+    const r = await api("/profiles/batch-move", { method: "POST", body: JSON.stringify({ ids, group: name.trim() }) });
+    toast(`created group "${name.trim()}" with ${r.moved} profile${r.moved === 1 ? "" : "s"}`);
+    activeGroup = name.trim();
+    batchSelection.clear();
+    updateBatchBar();
+    await loadProfiles();
+  } catch (err) {
+    toast(err.message, "error");
+  }
 }
 
 async function startSelected() {
@@ -309,6 +360,15 @@ function renderProfileTabs(groups) {
     }
     bar.appendChild(b);
   }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.id = "new-group-chip";
+  add.className = "chip-tab";
+  add.title = "create a group from the selected profiles";
+  add.textContent = "+ New group";
+  add.addEventListener("click", newGroupFromSelection);
+  bar.appendChild(add);
+  $("#group-names").innerHTML = groups.map((g) => `<option value="${esc(g.group)}"></option>`).join("");
   const moveSel = $("#batch-move-group");
   moveSel.innerHTML =
     groups.map((g) => `<option value="${esc(g.group)}">${esc(g.group)}</option>`).join("") +
@@ -399,6 +459,13 @@ async function renderProfileTable() {
     const driftBadge = state?.drift?.stale
       ? `<span class="tag tag-drift" title="${esc(state.drift.message)}">applies at next start</span>`
       : "";
+    /* Adopted after an API restart: the proxy relay died with the old API. */
+    const relayBadge =
+      state?.relay === "lost-held"
+        ? `<span class="tag tag-drift" title="The proxy relay died with the previous API process. Every page in this browser fails (nothing leaks). Stop and restart the profile to browse again.">proxy lost — restart</span>`
+        : state?.relay === "lost-unguarded"
+          ? `<span class="tag" style="color:var(--red);border-color:var(--red)" title="The proxy relay port is owned by another process: this browser's traffic may NOT go through its proxy. Stop this profile now.">proxy port taken — stop now</span>`
+          : "";
     const favorite = p.extra?.favorite === true;
     const tabColor = typeof p.extra?.tabColor === "string" ? p.extra.tabColor : null;
     const proxy = p.proxyId ? proxyById.get(p.proxyId) : null;
@@ -410,7 +477,7 @@ async function renderProfileTable() {
     tr.innerHTML = `
       <td><input type="checkbox" class="batch-check" data-batch="${esc(p.id)}" title="select" ${batchSelection.has(p.id) ? "checked" : ""} /></td>
       <td class="mono" style="color:var(--faint)">${String(start + i + 1).padStart(4, "0")}</td>
-      <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}</td>
+      <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}${relayBadge}</td>
       <td><span class="status status-${esc(status)}"><span class="dot ${running ? "dot-on" : status === "error" ? "dot-warn" : "dot-off"}"></span>${esc(status.toUpperCase())}</span></td>
       <td class="mono">${esc(proxyText)}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>
@@ -429,6 +496,7 @@ async function renderProfileTable() {
   });
 
   renderPagination(list.length, pageCount);
+  updateSelectAll();
 }
 
 function renderPagination(total, pageCount) {
@@ -743,32 +811,168 @@ $("#create-modal").addEventListener("click", (e) => { if (e.target.id === "creat
 async function loadProxies() {
   const { proxies } = await api("/proxies");
   proxyById = new Map(proxies.map((p) => [p.id, p]));
+  for (const id of [...proxySelection]) if (!proxyById.has(id)) proxySelection.delete(id);
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
   $("#proxies-empty").hidden = proxies.length !== 0;
   for (const p of proxies) {
     const tr = document.createElement("tr");
+    if (proxySelection.has(p.id)) tr.classList.add("selected");
     tr.innerHTML = `
+      <td><input type="checkbox" data-proxy="${esc(p.id)}" ${proxySelection.has(p.id) ? "checked" : ""} /></td>
       <td style="font-weight:600">${esc(p.name)}</td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono">${esc(p.host)}:${esc(p.port)}</td>
+      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
-      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>`;
-    tr.querySelector("[data-act='test']").addEventListener("click", async (ev) => {
-      const out = tr.querySelector("[data-out]");
-      out.textContent = "…";
+      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
+      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>`;
+    tr.querySelector("[data-proxy]").addEventListener("change", (ev) => {
+      if (ev.target.checked) proxySelection.add(p.id);
+      else proxySelection.delete(p.id);
+      tr.classList.toggle("selected", ev.target.checked);
+      updateProxySelection();
+    });
+    tr.querySelector("[data-act='test']").addEventListener("click", () => testProxyRow(p, tr));
+    tr.querySelector("[data-act='delete']").addEventListener("click", async () => {
+      if (!window.confirm(`Delete proxy "${p.name}"?`)) return;
       try {
-        const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
-        out.textContent = r.ok ? `ok · ${r.latencyMs}ms` : `fail: ${r.error}`;
-        out.style.color = r.ok ? "var(--green)" : "var(--red)";
+        await api(`/proxies/${p.id}`, { method: "DELETE" });
+        proxySelection.delete(p.id);
+        toast(`proxy "${p.name}" deleted`);
       } catch (err) {
-        out.textContent = err.message;
-        out.style.color = "var(--red)";
+        toast(err.message, "error");
       }
+      await loadProxies();
     });
     tbody.appendChild(tr);
   }
+  updateProxySelection();
 }
+
+/* Proxies view: selection, bulk test/delete, add drawer */
+const proxySelection = new Set();
+
+function updateProxySelection() {
+  const n = proxySelection.size;
+  $("#proxies-selected").textContent = n ? `${n} selected` : "";
+  $("#proxies-delete-selected").disabled = n === 0;
+  $("#proxies-test-selected").disabled = n === 0;
+  const all = [...proxyById.keys()];
+  const box = $("#proxies-select-all");
+  box.checked = all.length > 0 && all.every((id) => proxySelection.has(id));
+  box.indeterminate = n > 0 && !box.checked;
+}
+
+async function testProxyRow(p, tr) {
+  const out = tr.querySelector("[data-out]");
+  out.textContent = "…";
+  out.style.color = "var(--faint)";
+  try {
+    const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
+    const geo = r.geo ? ` · ${[r.geo.city, r.geo.region, r.geo.country].filter(Boolean).join(", ")}` : "";
+    out.textContent = r.ok ? `ok · ${r.latencyMs}ms${r.exitIp ? ` · ${r.exitIp}` : ""}${geo}` : `fail: ${r.error}`;
+    out.style.color = r.ok ? "var(--green)" : "var(--red)";
+  } catch (err) {
+    out.textContent = err.message;
+    out.style.color = "var(--red)";
+  }
+}
+
+$("#proxies-select-all").addEventListener("change", (e) => {
+  for (const id of proxyById.keys()) {
+    if (e.target.checked) proxySelection.add(id);
+    else proxySelection.delete(id);
+  }
+  loadProxies();
+});
+
+$("#proxies-test-selected").addEventListener("click", async () => {
+  for (const tr of document.querySelectorAll("#proxies tbody tr")) {
+    const id = tr.querySelector("[data-proxy]")?.dataset.proxy;
+    if (id && proxySelection.has(id)) await testProxyRow(proxyById.get(id), tr);
+  }
+});
+
+$("#proxies-delete-selected").addEventListener("click", async () => {
+  const ids = [...proxySelection];
+  if (ids.length === 0) return;
+  if (!window.confirm(`Delete ${ids.length} prox${ids.length === 1 ? "y" : "ies"}?`)) return;
+  const failed = [];
+  for (const id of ids) {
+    try {
+      await api(`/proxies/${id}`, { method: "DELETE" });
+      proxySelection.delete(id);
+    } catch (err) {
+      failed.push(`${proxyById.get(id)?.name ?? id}: ${err.message}`);
+    }
+  }
+  toast(failed.length ? `${ids.length - failed.length} deleted; ${failed.length} kept — ${failed.join("; ")}` : `${ids.length} deleted`, failed.length ? "error" : "info");
+  await loadProxies();
+});
+
+/* One pasted line -> proxy input. Accepts host:port, host:port:user:pass and
+   name:host:port:user:pass, with an optional scheme:// prefix. The password
+   is everything after the user (it may itself contain ':'). */
+function parseProxyLine(raw, defaultType) {
+  let line = raw.trim();
+  if (!line) return null;
+  let type = defaultType;
+  const scheme = /^(https?|socks5h?):\/\//i.exec(line);
+  if (scheme) {
+    type = scheme[1].toLowerCase().replace("socks5h", "socks5");
+    line = line.slice(scheme[0].length);
+  }
+  const parts = line.split(":");
+  let name = null;
+  if (parts.length >= 3 && !/^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) name = parts.shift();
+  const [host, port, username, ...rest] = parts;
+  if (!host || !/^\d+$/.test(port ?? "")) throw new Error("expected host:port[:user:pass]");
+  return {
+    name: name || `${host}:${port}`,
+    type,
+    host,
+    port: Number(port),
+    username: username || null,
+    password: rest.length ? rest.join(":") : null,
+  };
+}
+
+$("#proxy-add-open").addEventListener("click", () => {
+  $("#proxy-add-result").innerHTML = "";
+  $("#proxy-add-status").textContent = "";
+  $("#proxy-add-modal").hidden = false;
+  $("#proxy-add-lines").focus();
+});
+$("#proxy-add-close").addEventListener("click", () => { $("#proxy-add-modal").hidden = true; });
+$("#proxy-add-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-add-modal") $("#proxy-add-modal").hidden = true; });
+
+$("#proxy-add-go").addEventListener("click", async () => {
+  const lines = $("#proxy-add-lines").value.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length === 0) return;
+  const type = $("#proxy-add-type").value;
+  const btn = $("#proxy-add-go");
+  btn.disabled = true;
+  const rows = [];
+  let added = 0;
+  for (const [i, raw] of lines.entries()) {
+    let input = null;
+    try {
+      input = parseProxyLine(raw, type);
+      await api("/proxies", { method: "POST", body: JSON.stringify(input) });
+      added++;
+      rows.push(`<tr><td>line ${i + 1}</td><td>${esc(input.name)} added</td></tr>`);
+    } catch (err) {
+      /* never echo the line back: it may carry a password */
+      rows.push(`<tr class="import-err"><td>line ${i + 1}</td><td>${esc(input?.name ?? "")} ${esc(err.message)}</td></tr>`);
+    }
+  }
+  btn.disabled = false;
+  $("#proxy-add-status").textContent = `${added}/${lines.length} added`;
+  $("#proxy-add-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
+  if (added === lines.length) $("#proxy-add-lines").value = "";
+  toast(`${added} prox${added === 1 ? "y" : "ies"} added`);
+  await loadProxies();
+});
 
 /* ========================= CSV / xlsx import ============================ */
 
@@ -942,6 +1146,43 @@ function selectedTabIds() {
   );
 }
 
+/* tab-ops depth: per-tab reload / duplicate / screenshot / close */
+const AUTO_RELOAD_CHOICES = [[0, "off"], [15, "15 s"], [30, "30 s"], [60, "1 min"], [300, "5 min"], [900, "15 min"]];
+
+async function onTabAction(profileId, tab, act, btn) {
+  btn.disabled = true;
+  try {
+    if (act === "reload") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/reload`, { method: "POST" });
+      toast(`reloaded ${tab.url ?? tab.id}`);
+    } else if (act === "duplicate") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/duplicate`, { method: "POST" });
+    } else if (act === "close") {
+      await api(`/profiles/${profileId}/tabs/${tab.id}/close`, { method: "POST" });
+    } else if (act === "screenshot") {
+      /* fetch, not a plain <img src>: the bearer-token hook applies to images too */
+      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      }
+      const img = $("#tab-shot-img");
+      if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(await res.blob());
+      $("#tab-shot-url").textContent = tab.url ?? tab.id;
+      $("#tab-shot-modal").hidden = false;
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+  if (act === "duplicate" || act === "close") await runTabsQuery();
+}
+
+$("#tab-shot-close").addEventListener("click", () => { $("#tab-shot-modal").hidden = true; });
+$("#tab-shot-modal").addEventListener("click", (e) => { if (e.target.id === "tab-shot-modal") $("#tab-shot-modal").hidden = true; });
+
 async function runTabsQuery() {
   const profileId = $("#tabs-profile").value;
   const tbody = $("#tabs-table tbody");
@@ -974,11 +1215,25 @@ async function runTabsQuery() {
       <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">${esc(t.url ?? "—")}</td>
       <td><span class="status status-${esc(t.status)}"><span class="dot ${t.status === "open" ? "dot-on" : "dot-off"}"></span>${esc(t.status.toUpperCase())}</span></td>
       <td class="mono" style="color:var(--faint)">${esc(t.partitionId.slice(0, 8))}</td>
-      <td>${t.status === "open" ? `<button class="ghost" data-close="${esc(t.id)}">close</button>` : ""}</td>`;
-    tr.querySelector("[data-close]")?.addEventListener("click", async (ev) => {
-      ev.target.disabled = true;
-      await api(`/profiles/${profileId}/tabs/${t.id}/close`, { method: "POST" });
-      await runTabsQuery();
+      <td>${t.status === "open" ? `<select data-autoreload title="reload this tab on an interval while it stays open">${AUTO_RELOAD_CHOICES.map(([sec, label]) => `<option value="${sec}" ${Number(t.autoReloadSec ?? 0) === sec ? "selected" : ""}>${label}</option>`).join("")}</select>` : ""}</td>
+      <td>${t.status === "open" ? `<span class="row-actions">
+        <button data-tact="reload" title="reload tab">↻</button>
+        <button class="act-clone" data-tact="duplicate" title="duplicate into the same session partition">⎘</button>
+        <button class="act-edit" data-tact="screenshot" title="screenshot">📷</button>
+        <button class="act-delete" data-tact="close" title="close tab">✕</button>
+      </span>` : ""}</td>`;
+    tr.querySelectorAll("[data-tact]").forEach((b) =>
+      b.addEventListener("click", () => onTabAction(profileId, t, b.dataset.tact, b)),
+    );
+    tr.querySelector("[data-autoreload]")?.addEventListener("change", async (ev) => {
+      const intervalSec = Number(ev.target.value);
+      try {
+        await api(`/profiles/${profileId}/tabs/${t.id}/auto-reload`, { method: "POST", body: JSON.stringify({ intervalSec }) });
+        toast(intervalSec ? `auto-reload every ${intervalSec}s: ${t.url ?? t.id}` : `auto-reload off: ${t.url ?? t.id}`);
+      } catch (err) {
+        toast(err.message, "error");
+        await runTabsQuery();
+      }
     });
     tbody.appendChild(tr);
   }
@@ -1270,13 +1525,95 @@ function renderIntegrationsInfo() {
     return;
   }
   box.innerHTML = `
-    <div class="info-card">
-      <h4>Email resolvers (Gmail / IMAP)</h4>
-      <p>Code-running endpoints resolve one-time codes from mail. IMAP uses an app password:</p>
-      <p><code>imap://imap.gmail.com:993?user=you@gmail.com&amp;pass=****&amp;query=UNSEEN</code></p>
-      <p>Options: <code>tls=false</code> (plain, testing only) · <code>query</code> = any IMAP SEARCH term.
-      Credentials reference aliases (<code>@mail-user</code>) from the alias store — never paste real passwords into provider notes.</p>
+    <div class="info-card" id="email-accounts-card">
+      <h4>Email accounts (Gmail / IMAP)</h4>
+      <p>Used to read one-time codes from mail. For Gmail, turn on 2-Step Verification and create an <b>app password</b> (Google Account → Security → App passwords). The app password is stored encrypted on this machine and never shown again.</p>
+      <table class="import-table" id="email-accounts-table"><tbody></tbody></table>
+      <p id="email-accounts-empty" class="hint" hidden>No email accounts yet.</p>
+      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;margin-top:10px">
+        <label>Email <input id="email-account-email" type="email" required maxlength="254" placeholder="you@gmail.com" /></label>
+        <label>App password <input id="email-account-password" type="password" required maxlength="200" autocomplete="new-password" placeholder="16-letter app password" /></label>
+        <label>Server <input id="email-account-host" required maxlength="253" value="imap.gmail.com" /></label>
+        <label>Port <input id="email-account-port" type="number" required min="1" max="65535" value="993" /></label>
+        <button type="submit" class="primary" id="email-account-add">+ Add</button>
+      </form>
+      <p class="hint" id="email-account-status"></p>
+      <p>Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
     </div>`;
+  $("#email-account-form").addEventListener("submit", addEmailAccount);
+  loadEmailAccounts();
+}
+
+async function loadEmailAccounts() {
+  const tbody = $("#email-accounts-table tbody");
+  if (!tbody) return;
+  let accounts = [];
+  try {
+    ({ accounts } = await api("/email-accounts"));
+  } catch (err) {
+    $("#email-account-status").textContent = err.message;
+    return;
+  }
+  tbody.innerHTML = "";
+  $("#email-accounts-empty").hidden = accounts.length !== 0;
+  for (const a of accounts) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="font-weight:600">${esc(a.email)}</td>
+      <td class="mono">${esc(a.host)}:${esc(a.port)}${a.tls ? "" : " (no TLS)"}</td>
+      <td>${a.hasPassword ? "app password stored" : `<span style="color:var(--red)">no password</span>`}</td>
+      <td><button type="button" class="ghost" data-act="test">Test</button> <span class="mono" data-out></span></td>
+      <td><button type="button" class="danger" data-act="remove">Remove</button></td>`;
+    tr.querySelector('[data-act="test"]').addEventListener("click", async (ev) => {
+      const out = tr.querySelector("[data-out]");
+      ev.target.disabled = true;
+      out.textContent = "logging in…";
+      out.style.color = "var(--faint)";
+      try {
+        const r = await api(`/email-accounts/${a.id}/test`, { method: "POST" });
+        out.textContent = r.ok ? "ok — logged in" : r.error;
+        out.style.color = r.ok ? "var(--green)" : "var(--red)";
+      } catch (err) {
+        out.textContent = err.message;
+        out.style.color = "var(--red)";
+      }
+      ev.target.disabled = false;
+    });
+    tr.querySelector('[data-act="remove"]').addEventListener("click", async () => {
+      if (!window.confirm(`Remove ${a.email}? Its stored app password is deleted too.`)) return;
+      try {
+        await api(`/email-accounts/${a.id}`, { method: "DELETE" });
+        toast(`email account ${a.email} removed`);
+      } catch (err) {
+        toast(err.message, "error");
+      }
+      loadEmailAccounts();
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+async function addEmailAccount(e) {
+  e.preventDefault();
+  const status = $("#email-account-status");
+  const body = {
+    email: $("#email-account-email").value.trim(),
+    appPassword: $("#email-account-password").value,
+    host: $("#email-account-host").value.trim(),
+    port: Number($("#email-account-port").value),
+  };
+  try {
+    await api("/email-accounts", { method: "POST", body: JSON.stringify(body) });
+    status.textContent = `${body.email} added — click Test to check the login`;
+    status.style.color = "var(--faint)";
+    $("#email-account-email").value = "";
+    $("#email-account-password").value = "";
+  } catch (err) {
+    status.textContent = err.message;
+    status.style.color = "var(--red)";
+  }
+  $("#email-account-password").value = "";
+  loadEmailAccounts();
 }
 
 function renderSettings() {
@@ -1331,6 +1668,217 @@ $("#settings-form").addEventListener("change", (e) => {
   if (field) persistSetting(key, field);
 });
 
+/* ============================== warmups ================================ */
+
+/* Record and Run both hold their HTTP request open for the whole window
+   (the recording duration / the recipe's total dwell), so each has an
+   explicit in-progress state: the button is disabled and a ticking status
+   line shows the elapsed time until the request returns. */
+
+let warmupRecipes = [];
+let warmupRunRecipe = null; /* recipe shown in the run modal */
+let warmupRunning = false; /* a run request is in flight */
+
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+function warmupStatus(msg, isErr = false) {
+  const el = $("#warmups-status");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--faint)";
+}
+
+async function refreshWarmupProfiles() {
+  const sel = $("#warmup-record-profile");
+  const current = sel.value;
+  const { profiles } = await api("/profiles");
+  const running = profiles.filter((p) => p.status === "running");
+  sel.innerHTML =
+    `<option value="">(${running.length} running — pick one)</option>` +
+    running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  if (running.some((p) => p.id === current)) sel.value = current;
+}
+
+async function loadWarmups() {
+  refreshWarmupProfiles().catch(() => {});
+  const tbody = $("#warmups-table tbody");
+  try {
+    const { recipes } = await api("/warmups");
+    warmupRecipes = recipes ?? [];
+  } catch (err) {
+    warmupRecipes = [];
+    warmupStatus(err.message, true);
+  }
+  tbody.innerHTML = "";
+  $("#warmups-empty").hidden = warmupRecipes.length !== 0;
+  for (const r of warmupRecipes) {
+    const steps = r.steps ?? [];
+    const total = steps.reduce((sum, s) => sum + (Number(s.dwellMs) || 0), 0);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="font-weight:600" title="${esc(steps.map((s) => s.url).join("\n"))}">${esc(r.name)}</td>
+      <td class="mono">${steps.length}</td>
+      <td class="mono">${esc(fmtDuration(total))}</td>
+      <td class="mono" style="color:var(--faint)">${esc(String(r.createdAt ?? "").slice(0, 16).replace("T", " "))}</td>
+      <td><span class="row-actions">
+        <button class="act-start" data-act="run" title="run this recipe on a profile">▶</button>
+        <button class="act-delete" data-act="delete" title="delete recipe">🗑</button>
+      </span></td>`;
+    tr.querySelector('[data-act="run"]').addEventListener("click", () => openWarmupRun(r));
+    tr.querySelector('[data-act="delete"]').addEventListener("click", () => deleteWarmup(r));
+    tbody.appendChild(tr);
+  }
+}
+
+async function deleteWarmup(recipe) {
+  if (!window.confirm(`Delete warmup recipe "${recipe.name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/warmups/${recipe.id}`, { method: "DELETE" });
+    toast(`warmup "${recipe.name}" deleted`);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadWarmups();
+}
+
+async function recordWarmup() {
+  const profileId = $("#warmup-record-profile").value;
+  const name = $("#warmup-record-name").value.trim();
+  const seconds = Number($("#warmup-record-seconds").value);
+  if (!profileId) return warmupStatus("pick a running profile to record", true);
+  if (!name) return warmupStatus("give the recipe a name", true);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+    return warmupStatus("duration must be a whole number of seconds, 1–600", true);
+  }
+  const btn = $("#warmup-record");
+  const started = Date.now();
+  const tick = () => {
+    const left = Math.max(0, seconds - Math.floor((Date.now() - started) / 1000));
+    btn.textContent = `● Recording… ${left}s`;
+    warmupStatus(`recording "${name}" — open tabs in the profile now (${left}s left)`);
+  };
+  btn.disabled = true;
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const recipe = await api(`/profiles/${profileId}/warmup/record`, {
+      method: "POST",
+      body: JSON.stringify({ name, durationMs: seconds * 1000 }),
+    });
+    $("#warmup-record-name").value = "";
+    warmupStatus(`recorded "${recipe.name}" — ${recipe.steps.length} step${recipe.steps.length === 1 ? "" : "s"}`);
+    toast(`warmup "${recipe.name}" recorded (${recipe.steps.length} steps)`);
+  } catch (err) {
+    warmupStatus(err.message, true);
+    toast(err.message, "error");
+  } finally {
+    clearInterval(timer);
+    btn.disabled = false;
+    btn.textContent = "● Record";
+  }
+  await loadWarmups();
+}
+
+async function openWarmupRun(recipe) {
+  warmupRunRecipe = recipe;
+  const steps = recipe.steps ?? [];
+  const total = steps.reduce((sum, s) => sum + (Number(s.dwellMs) || 0), 0);
+  $("#warmup-run-recipe").textContent =
+    `"${recipe.name}" — ${steps.length} step${steps.length === 1 ? "" : "s"}, about ${fmtDuration(total)} (dwell varies ±20% per step)`;
+  $("#warmup-run-result").innerHTML = "";
+  $("#warmup-run-status").textContent = "";
+  $("#warmup-run-stop").checked = false;
+  $("#warmup-run-go").disabled = warmupRunning;
+  const sel = $("#warmup-run-profile");
+  sel.innerHTML = `<option value="">(loading profiles…)</option>`;
+  $("#warmup-run-modal").hidden = false;
+  try {
+    const { profiles } = await api("/profiles");
+    sel.innerHTML =
+      `<option value="">(pick a profile)</option>` +
+      profiles
+        .map((p) => `<option value="${esc(p.id)}">${esc(p.name)} — ${esc(String(p.status ?? "idle"))}</option>`)
+        .join("");
+  } catch (err) {
+    sel.innerHTML = `<option value="">(could not load profiles)</option>`;
+    $("#warmup-run-status").textContent = err.message;
+  }
+}
+
+function closeWarmupRun() {
+  $("#warmup-run-modal").hidden = true;
+}
+
+function renderWarmupRunResult(data) {
+  const results = data.results ?? [];
+  const ok = results.filter((r) => r.ok).length;
+  const rows = results
+    .map((r) =>
+      r.ok
+        ? `<tr><td>✓</td><td class="mono">${esc(r.url)}</td><td class="mono">${esc(fmtDuration(r.dwellMs))}</td></tr>`
+        : `<tr class="import-err"><td>✗</td><td class="mono">${esc(r.url)}</td><td>${esc(r.error ?? "failed")}</td></tr>`,
+    )
+    .join("");
+  $("#warmup-run-result").innerHTML = `
+    <p class="hint">${ok}/${results.length} steps ok — ${data.startedByRun ? "profile was started by this run" : "profile was already running"}</p>
+    <table class="import-table"><tbody>${rows}</tbody></table>`;
+}
+
+async function runWarmup() {
+  const recipe = warmupRunRecipe;
+  const profileId = $("#warmup-run-profile").value;
+  const status = $("#warmup-run-status");
+  if (!recipe || warmupRunning) return;
+  if (!profileId) {
+    status.textContent = "pick a profile";
+    return;
+  }
+  const stopAfter = $("#warmup-run-stop").checked;
+  const btn = $("#warmup-run-go");
+  const started = Date.now();
+  const tick = () => {
+    status.textContent = `running… ${fmtDuration(Date.now() - started)} elapsed — this stays open until the recipe finishes`;
+  };
+  warmupRunning = true;
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  $("#warmup-run-result").innerHTML = "";
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const data = await api(`/warmups/${recipe.id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ profileId, stopAfter }),
+    });
+    const results = data.results ?? [];
+    const ok = results.filter((r) => r.ok).length;
+    toast(`warmup "${recipe.name}" finished: ${ok}/${results.length} steps ok`, ok === results.length ? "info" : "error");
+    /* the modal may have been closed or re-opened on another recipe meanwhile */
+    if (warmupRunRecipe === recipe) {
+      status.textContent = `finished in ${fmtDuration(Date.now() - started)}`;
+      renderWarmupRunResult(data);
+    }
+  } catch (err) {
+    toast(err.message, "error");
+    if (warmupRunRecipe === recipe) status.textContent = err.message;
+  } finally {
+    clearInterval(timer);
+    warmupRunning = false;
+    btn.disabled = false;
+    btn.textContent = "Run";
+  }
+  await loadProfiles();
+  if (activeView === "warmups") refreshWarmupProfiles().catch(() => {});
+}
+
+$("#warmup-record").addEventListener("click", recordWarmup);
+$("#warmups-refresh").addEventListener("click", loadWarmups);
+$("#warmup-run-go").addEventListener("click", runWarmup);
+$("#warmup-run-close").addEventListener("click", closeWarmupRun);
+$("#warmup-run-modal").addEventListener("click", (e) => { if (e.target.id === "warmup-run-modal") closeWarmupRun(); });
+
 /* ============================ live events (SSE) ========================= */
 
 function pushEvent(e) {
@@ -1363,6 +1911,7 @@ function connectEvents() {
         loadProfiles();
         refreshTabsProfiles();
         if (activeView === "cookies") refreshCookiesProfiles();
+        if (activeView === "warmups") refreshWarmupProfiles().catch(() => {});
         if ($("#tabs-profile").value) runTabsQuery();
       }
     } catch {

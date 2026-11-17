@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { makeTestContext } from "./helpers.js";
 
 const TEMP = {
@@ -16,7 +18,13 @@ const TEMP = {
  */
 describe("temporary proxies", () => {
   it("launches with the temp proxy, snapshots provenance, never touches the profile row", async () => {
-    const { lifecycle, profiles, proxies, snapshots } = makeTestContext();
+    const { lifecycle, profiles, proxies, snapshots, runtime, dataDir } = makeTestContext();
+    const launchedWith: Array<string | null> = [];
+    const launch = runtime.launch.bind(runtime);
+    runtime.launch = (req) => {
+      launchedWith.push(req.proxyUrl);
+      return launch(req);
+    };
     const stored = proxies.create({
       name: "attached",
       type: "http",
@@ -35,7 +43,12 @@ describe("temporary proxies", () => {
     expect(snap).not.toBeNull();
     expect(snap!.proxySource).toBe("temporary");
     expect(snap!.proxyId).toBeNull();
-    expect(snap!.proxyUrl).toBe("socks5://u:secret@10.0.0.9:1080");
+    // The engine still authenticates with the password; the snapshot file
+    // on disk never holds it.
+    expect(launchedWith).toEqual(["socks5://u:secret@10.0.0.9:1080"]);
+    expect(snap!.proxyUrl).toBe("socks5://u@10.0.0.9:1080");
+    const onDisk = fs.readFileSync(path.join(dataDir, "snapshots", `${run.id}.json`), "utf8");
+    expect(onDisk).not.toContain("secret");
 
     // The profile still points at its own attached proxy.
     expect(profiles.get(p.id).proxyId).toBe(stored.id);

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   DomainError,
   ErrorCodes,
+  computeIdentityDrift,
   TempProxyInputSchema,
   type AttestationResult,
   type BrowserRun,
@@ -24,6 +25,7 @@ import {
   waitForProcessExit,
 } from "../../infrastructure/process-inventory.js";
 import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
+import { holdRelayPort, type RelayPortHold } from "../runtime/proxy-relay.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
@@ -98,7 +100,23 @@ export class BrowserLifecycleService {
     runsAdopted: 0,
     runsAdoptedUnverified: 0,
     runsReconciledCrashed: 0,
+    /** Adopted proxied runs whose dead relay port we now hold (fails closed). */
+    relaysHeld: 0,
+    /** Adopted proxied runs whose relay port another process already owned. */
+    relaysUnguarded: 0,
   };
+  /**
+   * Adopted proxied runs → the placeholder holding their dead relay port, or
+   * null when the port was already taken by someone else. See holdRelayPort.
+   */
+  private readonly relayHolds = new Map<string, RelayPortHold | null>();
+  /** Per-tab auto-reload timers (tab id → run, interval, timer). */
+  private readonly autoReloads = new Map<
+    string,
+    { runId: string; profileId: string; sec: number; timer: ReturnType<typeof setInterval> }
+  >();
+  /** ms per auto-reload "second" — tests shrink it. */
+  private autoReloadUnitMs = 1000;
   /**
    * How long an adopted engine gets to exit after each stop request
    * (Browser.close, graceful kill, forced kill) before the next escalation.
@@ -391,6 +409,7 @@ export class BrowserLifecycleService {
       };
       this.runs.update(stopped);
       this.markProfile(profile, "idle");
+      this.clearAutoReloadsForRun(run.id);
       this.tabRegistry.clearRun(run.id); // tabs die with the run
       await this.leaseGuard?.release(profileId).catch(() => {}); // TTL reaps a lost release
       let final = stopped;
@@ -404,6 +423,9 @@ export class BrowserLifecycleService {
         // Adopted after an API restart: there is no session handle, but Stop
         // must still mean "the browser is gone" (D-002 follow-up).
         const note = await this.stopAdoptedEngine(run);
+        // Keep holding the dead relay port while the engine may still run
+        // (a note means it may); release only once it is gone.
+        if (!note) this.releaseRelayHold(run.id);
         if (note) {
           final = { ...stopped, lastError: note };
           this.runs.update(final);
@@ -654,6 +676,7 @@ export class BrowserLifecycleService {
           // Engine may already be gone; the registry is reconciled regardless.
         }
       }
+      this.clearAutoReload(tabId);
       const closed = this.tabRegistry.markClosed(tabId);
       this.emit({
         type: "tab.closed",
@@ -674,7 +697,115 @@ export class BrowserLifecycleService {
   } {
     const run = this.runs.occupyingForProfile(profileId);
     if (!run) return { tabs: [], partitions: [] };
-    return this.tabRegistry.listForRun(run.id);
+    const listed = this.tabRegistry.listForRun(run.id);
+    return {
+      ...listed,
+      tabs: listed.tabs.map((t) => {
+        const sec = this.autoReloads.get(t.id)?.sec;
+        return sec ? { ...t, autoReloadSec: sec } : t;
+      }),
+    };
+  }
+
+  /* --------------------------- tab-ops depth --------------------------- */
+
+  /**
+   * An OPEN tab of the profile's active run plus the session that can act on
+   * it. Refuses honestly: no run, adopted run (no session), closed tab, or a
+   * runtime without the capability.
+   */
+  private requireTabOp(
+    profileId: string,
+    tabId: string,
+    capability: "reloadTab" | "screenshotTab",
+  ): { run: BrowserRun; tab: BrowserTab; session: BrowserSession; engineTabId: string } {
+    this.requireProfile(profileId);
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
+    }
+    const tab = this.tabRegistry.getForRun(run.id, tabId);
+    if (tab.status !== "open" || !tab.engineTabId) {
+      throw new DomainError(ErrorCodes.CONFLICT, `tab ${tabId} is not open`);
+    }
+    const session = this.sessions.get(profileId);
+    if (!session) {
+      throw new DomainError(
+        ErrorCodes.TABS_UNSUPPORTED,
+        `run ${run.id} was adopted after an API restart — its tab state is unknown; stop and relaunch to manage tabs`,
+      );
+    }
+    if (!session[capability]) {
+      throw new DomainError(
+        ErrorCodes.TABS_UNSUPPORTED,
+        `runtime "${this.runtime.kind}" does not implement ${capability}`,
+      );
+    }
+    return { run, tab, session, engineTabId: tab.engineTabId };
+  }
+
+  async reloadTab(profileId: string, tabId: string): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { tab, session, engineTabId } = this.requireTabOp(profileId, tabId, "reloadTab");
+      await session.reloadTab!(engineTabId);
+      return tab;
+    });
+  }
+
+  async screenshotTab(profileId: string, tabId: string): Promise<Buffer> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { session, engineTabId } = this.requireTabOp(profileId, tabId, "screenshotTab");
+      return session.screenshotTab!(engineTabId);
+    });
+  }
+
+  /**
+   * Open the tab's URL again as a RELATED tab — same session partition, so
+   * the copy shares cookies/storage (Jancy's duplicate). The URL is the one
+   * the tab was opened with; in-page navigation since is not tracked.
+   */
+  async duplicateTab(profileId: string, tabId: string): Promise<BrowserTab> {
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) {
+      throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
+    }
+    const tab = this.tabRegistry.getForRun(run.id, tabId);
+    if (tab.status !== "open") throw new DomainError(ErrorCodes.CONFLICT, `tab ${tabId} is not open`);
+    return this.openTab(profileId, { url: tab.url ?? undefined, relatedTo: tab.id });
+  }
+
+  /**
+   * Reload a tab every `sec` seconds while it stays open (null/0 = off).
+   * In-memory: cleared when the tab closes, the run stops or the engine
+   * exits. A failed reload (page gone, engine busy) never stops the timer —
+   * the next tick tries again, like a human hitting F5.
+   */
+  async setAutoReload(profileId: string, tabId: string, sec: number | null): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { run, tab } = this.requireTabOp(profileId, tabId, "reloadTab");
+      this.clearAutoReload(tabId);
+      if (sec && sec > 0) {
+        const timer = setInterval(() => {
+          void this.reloadTab(profileId, tabId).catch(() => {});
+        }, sec * this.autoReloadUnitMs);
+        timer.unref?.();
+        this.autoReloads.set(tabId, { runId: run.id, profileId, sec, timer });
+        return { ...tab, autoReloadSec: sec };
+      }
+      return tab;
+    });
+  }
+
+  private clearAutoReload(tabId: string): void {
+    const entry = this.autoReloads.get(tabId);
+    if (entry) clearInterval(entry.timer);
+    this.autoReloads.delete(tabId);
+  }
+
+  private clearAutoReloadsForRun(runId: string): void {
+    for (const [tabId, entry] of this.autoReloads) {
+      if (entry.runId === runId) this.clearAutoReload(tabId);
+    }
   }
 
   /**
@@ -682,6 +813,28 @@ export class BrowserLifecycleService {
    * against the profile's current identity/proxy pointers. Null when the
    * profile has no active run or the run predates snapshots.
    */
+  /**
+   * Drift + relay state for the console grid in ONE snapshot read — the
+   * batch-state endpoint runs this per profile on every SSE event (audit B4
+   * removed an N+1 there; two file reads per running profile would bring a
+   * smaller one back).
+   */
+  gridState(profileId: string): {
+    drift: IdentityDrift | null;
+    relay: "live" | "lost-held" | "lost-unguarded" | null;
+  } {
+    const run = this.runs.occupyingForProfile(profileId);
+    const profile = this.profiles.get(profileId);
+    if (!run || !profile || !this.snapshots) return { drift: null, relay: null };
+    const snapshot = this.snapshots.forRun(run.id);
+    return {
+      drift: snapshot
+        ? computeIdentityDrift(snapshot, { identityId: profile.identityId, proxyId: profile.proxyId })
+        : null,
+      relay: this.relayStateFor(profileId, run, snapshot),
+    };
+  }
+
   identityDrift(profileId: string): IdentityDrift | null {
     if (!this.snapshots) return null;
     const run = this.runs.occupyingForProfile(profileId);
@@ -709,9 +862,27 @@ export class BrowserLifecycleService {
     proxyUrl: string | null;
     proxySource: "profile" | "temporary" | "profile-list" | "rotation" | "none";
     egress: LaunchIdentitySnapshot["egress"] | null;
+    /**
+     * Whether the measured egress still describes where traffic goes:
+     * "live" = this API launched the engine and its relay is serving;
+     * "lost-held" = adopted after an API restart, the relay died with the old
+     * API and its port is held closed (every page fails, nothing leaks);
+     * "lost-unguarded" = adopted, and the relay port is owned by another
+     * process — traffic may be going through a stranger. null = no proxy.
+     */
+    relay: "live" | "lost-held" | "lost-unguarded" | null;
+    /** Human-readable warning when `egress` no longer reflects reality. */
+    note: string | null;
   } | null {
     const run = this.runs.occupyingForProfile(profileId);
     const snapshot = run && this.snapshots ? this.snapshots.forRun(run.id) : null;
+    const relay = this.relayStateFor(profileId, run, snapshot);
+    const note =
+      relay === "lost-held"
+        ? "adopted after an API restart: the proxy relay died with the old API, so every request from this browser fails (nothing leaks). The egress below is the launch measurement. Stop and restart the profile to browse again."
+        : relay === "lost-unguarded"
+          ? "adopted after an API restart: the proxy relay port is owned by another process — this browser's traffic may NOT be going through its proxy. Stop this profile now."
+          : null;
     return {
       profileId,
       running: run !== null && run.status === "running",
@@ -719,6 +890,8 @@ export class BrowserLifecycleService {
       proxyUrl: redactProxyUrl(snapshot?.proxyUrl ?? null),
       proxySource: snapshot?.proxySource ?? "none",
       egress: snapshot?.egress ?? null,
+      relay,
+      note,
     };
   }
 
@@ -875,8 +1048,66 @@ export class BrowserLifecycleService {
     return crashed;
   }
 
+  /**
+   * Hold the dead relay port of every adopted, proxied run (call after
+   * reconcileOnBoot, before the API serves). The adopted engine keeps its
+   * `--proxy-server` pointing at a port nobody serves any more; holding it
+   * keeps the engine failing closed and stops any other process — including
+   * a new relay in this API — from receiving that profile's traffic.
+   */
+  async guardAdoptedRelays(): Promise<{ held: number; unguarded: number }> {
+    let held = 0;
+    let unguarded = 0;
+    for (const run of this.runs.listOccupying()) {
+      if (run.status !== "running" || this.sessions.has(run.profileId)) continue;
+      if (this.relayHolds.has(run.id)) continue;
+      const snapshot = this.snapshots?.forRun(run.id) ?? null;
+      const port = snapshot?.proxyUrl ? (snapshot.egress?.relayPort ?? null) : null;
+      if (!port) continue;
+      const hold = await holdRelayPort(port);
+      this.relayHolds.set(run.id, hold);
+      if (hold) {
+        held++;
+      } else {
+        unguarded++;
+        console.warn(
+          `[queuepilot] recovery: run ${run.id} (profile ${run.profileId}) — its proxy relay port ` +
+            `${port} is owned by ANOTHER process; this engine's traffic may not go through its proxy. ` +
+            "Stop and restart this profile.",
+        );
+      }
+    }
+    this.recoveryCounters.relaysHeld += held;
+    this.recoveryCounters.relaysUnguarded += unguarded;
+    return { held, unguarded };
+  }
+
+  /**
+   * Proxy-relay state of a run (see egressDiagnostics): null when not
+   * running or not proxied. Takes the snapshot so callers read it once.
+   */
+  private relayStateFor(
+    profileId: string,
+    run: BrowserRun | null,
+    snapshot: LaunchIdentitySnapshot | null,
+  ): "live" | "lost-held" | "lost-unguarded" | null {
+    if (!run || !snapshot?.proxyUrl || !snapshot.egress?.relayPort) return null;
+    if (this.sessions.has(profileId)) return "live";
+    return this.relayHolds.get(run.id) ? "lost-held" : "lost-unguarded";
+  }
+
+  private releaseRelayHold(runId: string): void {
+    const hold = this.relayHolds.get(runId);
+    this.relayHolds.delete(runId);
+    void hold?.close();
+  }
+
   /** A run whose engine is gone without the API seeing its exit. */
   private markCrashed(run: BrowserRun, lastError: string, detail: string): void {
+    this.releaseRelayHold(run.id);
+    // Unreachable today (crash marking is sessionless, auto-reload needs a
+    // session) — kept so every run-ending path clears both kinds of state.
+    this.clearAutoReloadsForRun(run.id);
     this.runs.update({ ...run, status: "crashed", stoppedAt: now(), lastError });
     const profile = this.profiles.get(run.profileId);
     if (profile) this.markProfile(profile, "idle");
@@ -900,6 +1131,7 @@ export class BrowserLifecycleService {
       return;
     this.sessions.delete(profileId);
     this.stopLeaseRenewal(profileId);
+    this.clearAutoReloadsForRun(runId);
     this.tabRegistry.clearRun(runId); // tabs die with the engine
     const clean = code === 0;
     const final: BrowserRun = {

@@ -53,7 +53,9 @@ async function adoptedRun(
 
 const alive = (pid: number) => checkProcessIdentity(pid) !== "dead";
 
-describe("stop() on an adopted run", () => {
+// Real processes + blocking OS start-time reads + kill escalation windows:
+// ~10 s alone, can pass 30 s under a loaded full run.
+describe("stop() on an adopted run", { timeout: 60_000 }, () => {
   it("right token: the engine process is actually terminated", async () => {
     const ctx = makeTestContext();
     const child = spawnSleeper();

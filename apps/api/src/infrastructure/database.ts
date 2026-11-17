@@ -228,6 +228,21 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX proxy_health_proxy ON proxy_health(proxy_id, checked_at);
     `,
   },
+  {
+    // Email accounts for the IMAP resolver (Gmail app passwords). The
+    // password itself lives in the SecretStore, never in this table.
+    id: "010-email-accounts",
+    up: `
+      CREATE TABLE email_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        tls INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

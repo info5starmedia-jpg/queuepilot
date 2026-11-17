@@ -59,11 +59,11 @@ Site columns ✅, typed persona/2FA fields ✅ with resolve binding, SMS cycling
 | Engine-side tab routing | ✅ | CDP contexts |
 | Tab bar / vertical Tab View, 7 sort modes | 🟡 | Console Tabs panel (v0.14.8): per-running-profile tab table w/ query, select-all, close; v0.14.12: sort modes ✅ (newest/oldest/url/domain/status/partition — the six orderings real tab records can honor; no page-title tracking in the API, vertical bar ❌) |
 | Mass select + "(all selected)" commands | ✅ | v0.14.8: `POST /profiles/:id/tabs/bulk-close` by `tabIds` OR Thinger `q` — per-tab results, idempotent closes; console select-all + Close selected |
-| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | 🟡 | cookie clear (partition-scoped) ✅ v0.14.9, bulk-close/bulk-open ✅ v0.14.8; per-tab screenshot/duplicate/move/set-color ❌ (window tiling presets ✅ v0.14.15 cover the move-window shape at launch) |
+| Tab context menu commands (set profile, color, timezone, clear cookies, screenshot, duplicate, move window) | 🟡 | cookie clear (partition-scoped) ✅ v0.14.9, bulk-close/bulk-open ✅ v0.14.8; per-tab reload / duplicate (same partition) / screenshot ✅ Phase 2 (`16cf765`); per-tab move/set-color/set-profile/timezone ❌ (window tiling presets ✅ v0.14.15 cover the move-window shape at launch) |
 | Tab Thinger (formula query language over tabs) | ✅ | v0.14.8 minimal slice: `[!]field:pattern` tokens ANDed (`status`/`url`/`id`/`partition`/`related`/`engine`), `*` wildcard, bare token = url sugar, partition = prefix match; unknown fields refuse 400; `POST /profiles/:id/tabs/query` |
 | Tab Studio (visual bulk editor) | ❌ | Later phase |
 | Tab priority from page signals (queue position → band) | ❌ | Plugin-shaped (§6) |
-| Auto-reload per tab | ❌ | |
+| Auto-reload per tab | ✅ | Phase 2 (`16cf765`): `POST /profiles/:id/tabs/:tabId/auto-reload {intervalSec}` (5 s – 1 h, 0 = off), console picker per tab; dies with the tab/run |
 | Named windows, max tabs/window, closed-tab restore | ❌ | |
 | Bulk-open unique URLs w/ matching proxies, staggered navigation | 🟡 | v0.14.8: `POST /profiles/:id/tabs/bulk-open` opens many URLs (optional shared `relatedTo` partition), per-url results; v0.14.12: `staggerMs` ✅ (0–10 s between opens); proxy matching ❌ |
 | Tab strings (shareable tab definitions) | 🟡 | Session bundles v2 carry tabUrls — closest equivalent |

@@ -29,9 +29,12 @@ export function registerTabRoutes(
     const states = ids.map((id) => {
       try {
         const listed = lifecycle.listTabs(id);
-        return { id, drift: lifecycle.identityDrift(id), tabCount: listed.tabs.length };
+        // drift + relay (adopted run whose relay died with the old API)
+        // from one snapshot read.
+        const { drift, relay } = lifecycle.gridState(id);
+        return { id, drift, tabCount: listed.tabs.length, relay };
       } catch {
-        return { id, drift: null, tabCount: 0 };
+        return { id, drift: null, tabCount: 0, relay: null };
       }
     });
     return { states };
@@ -62,6 +65,34 @@ export function registerTabRoutes(
     const { id, tabId } = req.params as { id: string; tabId: string };
     const tab = await lifecycle.closeTab(id, tabId);
     return { closed: tab.status === "closed", tab };
+  });
+
+  /* ---- tab-ops depth: reload / auto-reload / duplicate / screenshot ---- */
+
+  app.post("/profiles/:id/tabs/:tabId/reload", async (req) => {
+    const { id, tabId } = req.params as { id: string; tabId: string };
+    return { reloaded: true, tab: await lifecycle.reloadTab(id, tabId) };
+  });
+
+  app.post("/profiles/:id/tabs/:tabId/auto-reload", async (req) => {
+    const { id, tabId } = req.params as { id: string; tabId: string };
+    // 0 = off; otherwise 5 s – 1 h (a faster loop hammers the site and
+    // reads as a bot; an hour is the longest a queue page sensibly waits).
+    const { intervalSec } = z
+      .object({ intervalSec: z.union([z.literal(0), z.number().int().min(5).max(3600)]) })
+      .parse(req.body ?? {});
+    return { tab: await lifecycle.setAutoReload(id, tabId, intervalSec === 0 ? null : intervalSec) };
+  });
+
+  app.post("/profiles/:id/tabs/:tabId/duplicate", async (req, reply) => {
+    const { id, tabId } = req.params as { id: string; tabId: string };
+    return reply.code(201).send(await lifecycle.duplicateTab(id, tabId));
+  });
+
+  app.get("/profiles/:id/tabs/:tabId/screenshot", async (req, reply) => {
+    const { id, tabId } = req.params as { id: string; tabId: string };
+    const png = await lifecycle.screenshotTab(id, tabId);
+    return reply.type("image/png").header("cache-control", "no-store").send(png);
   });
 
   /**

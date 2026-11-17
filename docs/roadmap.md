@@ -194,7 +194,9 @@ verification owed before calling the ENGINE done.
   selectable for A/B fallback. Remaining detection polish (warnings, not
   failures): deviceMemory↔heap coherence FIXED same day via the host-memory
   clamp in identity generation (`hostMemoryGb()`); canvas-noise cross-context
-  presentation is the one open engine-side item.
+  presentation was the one open engine-side item — closed in fury-core
+  0.5.5-qp.4 (`3c89fc9`, v0.16 item 8c), re-verified 2026-11-17 (Phase 2
+  hardening below).
 
 ## P7 — Post-engine batch (parity audit PASSED 2026-11-14 — this batch is now unblocked)
 
@@ -1254,3 +1256,225 @@ the same shape and is fixed by the mock-CDP-server change in `adb0b32`.
 
 Open after this item: Phase 2 continues with warmup console UX, tab-ops
 depth, and the canvas cross-context engine item.
+
+## Phase 2 item 2 — Warmup console UX (DONE 2026-11-17, branch `warmup-console`)
+
+The warmup recorder + player shipped API-only in v0.16.0 (`97dad9f`); the
+console had no way to reach it. Standing rule applies: a box is ticked only
+with code + tests + docs + live verification + the commit hash.
+
+- [x] **Warmups view in the ops console** (`300caca`) — sidebar entry
+  (shortcut `W`, between Cookies and Providers), recipes table (name, steps,
+  total dwell, created, Run / Delete with confirm), record controls for a
+  running profile with an in-progress countdown while the request is held
+  open, and a run modal (any profile, stop-after, elapsed timer, per-step
+  results). Dashboard only — no API change, no new CSS tokens. New
+  `dashboard-views` wiring guard: every view has its section, nav button and
+  a unique shortcut matching its `<kbd>` hint; every id app.js looks up
+  exists.
+- [x] **Body-less console requests fixed** (`04b6efd`) — found by this
+  item's live check. The console's `api()` helper sent
+  `content-type: application/json` on every request since v0.8.0
+  (`df45475`); Fastify answers a body-less request that claims JSON with a
+  500, so every body-less button failed: profile delete, profile stop, proxy
+  test, provider refresh, tab close, and the new recipe delete. The header
+  is now sent only with a body. New `dashboard-api-helper` test runs the real
+  `api()` source against the API — it fails on the old helper with the exact
+  live error and passes on the fix.
+
+**Live verification, 2026-11-17, live API on 50325 (current `main`), fury,
+throwaway profiles only.** The live API serves the dashboard from the
+working copy on `main`, so this branch's three dashboard files were served
+by a small static preview on port 50478 that forwarded every API call
+unchanged to 50325 (no database, no engine; stopped afterwards). No API
+restart was needed or done.
+
+| Check | Result |
+| --- | --- |
+| `W` opens Warmups; running-profile picker | only the running throwaway profile listed |
+| Record 25 s while two real pages were opened | button disabled with countdown; recipe saved: 2 steps (`example.com`, `example.org`), 36 s total dwell; list refreshed |
+| Run on a second, idle throwaway profile with stop-after | button disabled with elapsed timer; 2/2 steps ok with dwell shown; "profile was started by this run"; profile ran and was back to `idle` (run `stopped`, `lastError: null`) |
+| Recipe Delete (first build) | **failed** — HTTP 500 "Body cannot be empty…" → fix `04b6efd` |
+| After the fix: record 20 s, then Delete from the table | confirm shown; recipe gone; empty state back |
+| After the fix: profile Stop and Delete from the Profiles table | profile stopped (`idle` on the API), then deleted (404) |
+
+Clean-up: all three throwaway profiles and both test recipes deleted; the
+existing `detect-test` profiles were never touched.
+
+Gates on the final branch: 639/639 API tests (626 + 10 view wiring + 3 api
+helper), 20/20 server, `tsc --noEmit` clean, `npm run build` clean.
+
+## Phase 2 hardening — adopted-proxy guard, console smoke, flakes, canvas re-check (DONE 2026-11-17, branch `phase2-hardening`)
+
+Follow-ups the owner approved after the warmup console. This branch merges
+`warmup-console` (the console smoke needs its `api()` fix `04b6efd`), so
+merge `warmup-console` first or merge this branch alone — both carry it.
+Every box: code + tests + docs + live verification + the commit hash.
+
+- [x] **Adopted proxied engine: dead relay port held** (`a4a38ed`) — live
+  finding below. `holdRelayPort()` placeholder (502 to everyone, port kept
+  from any other process); `guardAdoptedRelays()` at boot; released on
+  stop/crash; `/profiles/:id/egress` gains `relay` + `note`; `/metrics`
+  gains `relaysHeld` / `relaysUnguarded`. 7 tests. Architecture invariant 7.
+- [x] **Console shows a lost relay** (`afee572`) — `batch-state` carries
+  `relay` per profile and the Profiles grid badges the row "proxy lost —
+  restart" (held) or "proxy port taken — stop now" (unguarded). Live:
+  proxied launch → scratch API killed and restarted → the grid row shows
+  "proxy lost — restart" → Stop closed the engine. 1 test.
+- [x] **Console smoke in a real browser** (`da4349b`) — `e2e-smoke` phase 4b
+  (`scripts/console-smoke.mjs`) loads the dashboard in a headless Chromium
+  over CDP (no new dependency) and clicks Start, Stop, Delete, W → Warmups,
+  recipe Delete, checking each effect through the API and that the page
+  threw nothing. Owner lifted the `scripts/` guard for this item.
+- [x] **proxy-relay ECONNRESET flake** (`7bd8d1f`) — test fixtures, not the
+  relay: the fake upstreams' sockets had no error listener. 3/12 runs red
+  before, 0/15 after.
+- [ ] **vitest "Worker exited unexpectedly"** — NOT fixed. Seen in both
+  suites on untouched `main` too (server suite about 1 run in 6 once,
+  0/20 isolated today). No `node.exe` crash event and no Defender
+  detection in the last two days; no test kills a PID it does not own.
+  Most likely the worker process is ended from outside (endpoint AV is a
+  candidate, not proven). Left open rather than masked with retries.
+- [x] **Canvas cross-context item** — already fixed in fury-core
+  0.5.5-qp.4 (`3c89fc9`, manifest `c6553ea`); this item's docs were stale.
+  Re-verified 2026-11-17 on the installed qp.4 binary:
+  `engine/verify/verify-0030.py` **21/21 PASS**, including the putImageData
+  round-trip AliasMode checks (0 of 16384 bytes differ) and both controls.
+
+**Live verification — adopted proxied engine (2026-11-17, fury qp.4,
+SCRATCH API on 50477 with its own data dir; every API process killed was
+the scratch instance, PID read from the 50477 listener; the live API on
+50325 was never addressed).** A recording upstream proxy (basic auth) on
+127.0.0.1:50490 stood in for a real proxy.
+
+| Check | Result |
+| --- | --- |
+| Proxied launch, navigate (API alive) | page loads; upstream saw the CONNECTs |
+| Kill API, navigate a fresh URL (`main` code) | `ERR_PROXY_CONNECTION_FAILED`; upstream saw nothing — **fails closed** |
+| Credential-free proxy bound on the dead relay port, navigate | **page loads through it** — the squatter received the CONNECTs |
+| Restart API on this branch | `recovery: … held=1 unguarded=0`; a squatter bind now gets `EADDRINUSE` |
+| Navigate a fresh URL | `ERR_TUNNEL_CONNECTION_FAILED`; upstream saw nothing |
+| `GET /profiles/:id/egress` | `relay: "lost-held"` + note; `/metrics` `relaysHeld: 1` |
+| Stop the adopted run | engine gone, `lastError: null`, port released |
+
+**Console smoke control:** against the old `api()` helper (`300caca`)
+phase 4b goes RED on Stop, Delete and recipe Delete; on this branch GREEN
+(headless fury qp.4, Chrome/157).
+
+**Found, not fixed (outside this item — recorded, not yet scheduled):** launch
+snapshots under `<dataDir>/snapshots/` store the launch proxy URL with
+its password in plain text (`launch-identity.service.ts` writes
+`args.proxyUrl` verbatim), although proxy passwords have lived in DPAPI
+since v0.12.5. The API response redacts it; the file does not.
+**→ Fixed** in "Snapshot proxy passwords at rest" below (`6cc63f7`).
+
+Gates on the final branch: 647/647 API tests, 20/20 server, `tsc
+--noEmit` clean, `npm run build` clean; `node scripts/e2e-smoke.mjs` GREEN
+including phase 4b.
+
+## Phase 2 — Tab-ops depth, slice 1 (DONE 2026-11-17, branch `tab-ops-depth`)
+
+Built on `phase2-hardening` (the console needs the `api()` fix). Merge
+order: `warmup-console` → `phase2-hardening` → `tab-ops-depth`, or this
+branch alone (it carries both).
+
+- [x] **Per-tab reload, auto-reload, duplicate, screenshot** (`16cf765`) —
+  `POST …/tabs/:tabId/reload`, `POST …/auto-reload {intervalSec: 0 | 5–3600}`,
+  `POST …/duplicate` (related tab → same session partition),
+  `GET …/screenshot` (image/png). Real engines attach to the tab's target
+  and send `Page.*` on that page session, then detach. Auto-reload is
+  in-memory and dies with the tab, the run or the engine. Console Tabs view:
+  per-row ↻ / ⎘ / 📷 / ✕ and an auto-reload picker; screenshots open in a
+  drawer. 7 tests. Parity-jancy §4 rows updated.
+- [x] **Real-process test budget** (`11cb553`) — the adopted-stop suites
+  get 60 s per test; one loaded full run pushed a relay test past 30 s.
+
+**Live verification (2026-11-17, fury qp.4, scratch API on 50477 with its
+own data dir, throwaway profile, console served by that API):**
+
+| Check | Result |
+| --- | --- |
+| Tabs view row | ↻ ⎘ 📷 ✕ actions + auto-reload picker on the open tab |
+| ↻ Reload | page `performance.timeOrigin` moved forward (a real reload) |
+| Auto-reload 15 s | listed `autoReloadSec: 15`; origin advanced by 15.0 s between reloads |
+| Auto-reload off | origin unchanged over the next 20 s |
+| ⎘ Duplicate | second open tab, same URL, same partition (`66fc37a4`) |
+| 📷 Screenshot | drawer opened with a 1334×585 capture of the page |
+
+Still open on parity-jancy §4 (not in this slice): per-tab move /
+set-color / set-profile / timezone, named windows + max tabs/window,
+closed-tab restore, Tab Studio, proxy-matched bulk-open, tab strings.
+
+Gates: 654/654 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
+build` clean.
+
+## Phase 2 — Snapshot proxy passwords at rest (DONE 2026-11-17, branch `snapshot-proxy-redact`)
+
+Built on `tab-ops-depth`. Closes the "Found, not fixed" note in Phase 2
+hardening above.
+
+- [x] **Snapshots never store the proxy password** (`6cc63f7`) —
+  `LaunchIdentityService.capture` writes `stripProxyPassword(proxyUrl)`:
+  scheme, username, host and port are kept (`http://alice@10.0.0.1:8080`),
+  the password is dropped. It works on the string, so credential-free URLs
+  are stored byte-identical; any other `@`-bearing shape becomes
+  `(unparseable proxy url)` rather than risk keeping a secret. The engine
+  still gets the full URL — only the snapshot copy is stripped.
+- [x] **Boot migration** — `stripStoredProxyPasswords()` runs in `main.ts`
+  before recovery and rewrites (via `writeFileAtomic`) only the snapshot
+  files that still carry a password. Idempotent; an unreadable file is
+  logged and skipped, never a reason to abort boot.
+- Readers checked by grep — none needs the password: `egressDiagnostics`
+  re-redacts for the API, `relayStateFor` / `guardAdoptedRelays` only test
+  that a proxy URL exists and read `egress.relayPort`, `computeIdentityDrift`
+  reads `proxyId` / `proxySource`, `gridState` / `attest` don't touch the URL,
+  and bundles never read snapshots.
+- Tests: stripper unit cases, migration (rewrites one, leaves the clean file
+  byte-identical, skips a corrupt file, second run rewrites nothing, relay
+  port survives), egress + drift from a stripped snapshot, and temp-proxy
+  asserts the engine still received the password while the file has none.
+
+**Live verification (2026-11-17, fury qp.4, scratch API on 50491 with its
+own data dir, local auth proxy on 50492; live API on 50325 untouched):**
+
+| Check | Result |
+| --- | --- |
+| Boot with a legacy snapshot holding `legacy:<password>` | log `proxy passwords stripped from 1 file(s), 0 unreadable`; file now `http://legacy@10.9.9.9:3128` |
+| Proxied launch through the password-protected proxy | running; proxy saw 10 authenticated requests, 0 denied |
+| New snapshot file | `"proxyUrl": "http://verify@127.0.0.1:50492"`; password string found in 0 snapshot files |
+| `GET /profiles/:id/egress` | `http://***@127.0.0.1:50492/`, exit IP measured, `relay: "live"` |
+| `GET /profiles/:id/drift` · stop | `stale: false` · stopped cleanly |
+
+Gates: 657/657 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
+build` clean.
+
+## Console ops — owner feedback batch (2026-11-17, branch `console-ops`)
+
+Owner could not add or remove proxies, select all profiles, create
+groups, or add Gmail accounts for the IMAP resolver from the console.
+
+- [x] **Profiles select-all + New group** (`859d597`) — header checkbox
+  selects every profile in the current view (all pages, group + search);
+  '+ New group' names a group for the selection. The batch bar's Move menu
+  already had '+ new group…', but without bulk selection it was easy never
+  to see it. Groups exist through their members (no empty groups).
+- [x] **Proxies: add, paste a list, remove, select all** (`859d597`) —
+  drawer accepts `host:port`, `host:port:user:pass` and
+  `name:host:port:user:pass` lines (optional scheme prefix; ':' allowed in
+  passwords); per-line results never echo a line back; per-row delete,
+  select-all, Test selected, Delete selected; test results show exit IP and
+  location. No API change.
+- [x] **Email accounts for the IMAP resolver** (`706d483`, form layout fix
+  `a73ac5e`) — Settings → Integrations: add several Gmail/IMAP accounts
+  (email, app password, server, port), Test login, Remove. Password only in
+  the SecretStore, write-only; `imap:you@gmail.com` resolves through a
+  stored account. Separate from `/aliases`: the scripting lock is
+  unchanged.
+
+Verified: `e2e-smoke` phase 4b clicks select-all, + New group, pastes two
+dummy loopback proxies, deletes them via select-all, and adds then removes
+an email account — GREEN. Visual check of all three screens on a scratch
+API (fake profiles, no real credentials); the email form's Add button was
+cut off at narrow widths and fixed. Gates: 661/661 API, 20/20 server, tsc
+and build clean.
+

@@ -3,8 +3,9 @@
  * e2e-smoke — the Phase-1 release gate: one command that proves the product
  * works the way a family member will use it.
  *
- *   node scripts/e2e-smoke.mjs            API phase only (temp data dir,
- *                                         no browser windows — CI-safe)
+ *   node scripts/e2e-smoke.mjs            API phases + a HEADLESS console
+ *                                         click-through (temp data dir, no
+ *                                         visible windows — CI-safe)
  *   node scripts/e2e-smoke.mjs --launch   also boots a real profile on the
  *                                         installed engine, proves egress,
  *                                         round-trips cookies, stops clean
@@ -15,6 +16,9 @@
  *   3. import  — CSV import + xlsx import create real profiles (dry-run then
  *                apply, upsert stable)
  *   4. surface — /metrics counts, /profiles list, identity PATCH merges
+ *   4b. console— the real dashboard in a headless browser: Start, Stop,
+ *                Delete, W → Warmups, recipe Delete (scripts/console-smoke.mjs;
+ *                SKIP, never PASS, when no Chromium-family browser exists)
  *   5. launch  — (--launch only) start on the real engine, /egress proves
  *                the exit IP, cookie export → import round-trips, stop
  *   6. teardown— profile stopped, no leaked child processes
@@ -27,6 +31,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 
+import { runConsoleSmoke } from "./console-smoke.mjs";
 const require = createRequire(import.meta.url);
 const XLSX = require("xlsx");
 
@@ -150,6 +155,10 @@ async function main() {
     pins.timezone === "America/New_York" && pins.deviceMemoryGb === 8, JSON.stringify(pins));
   const bad = await apiCall("POST", "/profiles/import-xlsx", { xlsx: Buffer.from("not a zip").toString("base64") });
   ok("non-workbook bytes are refused (400)", bad.status === 400);
+
+  // ---- phase 4b: console (real dashboard in a headless browser) -------
+  console.log("\nphase 4b: console buttons in a real browser");
+  await runConsoleSmoke({ base: BASE, ok });
 
   // ---- phase 5: real launch (optional) --------------------------------
   if (WITH_LAUNCH) {

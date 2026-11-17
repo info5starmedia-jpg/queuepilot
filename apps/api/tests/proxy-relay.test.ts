@@ -67,6 +67,10 @@ function startUpstream(): Promise<UpstreamHandle> {
       client.destroy();
       return;
     }
+    // The relay tears its side down when the tunnel ends; without a listener
+    // the resulting ECONNRESET on this fixture socket is an uncaught
+    // exception that fails the whole vitest run with every test green.
+    client.on("error", () => client.destroy());
     const [host, port] = (req.url ?? "").split(":");
     const target = net.connect(Number(port), host, () => {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -156,6 +160,9 @@ function startSocks5(opts: { user: string; pass: string }): Promise<Socks5Handle
   }
 
   const server = net.createServer((sock) => {
+    // Permanent listener: the reader's own handler is removed when the
+    // handshake ends, leaving a window where a reset would be uncaught.
+    sock.on("error", () => sock.destroy());
     void (async () => {
       const r = makeReader(sock);
       try {

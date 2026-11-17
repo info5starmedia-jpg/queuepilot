@@ -49,7 +49,8 @@ export class LaunchIdentityService {
       identityId: args.identity?.id ?? null,
       identity: args.identity,
       proxyId: args.proxyId,
-      proxyUrl: args.proxyUrl,
+      // Secrets at rest: the password lives only in the DPAPI SecretStore.
+      proxyUrl: stripProxyPassword(args.proxyUrl),
       proxySource: args.proxySource,
       ...(args.egress ? { egress: args.egress } : {}),
       capturedAt: new Date().toISOString(),
@@ -57,6 +58,38 @@ export class LaunchIdentityService {
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);
     writeFileAtomic(this.fileFor(args.runId), JSON.stringify(validated, null, 2));
     return validated;
+  }
+
+  /**
+   * Boot migration: snapshots written before passwords were stripped carry
+   * the proxy password in plain text. Rewrite just those files (atomically)
+   * without it. Idempotent — files with nothing to strip are never touched,
+   * and an unreadable file is skipped, never a reason to abort boot.
+   */
+  stripStoredProxyPasswords(): { rewritten: number; skipped: number } {
+    let rewritten = 0;
+    let skipped = 0;
+    for (const name of fs.readdirSync(this.dir)) {
+      if (!name.endsWith(".json")) continue;
+      const file = path.join(this.dir, name);
+      try {
+        const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+        if (typeof raw?.proxyUrl !== "string") continue;
+        const stripped = stripProxyPassword(raw.proxyUrl);
+        if (stripped === raw.proxyUrl) continue;
+        raw.proxyUrl = stripped;
+        writeFileAtomic(file, JSON.stringify(raw, null, 2));
+        rewritten++;
+      } catch (err) {
+        skipped++;
+        console.warn(
+          `[queuepilot] snapshot ${name}: could not check for a stored proxy password — ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return { rewritten, skipped };
   }
 
   forRun(runId: string): LaunchIdentitySnapshot | null {
@@ -83,4 +116,19 @@ export class LaunchIdentityService {
   private fileFor(runId: string): string {
     return path.join(this.dir, `${runId}.json`);
   }
+}
+
+/**
+ * Drop the password from a proxy URL, keeping scheme, username, host and
+ * port so the snapshot still identifies the proxy. Works on the string so
+ * credential-free URLs come back byte-identical (no URL normalization).
+ * Anything with an "@" that is not the plain `scheme://user@host` shape is
+ * replaced wholesale rather than risk keeping a secret.
+ */
+export function stripProxyPassword(url: string | null): string | null {
+  if (!url) return url;
+  const stripped = url.replace(/^([a-z][a-z0-9+.-]*:\/\/[^:@/]*):[^@/]*@/i, "$1@");
+  if (!stripped.includes("@")) return stripped;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^:@/]*@[^@]*$/i.test(stripped)) return stripped;
+  return "(unparseable proxy url)";
 }

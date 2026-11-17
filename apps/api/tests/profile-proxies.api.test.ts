@@ -111,7 +111,8 @@ describe("proxy-list launches", () => {
     const snap = ctx.snapshots.forRun(run.id)!;
     expect(snap.proxySource).toBe("profile-list");
     expect(snap.proxyId).toBeNull();
-    expect(snap.proxyUrl).toBe("http://alice:s3cret@10.0.0.1:8080");
+    // Password never at rest in the snapshot; username kept to identify it.
+    expect(snap.proxyUrl).toBe("http://alice@10.0.0.1:8080");
     // Drift explains the launch-time decision.
     expect(ctx.lifecycle.identityDrift(p.id)!.message).toContain("proxy list");
     await ctx.lifecycle.stop(p.id);
