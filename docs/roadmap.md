@@ -1541,7 +1541,7 @@ Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
 
 - [ ] **DNS leak through the HTTP proxy (the one "problem" on the proxied
   run)** — page DNS resolved via Cloudflare US resolvers while the proxy
-  exits in CA. **Diagnosed 2026-11-18: not the browser — the proxy's own
+  exits in CA. **Diagnosed 2026-11-17: not the browser — the proxy's own
   resolver plus its bad geo record.** Evidence:
   - `curl.exe -x <69.33.225.30 proxy> http://edns.ip-api.com/json` (no
     browser, no DoH) → `United States - Cloudflare, Inc.` `162.158.152.43`
@@ -1567,7 +1567,7 @@ Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
   such a host differ from stock Chrome, which upgrades — owner's call
   whether to keep it.
 - [ ] **Speech voices: only online Google voices, no Microsoft voice** —
-  **Not reproducible 2026-11-18; no engine change needed.** Stock Windows
+  **Not reproducible 2026-11-17; no engine change needed.** Stock Windows
   TTS (`content/browser/speech/tts_win.cc`, SAPI `ISpVoice`) is compiled
   into every Windows build unconditionally; no patch touches it; 0041 is
   inactive without `speech.voices`/mobile config; 0042 only adds the Google
