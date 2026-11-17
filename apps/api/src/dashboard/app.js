@@ -1525,13 +1525,95 @@ function renderIntegrationsInfo() {
     return;
   }
   box.innerHTML = `
-    <div class="info-card">
-      <h4>Email resolvers (Gmail / IMAP)</h4>
-      <p>Code-running endpoints resolve one-time codes from mail. IMAP uses an app password:</p>
-      <p><code>imap://imap.gmail.com:993?user=you@gmail.com&amp;pass=****&amp;query=UNSEEN</code></p>
-      <p>Options: <code>tls=false</code> (plain, testing only) · <code>query</code> = any IMAP SEARCH term.
-      Credentials reference aliases (<code>@mail-user</code>) from the alias store — never paste real passwords into provider notes.</p>
+    <div class="info-card" id="email-accounts-card">
+      <h4>Email accounts (Gmail / IMAP)</h4>
+      <p>Used to read one-time codes from mail. For Gmail, turn on 2-Step Verification and create an <b>app password</b> (Google Account → Security → App passwords). The app password is stored encrypted on this machine and never shown again.</p>
+      <table class="import-table" id="email-accounts-table"><tbody></tbody></table>
+      <p id="email-accounts-empty" class="hint" hidden>No email accounts yet.</p>
+      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:2fr 1.4fr 1.4fr 0.6fr auto;gap:8px;align-items:end;margin-top:10px">
+        <label>Email <input id="email-account-email" type="email" required maxlength="254" placeholder="you@gmail.com" /></label>
+        <label>App password <input id="email-account-password" type="password" required maxlength="200" autocomplete="new-password" placeholder="16-letter app password" /></label>
+        <label>Server <input id="email-account-host" required maxlength="253" value="imap.gmail.com" /></label>
+        <label>Port <input id="email-account-port" type="number" required min="1" max="65535" value="993" /></label>
+        <button type="submit" class="primary" id="email-account-add">+ Add</button>
+      </form>
+      <p class="hint" id="email-account-status"></p>
+      <p>Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
     </div>`;
+  $("#email-account-form").addEventListener("submit", addEmailAccount);
+  loadEmailAccounts();
+}
+
+async function loadEmailAccounts() {
+  const tbody = $("#email-accounts-table tbody");
+  if (!tbody) return;
+  let accounts = [];
+  try {
+    ({ accounts } = await api("/email-accounts"));
+  } catch (err) {
+    $("#email-account-status").textContent = err.message;
+    return;
+  }
+  tbody.innerHTML = "";
+  $("#email-accounts-empty").hidden = accounts.length !== 0;
+  for (const a of accounts) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="font-weight:600">${esc(a.email)}</td>
+      <td class="mono">${esc(a.host)}:${esc(a.port)}${a.tls ? "" : " (no TLS)"}</td>
+      <td>${a.hasPassword ? "app password stored" : `<span style="color:var(--red)">no password</span>`}</td>
+      <td><button type="button" class="ghost" data-act="test">Test</button> <span class="mono" data-out></span></td>
+      <td><button type="button" class="danger" data-act="remove">Remove</button></td>`;
+    tr.querySelector('[data-act="test"]').addEventListener("click", async (ev) => {
+      const out = tr.querySelector("[data-out]");
+      ev.target.disabled = true;
+      out.textContent = "logging in…";
+      out.style.color = "var(--faint)";
+      try {
+        const r = await api(`/email-accounts/${a.id}/test`, { method: "POST" });
+        out.textContent = r.ok ? "ok — logged in" : r.error;
+        out.style.color = r.ok ? "var(--green)" : "var(--red)";
+      } catch (err) {
+        out.textContent = err.message;
+        out.style.color = "var(--red)";
+      }
+      ev.target.disabled = false;
+    });
+    tr.querySelector('[data-act="remove"]').addEventListener("click", async () => {
+      if (!window.confirm(`Remove ${a.email}? Its stored app password is deleted too.`)) return;
+      try {
+        await api(`/email-accounts/${a.id}`, { method: "DELETE" });
+        toast(`email account ${a.email} removed`);
+      } catch (err) {
+        toast(err.message, "error");
+      }
+      loadEmailAccounts();
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+async function addEmailAccount(e) {
+  e.preventDefault();
+  const status = $("#email-account-status");
+  const body = {
+    email: $("#email-account-email").value.trim(),
+    appPassword: $("#email-account-password").value,
+    host: $("#email-account-host").value.trim(),
+    port: Number($("#email-account-port").value),
+  };
+  try {
+    await api("/email-accounts", { method: "POST", body: JSON.stringify(body) });
+    status.textContent = `${body.email} added — click Test to check the login`;
+    status.style.color = "var(--faint)";
+    $("#email-account-email").value = "";
+    $("#email-account-password").value = "";
+  } catch (err) {
+    status.textContent = err.message;
+    status.style.color = "var(--red)";
+  }
+  $("#email-account-password").value = "";
+  loadEmailAccounts();
 }
 
 function renderSettings() {

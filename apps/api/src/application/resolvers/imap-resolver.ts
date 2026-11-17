@@ -21,15 +21,27 @@ import { substituteAliases, type AliasStore } from "./token-aliases.js";
  * lab use only.
  */
 
+export type ImapConnect = (opts: {
+  host: string;
+  port: number;
+  tls: boolean;
+  tlsOptions?: ConnectionOptions;
+  timeoutMs: number;
+}) => Promise<SocketLike>;
+
+/**
+ * Stored email accounts (Settings → Integrations). `imap:you@gmail.com`
+ * resolves through this instead of inline user/pass.
+ */
+export interface ImapAccountLookup {
+  forEmail(email: string): { host: string; port: number; tls: boolean; user: string; pass: string } | null;
+}
+
 export interface ImapResolverOptions {
   /** Injectable for tests; defaults to a real TCP/TLS connect. */
-  connect?: (opts: {
-    host: string;
-    port: number;
-    tls: boolean;
-    tlsOptions?: ConnectionOptions;
-    timeoutMs: number;
-  }) => Promise<SocketLike>;
+  connect?: ImapConnect;
+  /** Stored accounts; absent = only the inline imap://host?user=&pass= form. */
+  accounts?: ImapAccountLookup;
 }
 
 /** Minimal socket surface the resolver needs — real sockets and test fakes. */
@@ -183,16 +195,8 @@ function extractTextBody(lines: string[]): string {
   return text;
 }
 
-/** Registers `imap` on the given registry. */
-export function registerImapResolver(
-  reg: ResolverRegistry,
-  options: ImapResolverOptions = {},
-): void {
-  reg.register("imap", async (args, ctx) => {
-    const { host, port, tls, user, pass, query } = parseImapUrl(args, ctx.aliases);
-    const connect =
-      options.connect ??
-      ((o: { host: string; port: number; tls: boolean; timeoutMs: number }): Promise<SocketLike> =>
+/** Real TCP/TLS connect, shared by the resolver and the account login test. */
+const defaultImapConnect: ImapConnect = (o) =>
         new Promise((resolve, reject) => {
           const onSocket = (s: Socket | TLSSocket) => {
             s.setTimeout(o.timeoutMs, () => {
@@ -217,7 +221,72 @@ export function registerImapResolver(
             const s = netConnect({ host: o.host, port: o.port }, () => onSocket(s));
             s.once("error", reject);
           }
-        }));
+        });
+
+/**
+ * `imap:you@gmail.com[?query=…]` → a stored account's credentials. Returns
+ * null when the spec is not the account form (so the inline form applies).
+ */
+function accountSpec(
+  args: string,
+  accounts: ImapAccountLookup | undefined,
+): { host: string; port: number; tls: boolean; user: string; pass: string; query: string } | null {
+  const m = /^(?:\/\/)?([^\s/?:@]+@[^\s/?:]+)(\?.*)?$/.exec(args.trim());
+  if (!m) return null;
+  const email = decodeURIComponent(m[1]!);
+  const account = accounts?.forEmail(email);
+  if (!account) throw new Error(`#NO ACCOUNT ${email} is not added in Settings → Integrations`);
+  const params = new URLSearchParams(m[2] ?? "");
+  const query = (params.get("query") ?? "UNSEEN").trim() || "UNSEEN";
+  return { ...account, query };
+}
+
+/**
+ * Log in and open INBOX — the console's "Test" button for a stored account.
+ * The answer names what failed; the password never appears in it.
+ */
+export async function imapLoginCheck(
+  creds: { host: string; port: number; tls: boolean; user: string; pass: string },
+  connect: ImapConnect = defaultImapConnect,
+): Promise<{ ok: boolean; error: string | null }> {
+  let session: ImapSession | null = null;
+  try {
+    const sock = await connect({ host: creds.host, port: creds.port, tls: creds.tls, timeoutMs: IMAP_TIMEOUT_MS });
+    session = new ImapSession(sock);
+    await session.command("CAPABILITY");
+    await session.command(`LOGIN ${quoteImap(creds.user)} ${quoteImap(creds.pass)}`);
+    await session.command("SELECT INBOX");
+    return { ok: true, error: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const clean = msg.replace(/^#NO ACCOUNT\s*/, "").replace(creds.pass, "***").slice(0, 200);
+    return { ok: false, error: /LOGIN|auth|credentials|invalid/i.test(clean) ? `login refused: ${clean}` : clean };
+  } finally {
+    try {
+      if (session) {
+        await session.command("LOGOUT");
+        await session.done();
+      }
+    } catch {
+      /* teardown best-effort */
+    }
+  }
+}
+
+/** Registers `imap` on the given registry. */
+export function registerImapResolver(
+  reg: ResolverRegistry,
+  options: ImapResolverOptions = {},
+): void {
+  reg.register("imap", async (args, ctx) => {
+    let parsed;
+    try {
+      parsed = accountSpec(args, options.accounts) ?? parseImapUrl(args, ctx.aliases);
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    const { host, port, tls, user, pass, query } = parsed;
+    const connect = options.connect ?? defaultImapConnect;
     let session: ImapSession | null = null;
     try {
       const sock = await connect({ host, port, tls, timeoutMs: IMAP_TIMEOUT_MS });

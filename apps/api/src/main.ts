@@ -43,6 +43,7 @@ import {
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
 import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
+import { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
@@ -111,7 +112,9 @@ export async function main(): Promise<void> {
   // Plugin + resolver + parser registries (Jancy workflow layer, P7).
   const resolvers = new ResolverRegistry();
   registerBuiltinResolvers(resolvers);
-  registerImapResolver(resolvers);
+  // Email accounts (Settings → Integrations): `imap:you@gmail.com` uses them.
+  const emailAccounts = new EmailAccountService(db, secretStore);
+  registerImapResolver(resolvers, { accounts: emailAccounts });
   const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
   await parserReg.rescan();
   const pluginReg = new PluginRegistry(
@@ -245,6 +248,7 @@ export async function main(): Promise<void> {
     aliases: secretAliasStore(secretStore),
     settingsStore: settingsService,
     secrets: secretStore,
+    emailAccounts,
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries

@@ -15,6 +15,8 @@ import { toHttpError } from "./http/error-mapper.js";
 import { scriptingGate } from "./http/scripting-gate.js";
 import { registerProfileRoutes } from "./http/profiles.routes.js";
 import { registerProxyRoutes } from "./http/proxies.routes.js";
+import { registerEmailAccountRoutes } from "./http/email-accounts.routes.js";
+import type { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerRunRoutes } from "./http/runs.routes.js";
 import { registerAdsPowerRoutes } from "./http/adspower.routes.js";
 import { registerEventRoutes } from "./http/events.routes.js";
@@ -65,6 +67,8 @@ export interface AppDeps {
   totp?: TotpService;
   settingsStore?: SettingsService;
   secrets?: SecretStore;
+  /** Email accounts for the IMAP resolver (Settings → Integrations). */
+  emailAccounts?: EmailAccountService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -122,6 +126,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp, deps.proxyProviders);
   registerProxyRoutes(app, deps.proxies);
+  if (deps.emailAccounts) registerEmailAccountRoutes(app, deps.emailAccounts);
   registerRunRoutes(app, deps.lifecycle, deps.profiles, deps.secrets);
   registerWindowRoutes(app, new WindowTilingService(deps.lifecycle, deps.profiles));
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
