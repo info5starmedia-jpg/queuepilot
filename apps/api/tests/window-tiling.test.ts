@@ -153,4 +153,21 @@ describe("window tiling API", () => {
     });
     expect(badPreset.statusCode).toBe(400);
   });
+
+  it("closes the CDP connection after tiling — no leaked sockets (audit finding 2)", async () => {
+    const ctx = await ctxWithMockCdp();
+    const p = ctx.profiles.create({ name: "win-leak", generateFingerprint: true });
+    await ctx.app.inject({ method: "POST", url: `/profiles/${p.id}/start`, payload: {} });
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/profiles/${p.id}/window/bounds`,
+      payload: { bounds: { left: 0, top: 0, width: 1200, height: 800 } },
+    });
+    expect(res.json()).toMatchObject({ status: "tiled" });
+    // The old driverFor() left one CdpConnection open per tiled window.
+    // Give the WebSocket close frame a moment, then assert zero remain.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(server!.openConnectionCount).toBe(0);
+  });
 });

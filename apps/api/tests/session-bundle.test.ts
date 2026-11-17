@@ -28,45 +28,42 @@ const MANIFEST = {
 };
 
 describe("session bundle crypto", () => {
-  it("round-trips a bundle under the passphrase", () => {
-    const bundle = createSessionBundle("correct horse", MANIFEST, COOKIES);
-    const opened = openSessionBundle("correct horse", bundle);
+  it("round-trips a bundle under the passphrase", async () => {
+    const bundle = await createSessionBundle("correct horse", MANIFEST, COOKIES);
+    const opened = await openSessionBundle("correct horse", bundle);
     expect(opened.manifest.profileName).toBe("checkout-1");
     expect(opened.manifest.cookieCount).toBe(1);
     expect(opened.cookies).toEqual(COOKIES);
   });
 
-  it("wrong passphrase fails with BUNDLE_INVALID and no oracle", () => {
-    const bundle = createSessionBundle("right", MANIFEST, COOKIES);
-    try {
-      openSessionBundle("wrong", bundle);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect((err as { code?: string }).code).toBe(ErrorCodes.BUNDLE_INVALID);
-      expect((err as Error).message).toContain("wrong passphrase or corrupted");
-    }
+  it("wrong passphrase fails with BUNDLE_INVALID and no oracle", async () => {
+    const bundle = await createSessionBundle("right", MANIFEST, COOKIES);
+    await expect(openSessionBundle("wrong", bundle)).rejects.toMatchObject({
+      code: ErrorCodes.BUNDLE_INVALID,
+      message: expect.stringContaining("wrong passphrase or corrupted"),
+    });
   });
 
-  it("tampered ciphertext fails authentication", () => {
-    const bundle = createSessionBundle("pw", MANIFEST, COOKIES);
+  it("tampered ciphertext fails authentication", async () => {
+    const bundle = await createSessionBundle("pw", MANIFEST, COOKIES);
     const envelope = JSON.parse(bundle.toString("utf8")) as { ciphertext: string };
     const raw = Buffer.from(envelope.ciphertext, "base64");
     raw[0] = (raw[0] ?? 0) ^ 0xff;
     envelope.ciphertext = raw.toString("base64");
-    expect(() => openSessionBundle("pw", Buffer.from(JSON.stringify(envelope)))).toThrow(
-      expect.objectContaining({ code: ErrorCodes.BUNDLE_INVALID }),
-    );
+    await expect(
+      openSessionBundle("pw", Buffer.from(JSON.stringify(envelope))),
+    ).rejects.toMatchObject({ code: ErrorCodes.BUNDLE_INVALID });
   });
 
-  it("foreign bytes are not a bundle", () => {
-    expect(() => openSessionBundle("pw", Buffer.from("not json"))).toThrow(
-      expect.objectContaining({ code: ErrorCodes.BUNDLE_INVALID }),
-    );
+  it("foreign bytes are not a bundle", async () => {
+    await expect(openSessionBundle("pw", Buffer.from("not json"))).rejects.toMatchObject({
+      code: ErrorCodes.BUNDLE_INVALID,
+    });
   });
 
-  it("two bundles of the same payload differ (random salt/iv)", () => {
-    const a = createSessionBundle("pw", MANIFEST, COOKIES);
-    const b = createSessionBundle("pw", MANIFEST, COOKIES);
+  it("two bundles of the same payload differ (random salt/iv)", async () => {
+    const a = await createSessionBundle("pw", MANIFEST, COOKIES);
+    const b = await createSessionBundle("pw", MANIFEST, COOKIES);
     expect(a.equals(b)).toBe(false);
   });
 });
@@ -112,7 +109,7 @@ describe("BundleService", () => {
     const { service } = makeService();
     const out = await service.exportBundle("p1", "pw");
     expect(out.cookieCount).toBe(1);
-    const opened = openSessionBundle("pw", Buffer.from(out.bundle, "base64"));
+    const opened = await openSessionBundle("pw", Buffer.from(out.bundle, "base64"));
     expect(opened.cookies).toEqual(COOKIES);
     expect(opened.manifest.engineKind).toBe("fury");
   });
@@ -157,7 +154,7 @@ describe("BundleService v2 restore", () => {
 
   it("restores a bundle into a NEW profile with metadata and cookies", async () => {
     const { service, profiles, imported } = ctx();
-    const bundle = createSessionBundle("pw", {
+    const bundle = await createSessionBundle("pw", {
       ...MANIFEST,
       profileName: "roam-me",
       group: "family",
@@ -178,7 +175,7 @@ describe("BundleService v2 restore", () => {
   it("matches an existing local proxy and never invents credentials", async () => {
     const { service, profiles, proxies } = ctx();
     const proxy = proxies.create({ name: "home", type: "http", host: "1.2.3.4", port: 8080, username: "u", password: "p" });
-    const bundle = createSessionBundle("pw", {
+    const bundle = await createSessionBundle("pw", {
       ...MANIFEST,
       profileName: "with-proxy",
       proxy: { type: "http", host: "1.2.3.4", port: 8080, username: "u" },
@@ -188,7 +185,7 @@ describe("BundleService v2 restore", () => {
     expect(out.proxyMatched).toBe(true);
     expect(profiles.get(out.profileId).proxyId).toBe(proxy.id);
 
-    const unknown = createSessionBundle("pw", {
+    const unknown = await createSessionBundle("pw", {
       ...MANIFEST,
       profileName: "no-proxy-match",
       proxy: { type: "http", host: "9.9.9.9", port: 1, username: null },
@@ -202,8 +199,8 @@ describe("BundleService v2 restore", () => {
 
   it("upserts an existing profile by name instead of duplicating", async () => {
     const { service, profiles } = ctx();
-    const first = await service.restoreBundle("pw", createSessionBundle("pw", { ...MANIFEST, profileName: "twice" }, []).toString("base64"));
-    const second = await service.restoreBundle("pw", createSessionBundle("pw", { ...MANIFEST, profileName: "twice", group: "g2" }, []).toString("base64"));
+    const first = await service.restoreBundle("pw", (await createSessionBundle("pw", { ...MANIFEST, profileName: "twice" }, [])).toString("base64"));
+    const second = await service.restoreBundle("pw", (await createSessionBundle("pw", { ...MANIFEST, profileName: "twice", group: "g2" }, [])).toString("base64"));
     expect(second.created).toBe(false);
     expect(profiles.get(second.profileId).group).toBe("g2");
     expect(profiles.list().filter((p) => p.name === "twice")).toHaveLength(1);
@@ -212,7 +209,7 @@ describe("BundleService v2 restore", () => {
   it("wrong passphrase refuses before touching anything", async () => {
     const { service, profiles } = ctx();
     await expect(
-      service.restoreBundle("nope", createSessionBundle("pw", { ...MANIFEST, profileName: "ghost" }, []).toString("base64")),
+      service.restoreBundle("nope", (await createSessionBundle("pw", { ...MANIFEST, profileName: "ghost" }, [])).toString("base64")),
     ).rejects.toMatchObject({ code: ErrorCodes.BUNDLE_INVALID });
     expect(profiles.list().filter((p) => p.name === "ghost")).toHaveLength(0);
   });

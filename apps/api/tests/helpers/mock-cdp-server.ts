@@ -89,6 +89,12 @@ export class MockCdpServer {
     return this.calls.filter((c) => c.method === method);
   }
 
+  /** Live WebSocket connections — the CDP-leak regression test asserts this
+   *  returns to 0 after a tiling pass (audit GPT-5.4 finding 2). */
+  get openConnectionCount(): number {
+    return this.sockets.size;
+  }
+
   private onUpgrade(req: http.IncomingMessage, socket: net.Socket): void {
     this.sockets.add(socket);
     socket.on("close", () => this.sockets.delete(socket));

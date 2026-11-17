@@ -78,7 +78,7 @@ export class BundleService {
         proxy = null; // dangling reference — export without it
       }
     }
-    const bundle = createSessionBundle(
+    const bundle = await createSessionBundle(
       passphrase,
       {
         profileName: profile.name,
@@ -123,7 +123,7 @@ export class BundleService {
   }> {
     let payload;
     try {
-      payload = openSessionBundle(passphrase, Buffer.from(bundleBase64, "base64"));
+      payload = await openSessionBundle(passphrase, Buffer.from(bundleBase64, "base64"));
     } catch (err) {
       if (err instanceof DomainError) throw err;
       throw new DomainError(ErrorCodes.BUNDLE_INVALID, "bundle is not valid base64/JSON");
@@ -227,7 +227,7 @@ export class BundleService {
     }
     let payload;
     try {
-      payload = openSessionBundle(passphrase, Buffer.from(bundleBase64, "base64"));
+      payload = await openSessionBundle(passphrase, Buffer.from(bundleBase64, "base64"));
     } catch (err) {
       if (err instanceof DomainError) throw err;
       throw new DomainError(ErrorCodes.BUNDLE_INVALID, "bundle is not valid base64/JSON");

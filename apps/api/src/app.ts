@@ -1,6 +1,8 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import type { AppConfig } from "./config/config.js";
+import { createApiLogger } from "./http/logger.js";
+import { registerScriptingOriginDeny } from "./http/scripting-origin-deny.js";
 import type { ProfileService } from "./application/profiles/profile.service.js";
 import type { ProxyService } from "./application/proxies/proxy.service.js";
 import type { BrowserLifecycleService } from "./application/lifecycle/browser.lifecycle.service.js";
@@ -66,7 +68,30 @@ export interface AppDeps {
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // Audit GPT-5.4 finding 3: structured logging was off (`logger: false`),
+  // so field failures left no trace. pino + reqIds + counters now; tests
+  // keep silent logs via NODE_ENV=test.
+  const apiLogger = createApiLogger({ silent: process.env.NODE_ENV === "test" });
+  const app = Fastify({
+    logger: apiLogger.fastifyOptions,
+    genReqId: () => apiLogger.nextReqId(),
+  });
+
+  app.addHook("onResponse", async (req, reply) => {
+    const c = apiLogger.counters;
+    c.requestsTotal++;
+    if (reply.statusCode >= 500) {
+      c.errorsTotal++;
+      c.status5xx++;
+      apiLogger.pino.warn({ reqId: req.id, url: req.url, status: reply.statusCode }, "request failed");
+    } else if (reply.statusCode >= 400) {
+      c.status4xx++;
+    } else {
+      c.status2xx++;
+    }
+  });
+
+  registerScriptingOriginDeny(app);
 
   if (deps.config.apiToken) {
     const token = deps.config.apiToken;
@@ -90,6 +115,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.get("/health", async () => ({ status: "ok", service: "queuepilot" }));
+  app.get("/metrics", async () => apiLogger.snapshot());
 
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp, deps.proxyProviders);
   registerProxyRoutes(app, deps.proxies);
@@ -116,11 +142,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       parsers: deps.parsers,
       aliases: deps.aliases,
       profiles: deps.profiles,
-      assertScriptingEnabled: scriptingGate(deps.settingsStore),
+      assertScriptingEnabled: scriptingGate(deps.settingsStore, {
+        hasApiToken: Boolean(deps.config.apiToken),
+      }),
     });
   }
   if (deps.jyl) {
-    registerJylRoutes(app, { jyl: deps.jyl, assertScriptingEnabled: scriptingGate(deps.settingsStore) });
+    registerJylRoutes(app, {
+      jyl: deps.jyl,
+      assertScriptingEnabled: scriptingGate(deps.settingsStore, {
+        hasApiToken: Boolean(deps.config.apiToken),
+      }),
+    });
   }
   if (deps.extensions) registerExtensionRoutes(app, { extensions: deps.extensions });
   if (deps.aliases && deps.plugins) {
@@ -134,7 +167,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
   if (deps.settingsStore) {
-    registerSettingsSectionRoutes(app, { store: deps.settingsStore });
+    registerSettingsSectionRoutes(app, {
+      store: deps.settingsStore,
+      hasApiToken: Boolean(deps.config.apiToken),
+    });
   }
 
   return app;

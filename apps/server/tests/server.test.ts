@@ -39,10 +39,14 @@ describe("team server", () => {
     await server.close();
   });
 
-  it("health needs no auth", async () => {
+  it("health needs no auth but leaks no metadata (audit 4b)", async () => {
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    // Unauthenticated probes get liveness ONLY — no server name, bundle
+    // counts, or role information for a port-scanner to harvest.
+    expect(body).toEqual({ ok: true });
   });
 
   it("rejects missing and wrong tokens everywhere else", async () => {

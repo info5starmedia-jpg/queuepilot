@@ -53,11 +53,22 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return store.authenticate(token);
   }
 
-  app.get("/health", async () => ({
-    ok: true,
-    name: "queuepilot-team-server",
-    bundles: store.listBundles().length,
-  }));
+  /**
+   * Liveness probe. Audit GPT-5.4 finding 4b: unauthenticated callers get
+   * ONLY `{ ok: true }` — server identity and bundle counts are metadata a
+   * port-scanner shouldn't harvest. Anything carrying a valid bearer token
+   * (admin, operator, or viewer) gets the full detail.
+   */
+  app.get("/health", async (req) => {
+    const auth = authenticate(req);
+    if (!auth) return { ok: true };
+    return {
+      ok: true,
+      name: "queuepilot-team-server",
+      bundles: store.listBundles().length,
+      role: auth.role,
+    };
+  });
 
   app.addHook("preHandler", async (req, reply) => {
     if (req.url === "/health" || req.url === "/health/") return;

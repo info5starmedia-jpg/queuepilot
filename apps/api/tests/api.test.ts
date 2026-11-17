@@ -10,6 +10,20 @@ describe("native API", () => {
     expect(res.json().status).toBe("ok");
   });
 
+  it("metrics snapshot counts requests and errors (audit finding 3)", async () => {
+    const { app } = makeTestContext();
+    await app.inject({ method: "GET", url: "/health" });
+    await app.inject({ method: "GET", url: "/definitely-missing" });
+    const res = await app.inject({ method: "GET", url: "/metrics" });
+    expect(res.statusCode).toBe(200);
+    const m = res.json();
+    // Two requests are counted before this one (the metrics request's own
+    // onResponse runs after the handler returns).
+    expect(m.requestsTotal).toBeGreaterThanOrEqual(2);
+    expect(m.status4xx).toBeGreaterThanOrEqual(1);
+    expect(m.logLevel).toBe("silent"); // NODE_ENV=test keeps vitest output clean
+  });
+
   it("creates, reads, updates and deletes a profile", async () => {
     const { app } = makeTestContext();
     const created = await app.inject({

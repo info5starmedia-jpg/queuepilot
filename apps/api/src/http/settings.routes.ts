@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import {
   SettingsBundleSchema,
   type SettingsBundleService,
@@ -11,6 +12,32 @@ export interface SettingsDeps {
 
 export interface SettingsSectionDeps {
   store: SettingsService;
+  /**
+   * Audit GPT-5.4 finding 1: the dashboard toggle may not turn scripting on
+   * while the API runs without SPECTRA_API_TOKEN — an RCE surface with no
+   * credential requirement is the flagged hole. Undefined = don't enforce
+   * (legacy call sites); buildApp always passes it.
+   */
+  hasApiToken?: boolean;
+}
+
+/**
+ * Returns a 403-ready DomainError if `body` would enable scripting on a
+ * token-less deployment. Called by the settings PATCH route.
+ */
+export function scriptingEnableGuard(
+  section: string,
+  body: unknown,
+  hasApiToken: boolean | undefined,
+): void {
+  if (hasApiToken !== false) return; // undefined or true: nothing to refuse
+  if (section !== "automation" || typeof body !== "object" || body === null) return;
+  if ((body as Record<string, unknown>).scriptingEndpoints === true) {
+    throw new DomainError(
+      ErrorCodes.FORBIDDEN,
+      "cannot enable scripting endpoints while SPECTRA_API_TOKEN is unset — set the env var and restart the API first",
+    );
+  }
 }
 
 /**
@@ -46,6 +73,7 @@ export function registerSettingsSectionRoutes(
 
   app.patch("/settings/sections/:section", async (req) => {
     const { section } = req.params as { section: string };
+    scriptingEnableGuard(section, req.body, deps.hasApiToken);
     return deps.store.patch(section, req.body);
   });
 }

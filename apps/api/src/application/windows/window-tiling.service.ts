@@ -90,7 +90,13 @@ export class WindowTilingService {
     private readonly profiles: ProfileService,
   ) {}
 
-  private async driverFor(profileId: string): Promise<WindowDriver> {
+  /**
+   * Open a short-lived window driver for a running profile. Audit GPT-5.4
+   * finding 2: the previous version handed the connection to the driver
+   * and never closed it — one leaked CDP connection per tiled window.
+   * Callers MUST close the handle in a finally block.
+   */
+  private async driverHandle(profileId: string): Promise<{ driver: WindowDriver; close: () => void }> {
     const run = this.lifecycle.activeRun(profileId);
     if (!run || run.status !== "running" || !run.wsEndpoint) {
       throw new DomainError(
@@ -99,23 +105,26 @@ export class WindowTilingService {
       );
     }
     const conn = await CdpConnection.connect(run.wsEndpoint, 10_000);
-    return cdpWindowDriver(conn);
+    return { driver: cdpWindowDriver(conn), close: () => conn.close() };
   }
 
   /** Apply bounds to the profile's window and remember them on the persona. */
   async setBounds(profileId: string, bounds: PersonaWindowBounds): Promise<TileResult> {
+    let handle: Awaited<ReturnType<typeof this.driverHandle>> | null = null;
     try {
-      const driver = await this.driverFor(profileId);
-      const windows = await driver.listWindows();
+      handle = await this.driverHandle(profileId);
+      const windows = await handle.driver.listWindows();
       const win = windows[0];
       if (!win) {
         throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, "no window found for profile");
       }
-      await driver.setBounds(win.windowId, bounds);
+      await handle.driver.setBounds(win.windowId, bounds);
       this.profiles.updatePersona(profileId, { windowBounds: bounds });
       return { id: profileId, status: "tiled", applied: bounds };
     } catch (err) {
       return { id: profileId, status: "failed", error: toErrorBody(err) };
+    } finally {
+      handle?.close();
     }
   }
 

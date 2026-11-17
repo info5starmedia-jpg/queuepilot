@@ -79,10 +79,12 @@ export class TeamServerClient {
     return res;
   }
 
-  async health(): Promise<{ ok: boolean; bundles: number }> {
+  /** Liveness probe without a token — `bundles` is present only for
+   *  authenticated callers (audit 4b: unauthenticated /health is {ok} only). */
+  async health(): Promise<{ ok: boolean; bundles?: number }> {
     const res = await fetch(this.url("/health"));
     if (!res.ok) throw new TeamServerError(res.status, "HTTP_ERROR", "health check failed");
-    return (await res.json()) as { ok: boolean; bundles: number };
+    return (await res.json()) as { ok: boolean; bundles?: number };
   }
 
   async listBundles(): Promise<TeamBundleHead[]> {

@@ -68,7 +68,10 @@ export class TeamSyncLoop {
 
   private saveState(state: SyncState): void {
     const tmp = `${this.stateFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    // Audit GPT-5.4 finding 4c: the watermark maps profile ids to server
+    // revisions — metadata about the team's fleet — so it is owner-read
+    // only (0o600), matching the oscrypt.key treatment.
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this.stateFile);
   }
 

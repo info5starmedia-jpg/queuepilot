@@ -143,6 +143,55 @@ describe("GoogleAuthService", () => {
       code: ErrorCodes.GOOGLE_NOT_CONNECTED,
     });
   });
+
+  it("pending flows live in the SecretStore, survive a restart, never a plaintext file (audit 4a)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
+    const secrets = new MapSecretStore();
+    const first = makeAuth(dir, { secrets });
+    const { state } = first.start("sheets", [SHEETS_SCOPE]);
+
+    // The PKCE verifier persists under the SecretStore key — DPAPI-bound on
+    // real machines — and the old plaintext file is never written.
+    expect(secrets.get("google.oauth.pending")).toContain(state);
+    expect(fs.existsSync(path.join(dir, "google", "oauth-pending.json"))).toBe(false);
+
+    // API restart = a new service instance over the same store. The flow
+    // completes without starting over.
+    const fetcher = (async () =>
+      mockResponse({
+        access_token: "access-r",
+        refresh_token: "refresh-r",
+        expires_in: 3600,
+      })) as unknown as typeof fetch;
+    const second = makeAuth(dir, { secrets, fetcher });
+    await second.complete(state, "restart-code");
+    expect(second.accounts()).toEqual(["sheets"]);
+    // A completed flow leaves no pending secret behind.
+    expect(secrets.get("google.oauth.pending")).toBeNull();
+  });
+
+  it("imports a legacy plaintext oauth-pending.json once and removes it (audit 4a)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qp-google-"));
+    const legacy = path.join(dir, "google", "oauth-pending.json");
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(
+      legacy,
+      JSON.stringify({
+        stale: {
+          account: "sheets",
+          scopes: [SHEETS_SCOPE],
+          verifier: "old-verifier",
+          expiresAt: Date.now() - 60_000, // expired — must not migrate
+        },
+      }),
+    );
+    const secrets = new MapSecretStore();
+    makeAuth(dir, { secrets });
+    // The legacy file is consumed and deleted; expired entries migrate to
+    // nothing (and nothing is persisted).
+    expect(fs.existsSync(legacy)).toBe(false);
+    expect(secrets.get("google.oauth.pending")).toBeNull();
+  });
 });
 
 describe("Google Sheets providers", () => {

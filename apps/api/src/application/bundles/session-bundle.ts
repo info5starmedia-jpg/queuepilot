@@ -1,5 +1,8 @@
-import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, pbkdf2, randomBytes } from "node:crypto";
+import { promisify } from "node:util";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
+
+const pbkdf2Async = promisify(pbkdf2);
 
 /**
  * Session bundle — the P5/roaming foundation (AliasMode "session bundle
@@ -71,16 +74,21 @@ export interface SessionBundlePayload {
   cookies: BundleCookie[];
 }
 
-function deriveKey(passphrase: string, salt: Buffer): Buffer {
-  return pbkdf2Sync(passphrase, salt, KDF_ITERATIONS, 32, "sha256");
+/**
+ * Derive the AES key off the event loop — audit GPT-5.4 finding 4d: the
+ * sync PBKDF2 (310k iterations ≈ 100 ms of blocked loop) stalled every
+ * other request/launch during an export or import.
+ */
+async function deriveKey(passphrase: string, salt: Buffer): Promise<Buffer> {
+  return pbkdf2Async(passphrase, salt, KDF_ITERATIONS, 32, "sha256");
 }
 
 /** Seal a payload into an encrypted bundle (bytes suitable for a .qpbundle file). */
-export function createSessionBundle(
+export async function createSessionBundle(
   passphrase: string,
   manifest: Omit<SessionBundleManifest, "format" | "version" | "cookieCount">,
   cookies: BundleCookie[],
-): Buffer {
+): Promise<Buffer> {
   const payload: SessionBundlePayload = {
     manifest: {
       ...manifest,
@@ -92,7 +100,7 @@ export function createSessionBundle(
   };
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -112,7 +120,7 @@ export function createSessionBundle(
  * wrong passphrase, tampered bytes, foreign format — with no way to tell
  * them apart, which is the property an encrypted container must have.
  */
-export function openSessionBundle(passphrase: string, bundle: Buffer): SessionBundlePayload {
+export async function openSessionBundle(passphrase: string, bundle: Buffer): Promise<SessionBundlePayload> {
   let envelope: BundleEnvelope;
   try {
     envelope = JSON.parse(bundle.toString("utf8")) as BundleEnvelope;
@@ -127,7 +135,7 @@ export function openSessionBundle(passphrase: string, bundle: Buffer): SessionBu
   }
   let payload: SessionBundlePayload;
   try {
-    const key = deriveKey(passphrase, Buffer.from(envelope.kdf.salt, "base64"));
+    const key = await deriveKey(passphrase, Buffer.from(envelope.kdf.salt, "base64"));
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64"));
     decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
     const plaintext = Buffer.concat([

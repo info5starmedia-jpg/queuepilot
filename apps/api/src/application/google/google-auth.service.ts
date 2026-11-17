@@ -14,8 +14,11 @@ import type { SecretStore } from "../secrets/secret-store.js";
  *   refresh token never leaves the machine in plaintext).
  * - Per-account scopes: sheets connects with spreadsheets.readonly, gmail
  *   with gmail.readonly; consent is per account+scope set.
- * - Pending authorizations persist to <dataDir>/google/oauth-pending.json so
- *   an API restart mid-flow doesn't lose the PKCE verifier.
+ * - Pending authorizations persist under `google.oauth.pending` in the
+ *   SecretStore (DPAPI machine-bound, audit GPT-5.4 finding 4a — they used
+ *   to sit in a plaintext oauth-pending.json next to the accounts list,
+ *   exposing the PKCE verifier at rest). An API restart mid-flow keeps the
+ *   verifier; a legacy plaintext file is imported once and removed.
  *
  * Client credentials come from env (SPECTRA_GOOGLE_CLIENT_ID /
  * SPECTRA_GOOGLE_CLIENT_SECRET). Endpoints and fetcher are injectable so
@@ -47,12 +50,16 @@ const DEFAULT_ENDPOINTS: GoogleEndpoints = {
   token: "https://oauth2.googleapis.com/token",
 };
 
-interface PendingAuth {
-  account: string;
-  scopes: string[];
-  verifier: string;
-  expiresAt: number;
-}
+const PendingAuthSchema = z.object({
+  account: z.string(),
+  scopes: z.array(z.string()),
+  verifier: z.string(),
+  expiresAt: z.number(),
+});
+type PendingAuth = z.infer<typeof PendingAuthSchema>;
+
+/** SecretStore key holding the in-flight OAuth flows (state → verifier). */
+const PENDING_KEY = "google.oauth.pending";
 
 export interface GoogleAuthDeps {
   secrets: SecretStore;
@@ -75,19 +82,54 @@ export class GoogleAuthService {
   constructor(private readonly deps: GoogleAuthDeps) {
     this.endpoints = deps.endpoints ?? DEFAULT_ENDPOINTS;
     this.fetcher = deps.fetcher ?? fetch;
+    // Legacy plaintext location — imported once on startup, then removed
+    // (audit GPT-5.4 finding 4a). New flows persist via persistPending().
     this.pendingFile = path.join(deps.dataDir, "google", "oauth-pending.json");
     this.accountsFile = path.join(deps.dataDir, "google", "accounts.json");
-    if (fs.existsSync(this.pendingFile)) {
-      try {
-        const raw = JSON.parse(
-          fs.readFileSync(this.pendingFile, "utf8"),
-        ) as Record<string, PendingAuth>;
-        for (const [state, p] of Object.entries(raw)) {
-          if (p.expiresAt > Date.now()) this.pending.set(state, p);
+    this.loadPendingFromSecrets();
+    this.importLegacyPendingFile();
+  }
+
+  /** In-flight flows from the SecretStore; expired entries are dropped. */
+  private loadPendingFromSecrets(): void {
+    const raw = this.deps.secrets.get(PENDING_KEY);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [state, value] of Object.entries(parsed)) {
+        const p = PendingAuthSchema.safeParse(value);
+        if (p.success && p.data.expiresAt > Date.now()) {
+          this.pending.set(state, p.data);
         }
-      } catch {
-        /* corrupt pending file: start fresh */
       }
+    } catch {
+      /* corrupt secret: start fresh */
+    }
+  }
+
+  /** One-time migration of the pre-SecretStore plaintext pending file. */
+  private importLegacyPendingFile(): void {
+    if (!fs.existsSync(this.pendingFile)) return;
+    try {
+      const raw = JSON.parse(
+        fs.readFileSync(this.pendingFile, "utf8"),
+      ) as Record<string, unknown>;
+      let migrated = false;
+      for (const [state, value] of Object.entries(raw)) {
+        const p = PendingAuthSchema.safeParse(value);
+        if (p.success && p.data.expiresAt > Date.now() && !this.pending.has(state)) {
+          this.pending.set(state, p.data);
+          migrated = true;
+        }
+      }
+      if (migrated) this.persistPending();
+    } catch {
+      /* corrupt legacy file: drop it */
+    }
+    try {
+      fs.rmSync(this.pendingFile);
+    } catch {
+      /* removal is best-effort */
     }
   }
 
@@ -291,10 +333,12 @@ export class GoogleAuthService {
   }
 
   private persistPending(): void {
-    fs.mkdirSync(path.dirname(this.pendingFile), { recursive: true });
-    fs.writeFileSync(
-      this.pendingFile,
-      JSON.stringify(Object.fromEntries(this.pending)),
-    );
+    // Empty map → delete the secret entirely: no stale blob holding a map
+    // shape with zero flows.
+    if (this.pending.size === 0) {
+      this.deps.secrets.delete(PENDING_KEY);
+      return;
+    }
+    this.deps.secrets.set(PENDING_KEY, JSON.stringify(Object.fromEntries(this.pending)));
   }
 }

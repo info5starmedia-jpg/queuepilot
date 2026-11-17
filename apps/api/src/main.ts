@@ -169,6 +169,16 @@ export async function main(): Promise<void> {
 
   const settingsService = new SettingsService(db);
 
+  // Audit GPT-5.4 finding 1: scripting endpoints demand a credential
+  // boundary. If the setting is already on but the deployment has no
+  // SPECTRA_API_TOKEN, every scripting request will 403 — say so at boot
+  // instead of letting the operator discover it from the dashboard.
+  if (settingsService.get("automation").scriptingEndpoints && !config.apiToken) {
+    console.error(
+      "[queuepilot] WARNING: automation.scriptingEndpoints is ON but SPECTRA_API_TOKEN is not set — scripting endpoints (JYL, plugins, resolvers, parsers, aliases) will refuse all requests until a token is set and the API restarts.",
+    );
+  }
+
   const lifecycle = new BrowserLifecycleService(
     profileRepo,
     identityRepo,
