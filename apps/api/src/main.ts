@@ -200,7 +200,7 @@ export async function main(): Promise<void> {
   const recovered = lifecycle.reconcileOnBoot();
   if (recovered.adopted || recovered.crashed) {
     console.log(
-      `[queuepilot] recovery: adopted=${recovered.adopted} crashed=${recovered.crashed}`,
+      `[queuepilot] recovery: adopted=${recovered.adopted} (unverified=${recovered.unverified}) crashed=${recovered.crashed}`,
     );
   }
 

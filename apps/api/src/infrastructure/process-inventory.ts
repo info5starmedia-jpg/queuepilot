@@ -19,20 +19,62 @@ import fs from "node:fs";
  * (a guessed refusal would "kill" healthy sessions).
  */
 
-export function isProcessAlive(pid: number, expectedToken?: string | null): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+/**
+ * What we can PROVE about the process behind a PID:
+ *  - "match":    alive, and its start time equals the stored token — ours.
+ *  - "mismatch": alive, but started at a different time — a stranger that
+ *                inherited the PID. Our engine is dead.
+ *  - "unknown":  alive, but identity is unprovable (no stored token, or the
+ *                OS refused the start-time read). Never grounds for a kill.
+ *  - "dead":     no such process.
+ */
+export type ProcessIdentity = "match" | "mismatch" | "unknown" | "dead";
+
+export function checkProcessIdentity(
+  pid: number | null | undefined,
+  expectedToken?: string | null,
+): ProcessIdentity {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return "dead";
   try {
     process.kill(pid, 0);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
     // EPERM means the process exists but is owned by another user.
-    return code === "EPERM";
+    if ((err as NodeJS.ErrnoException).code !== "EPERM") return "dead";
   }
-  if (!expectedToken) return true;
+  if (!expectedToken) return "unknown";
   const actual = captureProcessStartToken(pid);
-  // Soft failure to read: we cannot disprove identity — keep it alive.
-  if (actual === null) return true;
-  return actual === expectedToken;
+  if (actual === null) return "unknown";
+  return actual === expectedToken ? "match" : "mismatch";
+}
+
+/**
+ * Liveness with the soft-failure bias: "unknown" counts as alive, because we
+ * cannot disprove identity and a guessed death would kill healthy sessions.
+ * Callers that must distinguish proven from assumed use checkProcessIdentity.
+ */
+export function isProcessAlive(pid: number, expectedToken?: string | null): boolean {
+  const identity = checkProcessIdentity(pid, expectedToken);
+  return identity === "match" || identity === "unknown";
+}
+
+/** Clock/whole-second slack when comparing a start token to a run's start. */
+const START_TOKEN_TOLERANCE_MS = 2_000;
+
+/**
+ * The start token to store for a run launched at `runStartedAt`, or null.
+ * The run row is written BEFORE the engine spawns, so our engine cannot have
+ * started earlier than that. A token that predates it belongs to a stranger
+ * that inherited the PID between spawn and capture — storing it would make
+ * reconciliation "prove" the wrong process, so it is dropped (null = plain
+ * liveness, the honest fallback).
+ */
+export function startTokenForRun(pid: number, runStartedAt: string): string | null {
+  const token = captureProcessStartToken(pid);
+  if (token === null) return null;
+  const started = Date.parse(token);
+  const floor = Date.parse(runStartedAt) - START_TOKEN_TOLERANCE_MS;
+  if (!Number.isFinite(started) || started < floor) return null;
+  return token;
 }
 
 /**

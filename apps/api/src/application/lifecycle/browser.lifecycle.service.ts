@@ -16,7 +16,7 @@ import {
   type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
-import { isProcessAlive, captureProcessStartToken } from "../../infrastructure/process-inventory.js";
+import { checkProcessIdentity, startTokenForRun } from "../../infrastructure/process-inventory.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
@@ -83,6 +83,15 @@ export class BrowserLifecycleService {
   /** Per-run lease heartbeats (audit B1); cleared with the session. */
   private readonly leaseRenewers = new Map<string, ReturnType<typeof setInterval>>();
   readonly events = new EventEmitter();
+  /**
+   * D-002 recovery counters, surfaced by GET /metrics. "Unverified" = adopted
+   * on liveness alone (no start token, or the OS refused the read).
+   */
+  readonly recoveryCounters = {
+    runsAdopted: 0,
+    runsAdoptedUnverified: 0,
+    runsReconciledCrashed: 0,
+  };
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
   /**
@@ -315,7 +324,8 @@ export class BrowserLifecycleService {
         // D-002: the anti-PID-reuse token rides the run row from here on.
         // Null (capture failed) is fine — reconciliation then falls back to
         // plain liveness, never to a guessed death.
-        processToken: captureProcessStartToken(session.pid),
+        // A token older than this run's own start is a stranger's — dropped.
+        processToken: startTokenForRun(session.pid, run.startedAt),
         debugPort: session.debugPort,
         wsEndpoint: session.wsEndpoint,
       };
@@ -661,35 +671,56 @@ export class BrowserLifecycleService {
    * is what makes restart after a crash safe instead of corrupting profile
    * state.
    */
-  reconcileOnBoot(): { adopted: number; crashed: number } {
+  reconcileOnBoot(): { adopted: number; crashed: number; unverified: number } {
     let adopted = 0;
     let crashed = 0;
+    let unverified = 0;
     for (const run of this.runs.listOccupying()) {
-      if (run.pid && isProcessAlive(run.pid, run.processToken)) {
+      const identity = checkProcessIdentity(run.pid, run.processToken);
+      if (identity === "match" || identity === "unknown") {
         if (run.status !== "running") {
           this.runs.update({ ...run, status: "running" });
         }
         adopted++;
+        if (identity === "unknown") {
+          // Adopted on liveness alone: the soft-failure bias keeps a healthy
+          // session alive, but nothing proved this PID is our engine. Say so
+          // — stop() will refuse to kill it by PID.
+          unverified++;
+          console.warn(
+            `[queuepilot] recovery: run ${run.id} (pid ${run.pid}) adopted WITHOUT identity proof — ` +
+              (run.processToken ? "start time unreadable" : "no start token on record"),
+          );
+        }
       } else {
-        this.runs.update({
-          ...run,
-          status: "crashed",
-          stoppedAt: now(),
-          lastError: "engine process not found (or its PID reused) at API startup",
-        });
-        const profile = this.profiles.get(run.profileId);
-        if (profile) this.markProfile(profile, "idle");
-        this.emit({
-          type: "run.crashed",
-          profileId: run.profileId,
-          runId: run.id,
-          at: now(),
-          detail: "reconciled at boot",
-        });
+        this.markCrashed(
+          run,
+          identity === "mismatch"
+            ? "engine PID was reused by another process (start token mismatch) at API startup"
+            : "engine process not found at API startup",
+          "reconciled at boot",
+        );
         crashed++;
       }
     }
-    return { adopted, crashed };
+    this.recoveryCounters.runsAdopted += adopted;
+    this.recoveryCounters.runsAdoptedUnverified += unverified;
+    this.recoveryCounters.runsReconciledCrashed += crashed;
+    return { adopted, crashed, unverified };
+  }
+
+  /** A run whose engine is gone without the API seeing its exit. */
+  private markCrashed(run: BrowserRun, lastError: string, detail: string): void {
+    this.runs.update({ ...run, status: "crashed", stoppedAt: now(), lastError });
+    const profile = this.profiles.get(run.profileId);
+    if (profile) this.markProfile(profile, "idle");
+    this.emit({
+      type: "run.crashed",
+      profileId: run.profileId,
+      runId: run.id,
+      at: now(),
+      detail,
+    });
   }
 
   private onEngineExit(
