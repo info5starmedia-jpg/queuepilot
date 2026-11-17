@@ -1704,7 +1704,11 @@ foundation the agent and family rollout sit on.
 - Rough team size (affects token/account design, not architecture).
 - Confirm L1 may LAUNCH profiles (stated above as yes).
 
-## P9 — Local AI agent (scoped 2026-11-17, NOT started — queued behind hosted deployment)
+## P9 — Local AI agent (owner-directed build 2026-11-17, IN PROGRESS via Claude)
+
+Reprioritized by the owner 2026-17 evening: built NOW, in parallel with the
+hosted deployment track (server answers still pending). Brief:
+claude-p9-agent-brief.md. Original scope below stands:
 
 Trigger: AliasMode materially advanced their hosted agent (beta.75,
 scan 2026-11-17). Owner decisions recorded:
