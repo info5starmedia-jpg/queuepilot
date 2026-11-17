@@ -79,16 +79,21 @@
         <section class="view" id="view-proxies" hidden>
           <div class="view-hint">Proxies are assigned to profiles and injected at launch. Import them here (paste a list or choose a .txt file), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
           <div class="toolbar">
+            <div id="proxy-tabs" class="filter-chips"></div>
+          </div>
+          <div class="toolbar">
             <button id="proxy-add-open" class="primary">⇪ Import proxies</button>
             <div class="spacer"></div>
             <span id="proxies-selected" class="hint" style="color:var(--faint)"></span>
+            <select id="proxies-move-group" title="group to move the selected proxies into"></select>
+            <button id="proxies-move" title="move every selected proxy into the chosen group">Move to group</button>
             <button id="proxies-test-selected" title="test every selected proxy">Test selected</button>
             <button id="proxies-delete-selected" class="danger" title="delete every selected proxy">Delete selected</button>
           </div>
           <div class="table-wrap">
             <table class="grid" id="proxies">
               <thead>
-                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th></tr>
+                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Group</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th></tr>
               </thead>
               <tbody></tbody>
             </table>
@@ -269,6 +274,10 @@
         <div class="drawer-head"><h3>Import Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
         <label>Type
           <select id="proxy-add-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
+        </label>
+        <label>Group
+          <input id="proxy-add-group" maxlength="120" placeholder="default — pick or type a new one" list="proxy-group-names" />
+          <datalist id="proxy-group-names"></datalist>
         </label>
         <label>Paste one proxy per line
           <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;host:port:username:password:America/New_York&#10;host:port"></textarea>

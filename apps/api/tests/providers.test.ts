@@ -292,6 +292,18 @@ describe("ProxyProviderService", () => {
       code: ErrorCodes.CONFLICT,
     });
   });
+
+  it("refresh keeps the group the owner filed each proxy under (B2)", async () => {
+    const { proxyProviders, proxies } = makeTestContext();
+    const file = writeTmp("proxies.txt", FILE);
+    const { provider } = await proxyProviders.create({ name: "Pool", sourcePath: file });
+    const us1 = proxies.list().find((p) => p.name === "us-1")!;
+    proxies.moveToGroup([us1.id], "chicago");
+    await proxyProviders.refresh(provider.id);
+    const after = proxies.list();
+    expect(after.find((p) => p.name === "us-1")!.group).toBe("chicago");
+    expect(after.find((p) => p.name === "us-2")!.group).toBe("default");
+  });
 });
 
 describe("provider HTTP routes", () => {

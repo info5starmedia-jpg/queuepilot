@@ -246,6 +246,38 @@ export async function runConsoleSmoke({ base, ok }) {
       return true;
     })()`);
     await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    // Proxy groups: move the selection into a new group via the toolbar.
+    await page.evaluate(`(() => {
+      window.prompt = () => "smoke-grp";
+      document.querySelector('#proxies-move-group').value = "__new__";
+      document.querySelector('#proxies-move').click();
+      return true;
+    })()`);
+    const grouped2 = await waitFor(async () => {
+      const list = (await api("GET", "/proxies?group=smoke-grp")).json?.proxies ?? [];
+      return list.length === 2;
+    });
+    const tabActive = await waitFor(() => page.evaluate(`document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "smoke-grp"`));
+    ok("Move to group files the selection under a new proxy group", Boolean(grouped2 && tabActive));
+    // Switching tabs keeps only selected rows the new tab still shows (All shows both).
+    await page.evaluate(`(() => {
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    await page.evaluate(`(() => { const t = document.querySelector('#proxy-tabs [data-proxy-group="all"]'); t.click(); return true; })()`);
+    const kept = await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected" && document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "all"`));
+    ok("switching to All keeps rows that are still visible selected", Boolean(kept));
+    await page.evaluate(`(() => {
+      window.prompt = () => null;
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
     await page.evaluate(`document.querySelector('#proxies-delete-selected').click(); true`);
     const emptied = await waitFor(async () => ((await api("GET", "/proxies")).json?.proxies ?? []).length === 0);
     ok("select-all + Delete selected removes every proxy", Boolean(emptied));

@@ -808,19 +808,79 @@ $("#create-modal").addEventListener("click", (e) => { if (e.target.id === "creat
 
 /* ============================= proxies ================================ */
 
+/* Proxy groups (B2): the profile-groups model. "all" shows every proxy. */
+let activeProxyGroup = "all";
+
+function renderProxyTabs(groups) {
+  if (activeProxyGroup !== "all" && !groups.some((g) => g.group === activeProxyGroup)) activeProxyGroup = "all";
+  const total = groups.reduce((n, g) => n + g.total, 0);
+  const bar = $("#proxy-tabs");
+  bar.innerHTML = "";
+  for (const t of [{ group: "all", label: "All", total }, ...groups.map((g) => ({ ...g, label: g.group }))]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip-tab" + (t.group === activeProxyGroup ? " active" : "");
+    b.dataset.proxyGroup = t.group;
+    b.innerHTML = `${esc(t.label)}<span class="count">${t.total}${t.inUse ? ` · <span class="run">${t.inUse} in use</span>` : ""}</span>`;
+    b.addEventListener("click", () => {
+      activeProxyGroup = t.group;
+      loadProxies();
+    });
+    if (t.group !== "all") {
+      const edit = document.createElement("span");
+      edit.className = "rename";
+      edit.title = "rename group";
+      edit.textContent = "✎";
+      edit.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const to = window.prompt(`Rename proxy group "${t.label}" to:`, t.label);
+        if (!to || to.trim() === "" || to.trim() === t.label) return;
+        try {
+          await api("/proxy-groups/rename", { method: "POST", body: JSON.stringify({ from: t.label, to: to.trim() }) });
+          if (activeProxyGroup === t.label) activeProxyGroup = to.trim();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+        await loadProxies();
+      });
+      b.appendChild(edit);
+    }
+    bar.appendChild(b);
+  }
+  const names = groups.map((g) => g.group);
+  $("#proxy-group-names").innerHTML = names.map((g) => `<option value="${esc(g)}"></option>`).join("");
+  const sel = $("#proxies-move-group");
+  const keep = sel.value;
+  sel.innerHTML = names.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("") + `<option value="__new__">+ new group…</option>`;
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+/** Proxies shown under the active group tab (select-all acts on these). */
+function visibleProxyIds() {
+  return [...proxyById.values()].filter((p) => activeProxyGroup === "all" || p.group === activeProxyGroup).map((p) => p.id);
+}
+
 async function loadProxies() {
-  const { proxies } = await api("/proxies");
+  const [{ proxies }, { groups }] = await Promise.all([api("/proxies"), api("/proxy-groups").catch(() => ({ groups: [] }))]);
   proxyById = new Map(proxies.map((p) => [p.id, p]));
-  for (const id of [...proxySelection]) if (!proxyById.has(id)) proxySelection.delete(id);
+  renderProxyTabs(groups);
+  const visible = new Set(visibleProxyIds());
+  for (const id of [...proxySelection]) if (!visible.has(id)) proxySelection.delete(id);
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
-  $("#proxies-empty").hidden = proxies.length !== 0;
+  const empty = $("#proxies-empty");
+  empty.hidden = visible.size !== 0;
+  empty.innerHTML = proxies.length === 0
+    ? `<div class="big">⇄</div>No proxies configured — profiles will use your real IP. Click <b>⇪ Import proxies</b>.`
+    : `<div class="big">⇄</div>No proxies in group <b>${esc(activeProxyGroup)}</b>.`;
   for (const p of proxies) {
+    if (!visible.has(p.id)) continue;
     const tr = document.createElement("tr");
     if (proxySelection.has(p.id)) tr.classList.add("selected");
     tr.innerHTML = `
       <td><input type="checkbox" data-proxy="${esc(p.id)}" ${proxySelection.has(p.id) ? "checked" : ""} /></td>
       <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
       <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
@@ -857,7 +917,8 @@ function updateProxySelection() {
   $("#proxies-selected").textContent = n ? `${n} selected` : "";
   $("#proxies-delete-selected").disabled = n === 0;
   $("#proxies-test-selected").disabled = n === 0;
-  const all = [...proxyById.keys()];
+  $("#proxies-move").disabled = n === 0;
+  const all = visibleProxyIds();
   const box = $("#proxies-select-all");
   box.checked = all.length > 0 && all.every((id) => proxySelection.has(id));
   box.indeterminate = n > 0 && !box.checked;
@@ -878,8 +939,28 @@ async function testProxyRow(p, tr) {
   }
 }
 
+$("#proxies-move").addEventListener("click", async () => {
+  const ids = [...proxySelection];
+  if (ids.length === 0) return;
+  let group = $("#proxies-move-group").value;
+  if (group === "__new__" || !group) {
+    const name = window.prompt(`New group name for ${ids.length} selected prox${ids.length === 1 ? "y" : "ies"}:`, "");
+    if (!name || name.trim() === "") return;
+    group = name.trim();
+  }
+  try {
+    const r = await api("/proxies/batch-move", { method: "POST", body: JSON.stringify({ ids, group }) });
+    toast(`moved ${r.moved} prox${r.moved === 1 ? "y" : "ies"} to "${group}"`);
+    proxySelection.clear();
+    activeProxyGroup = group;
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadProxies();
+});
+
 $("#proxies-select-all").addEventListener("change", (e) => {
-  for (const id of proxyById.keys()) {
+  for (const id of visibleProxyIds()) {
     if (e.target.checked) proxySelection.add(id);
     else proxySelection.delete(id);
   }
@@ -914,6 +995,7 @@ $("#proxy-add-open").addEventListener("click", () => {
   $("#proxy-add-result").innerHTML = "";
   $("#proxy-add-status").textContent = "";
   $("#proxy-add-file").value = "";
+  $("#proxy-add-group").value = activeProxyGroup === "all" ? "" : activeProxyGroup;
   $("#proxy-add-modal").hidden = false;
   $("#proxy-add-lines").focus();
 });
@@ -930,7 +1012,11 @@ $("#proxy-add-go").addEventListener("click", async () => {
   const btn = $("#proxy-add-go");
   btn.disabled = true;
   try {
-    const r = await api("/proxies/import", { method: "POST", body: JSON.stringify({ text, type: $("#proxy-add-type").value }) });
+    const group = $("#proxy-add-group").value.trim();
+    const r = await api("/proxies/import", {
+      method: "POST",
+      body: JSON.stringify({ text, type: $("#proxy-add-type").value, ...(group ? { group } : {}) }),
+    });
     $("#proxy-add-status").textContent = `${r.added} added · ${r.skipped} skipped (already listed) · ${r.errors.length} error${r.errors.length === 1 ? "" : "s"}`;
     $("#proxy-add-result").innerHTML = r.errors.length
       ? `<table class="import-table"><tbody>${r.errors.map((e) => `<tr class="import-err"><td>line ${e.line}</td><td>${esc(e.reason)}</td></tr>`).join("")}</tbody></table>`

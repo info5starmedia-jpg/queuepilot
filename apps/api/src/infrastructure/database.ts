@@ -243,6 +243,14 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Proxy groups (B2), same shape as profile groups: every existing proxy
+    // lands in "default".
+    id: "011-proxy-groups",
+    up: `
+      ALTER TABLE proxies ADD COLUMN grp TEXT NOT NULL DEFAULT 'default';
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

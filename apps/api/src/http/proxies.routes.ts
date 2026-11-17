@@ -1,9 +1,28 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { CreateProxyInputSchema, ImportProxiesInputSchema, UpdateProxyInputSchema } from "@queuepilot/contracts";
 import type { ProxyService } from "../application/proxies/proxy.service.js";
 
+const GroupName = z.string().trim().min(1).max(120);
+const RenameGroupSchema = z.object({ from: GroupName, to: GroupName });
+const BatchMoveSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(1000), group: GroupName });
+
 export function registerProxyRoutes(app: FastifyInstance, service: ProxyService): void {
-  app.get("/proxies", async () => ({ proxies: service.list() }));
+  app.get("/proxies", async (req) => {
+    const { group } = req.query as { group?: string };
+    return { proxies: service.list(group || undefined) };
+  });
+
+  // Proxy groups (B2) — same model as /profile-groups.
+  app.get("/proxy-groups", async () => ({ groups: service.groups() }));
+  app.post("/proxy-groups/rename", async (req) => {
+    const body = RenameGroupSchema.parse(req.body ?? {});
+    return service.renameGroup(body.from, body.to);
+  });
+  app.post("/proxies/batch-move", async (req) => {
+    const body = BatchMoveSchema.parse(req.body ?? {});
+    return service.moveToGroup(body.ids, body.group);
+  });
 
   app.post("/proxies", async (req, reply) => {
     const input = CreateProxyInputSchema.parse(req.body);
@@ -15,10 +34,10 @@ export function registerProxyRoutes(app: FastifyInstance, service: ProxyService)
   app.post("/proxies/import", async (req) => {
     const body =
       typeof req.body === "string"
-        ? { text: req.body, type: (req.query as { type?: string }).type }
+        ? { text: req.body, ...(req.query as { type?: string; group?: string }) }
         : req.body;
     const input = ImportProxiesInputSchema.parse(body);
-    return service.importText(input.text, input.type);
+    return service.importText(input.text, input.type, input.group);
   });
 
   app.get("/proxies/:id", async (req) => {

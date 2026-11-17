@@ -26,6 +26,8 @@ export const ProxySchema = z.object({
   timezone: z.string().nullable().default(null),
   /** Importing provider, if any. */
   providerId: z.string().uuid().nullable().default(null),
+  /** Folder the proxy is filed under (same model as profile groups). */
+  group: z.string().max(120).default("default"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -40,6 +42,7 @@ export const CreateProxyInputSchema = z.object({
   password: z.string().max(200).nullable().optional(),
   /** IANA zone the browser should use behind this proxy (beats the exit-IP lookup). */
   timezone: z.string().max(64).nullable().optional(),
+  group: z.string().trim().min(1).max(120).optional(),
 });
 export type CreateProxyInput = z.input<typeof CreateProxyInputSchema>;
 
@@ -52,6 +55,8 @@ export type CreateProxyInput = z.input<typeof CreateProxyInputSchema>;
 export const ImportProxiesInputSchema = z.object({
   text: z.string().max(1_000_000),
   type: ProxyTypeSchema.default("http"),
+  /** Group every imported proxy lands in (default "default"). */
+  group: z.string().trim().min(1).max(120).optional(),
 });
 export type ImportProxiesInput = z.input<typeof ImportProxiesInputSchema>;
 
@@ -63,6 +68,7 @@ export const UpdateProxyInputSchema = z
     port: z.number().int().min(1).max(65535).optional(),
     username: z.string().max(200).nullable().optional(),
     password: z.string().max(200).nullable().optional(),
+    group: z.string().trim().min(1).max(120).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: "at least one field is required",
