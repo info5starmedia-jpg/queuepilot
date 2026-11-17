@@ -24,6 +24,7 @@ import {
   waitForProcessExit,
 } from "../../infrastructure/process-inventory.js";
 import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
+import { holdRelayPort, type RelayPortHold } from "../runtime/proxy-relay.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
@@ -98,7 +99,16 @@ export class BrowserLifecycleService {
     runsAdopted: 0,
     runsAdoptedUnverified: 0,
     runsReconciledCrashed: 0,
+    /** Adopted proxied runs whose dead relay port we now hold (fails closed). */
+    relaysHeld: 0,
+    /** Adopted proxied runs whose relay port another process already owned. */
+    relaysUnguarded: 0,
   };
+  /**
+   * Adopted proxied runs → the placeholder holding their dead relay port, or
+   * null when the port was already taken by someone else. See holdRelayPort.
+   */
+  private readonly relayHolds = new Map<string, RelayPortHold | null>();
   /**
    * How long an adopted engine gets to exit after each stop request
    * (Browser.close, graceful kill, forced kill) before the next escalation.
@@ -404,6 +414,9 @@ export class BrowserLifecycleService {
         // Adopted after an API restart: there is no session handle, but Stop
         // must still mean "the browser is gone" (D-002 follow-up).
         const note = await this.stopAdoptedEngine(run);
+        // Keep holding the dead relay port while the engine may still run
+        // (a note means it may); release only once it is gone.
+        if (!note) this.releaseRelayHold(run.id);
         if (note) {
           final = { ...stopped, lastError: note };
           this.runs.update(final);
@@ -709,9 +722,32 @@ export class BrowserLifecycleService {
     proxyUrl: string | null;
     proxySource: "profile" | "temporary" | "profile-list" | "rotation" | "none";
     egress: LaunchIdentitySnapshot["egress"] | null;
+    /**
+     * Whether the measured egress still describes where traffic goes:
+     * "live" = this API launched the engine and its relay is serving;
+     * "lost-held" = adopted after an API restart, the relay died with the old
+     * API and its port is held closed (every page fails, nothing leaks);
+     * "lost-unguarded" = adopted, and the relay port is owned by another
+     * process — traffic may be going through a stranger. null = no proxy.
+     */
+    relay: "live" | "lost-held" | "lost-unguarded" | null;
+    /** Human-readable warning when `egress` no longer reflects reality. */
+    note: string | null;
   } | null {
     const run = this.runs.occupyingForProfile(profileId);
     const snapshot = run && this.snapshots ? this.snapshots.forRun(run.id) : null;
+    const proxied = Boolean(snapshot?.proxyUrl && snapshot.egress?.relayPort);
+    let relay: "live" | "lost-held" | "lost-unguarded" | null = null;
+    if (run && proxied) {
+      if (this.sessions.has(profileId)) relay = "live";
+      else relay = this.relayHolds.get(run.id) ? "lost-held" : "lost-unguarded";
+    }
+    const note =
+      relay === "lost-held"
+        ? "adopted after an API restart: the proxy relay died with the old API, so every request from this browser fails (nothing leaks). The egress below is the launch measurement. Stop and restart the profile to browse again."
+        : relay === "lost-unguarded"
+          ? "adopted after an API restart: the proxy relay port is owned by another process — this browser's traffic may NOT be going through its proxy. Stop this profile now."
+          : null;
     return {
       profileId,
       running: run !== null && run.status === "running",
@@ -719,6 +755,8 @@ export class BrowserLifecycleService {
       proxyUrl: redactProxyUrl(snapshot?.proxyUrl ?? null),
       proxySource: snapshot?.proxySource ?? "none",
       egress: snapshot?.egress ?? null,
+      relay,
+      note,
     };
   }
 
@@ -875,8 +913,49 @@ export class BrowserLifecycleService {
     return crashed;
   }
 
+  /**
+   * Hold the dead relay port of every adopted, proxied run (call after
+   * reconcileOnBoot, before the API serves). The adopted engine keeps its
+   * `--proxy-server` pointing at a port nobody serves any more; holding it
+   * keeps the engine failing closed and stops any other process — including
+   * a new relay in this API — from receiving that profile's traffic.
+   */
+  async guardAdoptedRelays(): Promise<{ held: number; unguarded: number }> {
+    let held = 0;
+    let unguarded = 0;
+    for (const run of this.runs.listOccupying()) {
+      if (run.status !== "running" || this.sessions.has(run.profileId)) continue;
+      if (this.relayHolds.has(run.id)) continue;
+      const snapshot = this.snapshots?.forRun(run.id) ?? null;
+      const port = snapshot?.proxyUrl ? (snapshot.egress?.relayPort ?? null) : null;
+      if (!port) continue;
+      const hold = await holdRelayPort(port);
+      this.relayHolds.set(run.id, hold);
+      if (hold) {
+        held++;
+      } else {
+        unguarded++;
+        console.warn(
+          `[queuepilot] recovery: run ${run.id} (profile ${run.profileId}) — its proxy relay port ` +
+            `${port} is owned by ANOTHER process; this engine's traffic may not go through its proxy. ` +
+            "Stop and restart this profile.",
+        );
+      }
+    }
+    this.recoveryCounters.relaysHeld += held;
+    this.recoveryCounters.relaysUnguarded += unguarded;
+    return { held, unguarded };
+  }
+
+  private releaseRelayHold(runId: string): void {
+    const hold = this.relayHolds.get(runId);
+    this.relayHolds.delete(runId);
+    void hold?.close();
+  }
+
   /** A run whose engine is gone without the API seeing its exit. */
   private markCrashed(run: BrowserRun, lastError: string, detail: string): void {
+    this.releaseRelayHold(run.id);
     this.runs.update({ ...run, status: "crashed", stoppedAt: now(), lastError });
     const profile = this.profiles.get(run.profileId);
     if (profile) this.markProfile(profile, "idle");

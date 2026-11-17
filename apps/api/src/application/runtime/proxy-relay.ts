@@ -357,6 +357,65 @@ export function parseConnectTarget(target: string): { host: string; port: number
   return { host: m[1], port };
 }
 
+/**
+ * A placeholder on a dead relay's port. After an API restart an adopted
+ * engine still sends ALL its traffic to `--proxy-server=127.0.0.1:<port>`,
+ * but the relay that listened there died with the old API process. The
+ * engine fails closed while the port is empty — yet whatever binds that port
+ * next receives the profile's traffic: any local process, or a NEW relay in
+ * this API whose OS-assigned port happens to collide, which would route one
+ * profile through another profile's proxy (an identity linkage).
+ *
+ * Holding the port ourselves closes that: every connection gets a 502 and is
+ * dropped, so the engine keeps failing closed and nothing else can take the
+ * port. Returns null when the port is already taken — the caller must treat
+ * that as "the engine's traffic may be going to a stranger".
+ */
+export interface RelayPortHold {
+  readonly port: number;
+  /** Connections refused since the hold started (the engine tried to browse). */
+  readonly refused: () => number;
+  close(): Promise<void>;
+}
+
+export async function holdRelayPort(port: number): Promise<RelayPortHold | null> {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  let refused = 0;
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((client) => {
+    refused++;
+    sockets.add(client);
+    client.once("close", () => sockets.delete(client));
+    client.on("error", () => client.destroy());
+    client.end(
+      "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n" +
+        "X-QueuePilot: relay lost after API restart - restart this profile\r\n\r\n",
+    );
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", resolve);
+    });
+  } catch {
+    return null;
+  }
+  let closed: Promise<void> | null = null;
+  return {
+    port,
+    refused: () => refused,
+    close: () => {
+      if (!closed) {
+        closed = new Promise((resolve) => {
+          server.close(() => resolve());
+          for (const socket of sockets) socket.destroy();
+        });
+      }
+      return closed;
+    },
+  };
+}
+
 export async function startProxyRelay(proxyUrl: string): Promise<ProxyRelay> {
   const up = parseUpstream(proxyUrl);
   const stats: ProxyRelayStats = {

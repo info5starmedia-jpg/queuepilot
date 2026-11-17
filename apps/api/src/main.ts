@@ -198,6 +198,14 @@ export async function main(): Promise<void> {
   // Reconcile runs left occupying by a previous (possibly crashed) process
   // BEFORE opening the port, so the API never reports a stale "running".
   const recovered = lifecycle.reconcileOnBoot();
+  // Adopted proxied engines still point at their old relay port; hold those
+  // ports before serving so no new relay (or any other process) can take one.
+  const relays = await lifecycle.guardAdoptedRelays();
+  if (relays.held || relays.unguarded) {
+    console.log(
+      `[queuepilot] recovery: proxy relays lost with the old API — held=${relays.held} unguarded=${relays.unguarded}`,
+    );
+  }
   if (recovered.adopted || recovered.crashed) {
     console.log(
       `[queuepilot] recovery: adopted=${recovered.adopted} (unverified=${recovered.unverified}) crashed=${recovered.crashed}`,
