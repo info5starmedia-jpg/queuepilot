@@ -1366,6 +1366,7 @@ snapshots under `<dataDir>/snapshots/` store the launch proxy URL with
 its password in plain text (`launch-identity.service.ts` writes
 `args.proxyUrl` verbatim), although proxy passwords have lived in DPAPI
 since v0.12.5. The API response redacts it; the file does not.
+**→ Fixed** in "Snapshot proxy passwords at rest" below (`6cc63f7`).
 
 Gates on the final branch: 647/647 API tests, 20/20 server, `tsc
 --noEmit` clean, `npm run build` clean; `node scripts/e2e-smoke.mjs` GREEN
@@ -1407,3 +1408,42 @@ closed-tab restore, Tab Studio, proxy-matched bulk-open, tab strings.
 Gates: 654/654 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
 build` clean.
 
+## Phase 2 — Snapshot proxy passwords at rest (DONE 2026-11-17, branch `snapshot-proxy-redact`)
+
+Built on `tab-ops-depth`. Closes the "Found, not fixed" note in Phase 2
+hardening above.
+
+- [x] **Snapshots never store the proxy password** (`6cc63f7`) —
+  `LaunchIdentityService.capture` writes `stripProxyPassword(proxyUrl)`:
+  scheme, username, host and port are kept (`http://alice@10.0.0.1:8080`),
+  the password is dropped. It works on the string, so credential-free URLs
+  are stored byte-identical; any other `@`-bearing shape becomes
+  `(unparseable proxy url)` rather than risk keeping a secret. The engine
+  still gets the full URL — only the snapshot copy is stripped.
+- [x] **Boot migration** — `stripStoredProxyPasswords()` runs in `main.ts`
+  before recovery and rewrites (via `writeFileAtomic`) only the snapshot
+  files that still carry a password. Idempotent; an unreadable file is
+  logged and skipped, never a reason to abort boot.
+- Readers checked by grep — none needs the password: `egressDiagnostics`
+  re-redacts for the API, `relayStateFor` / `guardAdoptedRelays` only test
+  that a proxy URL exists and read `egress.relayPort`, `computeIdentityDrift`
+  reads `proxyId` / `proxySource`, `gridState` / `attest` don't touch the URL,
+  and bundles never read snapshots.
+- Tests: stripper unit cases, migration (rewrites one, leaves the clean file
+  byte-identical, skips a corrupt file, second run rewrites nothing, relay
+  port survives), egress + drift from a stripped snapshot, and temp-proxy
+  asserts the engine still received the password while the file has none.
+
+**Live verification (2026-11-17, fury qp.4, scratch API on 50491 with its
+own data dir, local auth proxy on 50492; live API on 50325 untouched):**
+
+| Check | Result |
+| --- | --- |
+| Boot with a legacy snapshot holding `legacy:<password>` | log `proxy passwords stripped from 1 file(s), 0 unreadable`; file now `http://legacy@10.9.9.9:3128` |
+| Proxied launch through the password-protected proxy | running; proxy saw 10 authenticated requests, 0 denied |
+| New snapshot file | `"proxyUrl": "http://verify@127.0.0.1:50492"`; password string found in 0 snapshot files |
+| `GET /profiles/:id/egress` | `http://***@127.0.0.1:50492/`, exit IP measured, `relay: "live"` |
+| `GET /profiles/:id/drift` · stop | `stale: false` · stopped cleanly |
+
+Gates: 657/657 API tests, 20/20 server, `tsc --noEmit` clean, `npm run
+build` clean.
