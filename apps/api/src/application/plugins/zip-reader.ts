@@ -37,11 +37,19 @@ export function safeZipName(raw: string): string {
   if (raw.includes("\0")) throw new ZipRejected(`entry name contains NUL`);
   const name = raw.replace(/\\/g, "/");
   if (name.startsWith("/") || /^[a-zA-Z]:/.test(name)) throw new ZipRejected(`absolute path rejected: ${raw}`);
+  // Windows: ':' opens an NTFS alternate data stream ("index.mjs:x" writes a
+  // hidden stream on index.mjs), and these characters are invalid anyway.
+  if (/[:<>"|?*\x01-\x1f]/.test(name)) throw new ZipRejected(`character not allowed in a file name: ${raw}`);
   const parts = name.split("/");
   for (const [i, seg] of parts.entries()) {
     if (seg === "..") throw new ZipRejected(`path traversal rejected: ${raw}`);
     if (seg === "" && i !== parts.length - 1) throw new ZipRejected(`empty path segment rejected: ${raw}`);
     if (seg === ".") throw new ZipRejected(`"." segment rejected: ${raw}`);
+    if (seg === "") continue;
+    // Windows strips trailing dots/spaces ("index.mjs." IS index.mjs) and
+    // maps device names (CON, NUL, COM1, ...) to devices, not files.
+    if (/[. ]$/.test(seg)) throw new ZipRejected(`name ending in "." or space rejected: ${raw}`);
+    if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(seg)) throw new ZipRejected(`reserved device name rejected: ${raw}`);
   }
   return name;
 }

@@ -34,7 +34,8 @@ export function pluginIdFrom(raw: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
   if (!id) throw new PluginImportError("cannot derive a plugin id from the name");
-  return id;
+  // A folder named CON/NUL/COM1… is a device on Windows, not a folder.
+  return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(id) ? `plugin-${id}` : id;
 }
 
 export function installPluginFile(pluginsDir: string, filename: string, bytes: Buffer): InstalledPlugin {

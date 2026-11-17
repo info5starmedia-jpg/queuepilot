@@ -131,6 +131,19 @@ describe("installPluginFile", () => {
     expect(() => installPluginFile(dir, "dup.mjs", Buffer.from("export {}"))).toThrow(/already installed/);
   });
 
+  it("safeZipName refuses Windows-special names (streams, trailing dot/space, devices)", () => {
+    for (const bad of ["index.mjs:hidden", "lib/a.mjs.", "lib/a.mjs ", "dir./x.mjs", "NUL", "lib/con.mjs", "COM1.txt", "a?b.mjs"]) {
+      expect(() => safeZipName(bad), bad).toThrow();
+    }
+    // The same names inside a zip install nothing.
+    const dir = tmpDir();
+    const zip = makeZip([{ name: "package.json", data: '{"name":"ads"}' }, { name: "index.mjs", data: "x" }, { name: "index.mjs:evil", data: "x" }]);
+    expect(() => installPluginFile(dir, "ads.zip", zip)).toThrow(/not allowed/);
+    expect(fs.readdirSync(dir)).toEqual([]);
+    // A script named after a device gets a safe folder id.
+    expect(installPluginFile(dir, "NUL.mjs", Buffer.from("export {}")).id).toBe("plugin-nul");
+  });
+
   it("safeZipName accepts ordinary nested names", () => {
     expect(safeZipName("lib/a.mjs")).toBe("lib/a.mjs");
     expect(safeZipName("lib\\b.mjs")).toBe("lib/b.mjs");
