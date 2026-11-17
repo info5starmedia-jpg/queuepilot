@@ -1149,3 +1149,34 @@ Gates at ship time: 605/605 API tests, 20/20 server tests, `tsc --noEmit`
 clean, `npm run build` clean, E2E GREEN in both modes. Phase 2 next steps
 (D-002 follow-ups, warmup console UX, tab-ops depth, canvas cross-context
 engine item) are queued in the release-hardening plan.
+
+## v0.16.4 — Console ops redesign (2026-11-16, shipped in `2c6d021`)
+
+Owner rejected the stacked-section console ("does not look like the image
+we agreed to") — rebuilt to the agreed GhostBrowser-pro-grade reference,
+still vanilla zero-build (ADR-0005 unchanged):
+
+- ✅ **Sidebar views** — Profiles/Proxies/Tabs/Cookies/Providers/Events/
+  Settings with keyboard shortcuts (P/X/T/C/V/E/G, `/` = search) and a
+  live engine/google/SSE status block.
+- ✅ **Top action bar** — + New Profile, Import (CSV/xlsx drawer), Export
+  (client-side CSV of the visible list), Start/Stop/Delete on the
+  selection, and live PROFILES/RUNNING/IDLE/STOPPED/ERROR counts.
+- ✅ **Profiles as a professional table** — row numbers, status dots,
+  proxy endpoint, group chips, per-row tab counts (batch-state), icon row
+  actions (start/stop/edit/clone/regen/delete), client-side pagination
+  (20/50/100, persisted). Batch bar floats bottom-center; setup checklist
+  is a dismissible first-run banner.
+- ✅ **Cookies view** (new) — load jar from a running profile, Netscape/
+  JSON import + export, domain-scoped clear; wired to the v0.15.1 cookie
+  endpoints, redaction respected.
+- ✅ **Settings in the sidebar** — six-section sub-nav laid out as a neat
+  grid; Integrations gains a read-only Email resolvers card documenting
+  the `gmail`/`imap://` URL shapes (IMAP lives in the scripting resolver
+  layer — there is no writable IMAP settings endpoint to wire).
+
+Verified live in the browser (profiles + settings screenshots), one real
+boot bug found by the visual pass (topbar actions never rendered at boot —
+`setView` was only called on click) and fixed. Gates: dashboard-syntax
+guard green, 605/605 API tests, build clean.
+
