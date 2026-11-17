@@ -1832,9 +1832,116 @@ scan 2026-11-17). Owner decisions recorded:
   from a page measured while its window was being created or torn down by
   something outside the launch path. Watch item stays: if it recurs,
   capture `Browser.getWindowBounds` for that target plus the launch args.
+- [ ] **A1 — vitest "Worker exited unexpectedly": characterised, one cause
+  fixed, the rest QUARANTINED WITH TRACKING (no test skipped or deleted).**
+  Reproduction: 8 full API runs back to back (`scratchpad/a1-loop.sh`),
+  alternating `--pool=forks` (default) and `--pool=threads`, with
+  `NODE_OPTIONS=--report-on-fatalerror --report-uncaught-exception`. Result:
+  4 green (runs 2, 4, 7, 8); **0 hard worker exits, 0 Node fatal reports**;
+  4 load-induced failures, all timing:
+  - `tests/team-lease-guard.test.ts` "renews the lease on a timer…" — 2 of 4
+    forks runs, `expected 1 to be greater than or equal to 2`: a 20 ms
+    heartbeat asserted after a fixed 70 ms sleep. **Fixed** on this branch:
+    wait (≤ 3 s) for the second renewal instead of assuming it.
+  - `tests/process-identity.test.ts` — 1 of 4 forks runs: one test took
+    35.8 s, then `Error: [vitest-worker]: Timeout calling "onTaskUpdate"`
+    ×3 and the file's 7 tests never reported. Cause: the production token
+    capture is a *synchronous* `execFileSync(powershell …)` (10 s timeout;
+    the invocation style is pinned by the endpoint-AV history), so under 8
+    parallel workers + AV scanning each fresh powershell.exe the worker's
+    event loop is blocked long enough for vitest's own worker↔main RPC to
+    time out.
+  - `tests/adopted-relay.test.ts` "releases the port when the adopted run
+    is stopped" — 1 of 4 threads runs, `expected 1 to be +0`: under load the
+    same synchronous PowerShell read timed out → identity `unknown` → the
+    code correctly refuses to kill and keeps the relay hold (fail-safe by
+    design); the test expected `match`.
+  - Earlier this session (gate run, forks, no reports enabled): one hard
+    `Error: Worker exited unexpectedly` (tinypool `ChildProcess
+    .onUnexpectedExit`) while `tests/proxy-relay.test.ts` was running; its 9
+    tests never reported; an immediate rerun was 689/689.
+  - Later the same day (17:20–17:30, untouched `apps/server`): the forked
+    worker running `tests/leases.test.ts` died **every** time for ~10
+    minutes — whole-file runs 3/3 dead after the first test, while each of
+    its 10 tests run alone passed, the same file under `--pool=threads`
+    passed 10/10, and a plain-Node replay of its lifecycle (3× build /
+    listen / request / close) exited 0. No Node report, no Windows
+    Application Error / WER event for node.exe, no Defender detection;
+    Norton AntiVirus is active (its log is not in the event log). Then it
+    stopped with no code change: 3/3 whole-file runs and the full server
+    suite 20/20. The window began right after the C1 live check extracted
+    a fresh 283 MB `chrome.exe` into the scratch data dir — consistent
+    with AV activity ending forked node processes, not proven.
+  Frequency: the hard exit 1 in ~11 full runs today, plus that 10-minute
+  window; some load-timing
+  failure in 4 of 8 loop runs (the loop ran alongside other work — A2 live
+  visits — so it is a pessimistic load). Suspected cause of the hard exit:
+  the worker process is ended from outside — a Node crash would have left a
+  report with `--report-on-fatalerror` (none in 8 runs), no test kills a PID
+  it does not own (tests only `ChildProcess.kill()` their own handles,
+  which cannot hit a reused PID), and the PowerShell-heavy files are the
+  ones running when workers misbehave. Next step if it keeps biting: run
+  the PowerShell-backed files (`process-identity`, `adopted-*`,
+  `process-inventory`) in a separate non-parallel vitest project so the
+  synchronous spawns no longer compete with 7 other workers — a test-infra
+  change, deliberately not done blind. Gate practice meanwhile: a red gate
+  whose only failure is one of the four above is rerun once, and the
+  report says so (as done for B2).
+- [ ] **A2 — iphey "whale": characterised; known behaviour, no fix
+  shipped (no concrete cause in our code).** Scratch API 50477, fury qp.4,
+  two fresh direct throwaways, 5 visits each over 31 min, a fresh tab per
+  visit (`scratchpad/a2-iphey.mjs`, results `a2-results.jsonl`):
+  `iphey-only` (nothing but iphey) → Trustworthy, whale, Trustworthy,
+  whale, whale; `busy` (a speechSynthesis read + two plain pages between
+  visits) → Trustworthy, whale, whale, whale, whale. What moves between
+  visits of ONE profile: only `Stack Overflow Counter` (4 260 … 18 980),
+  `SVG Computed Style` (flips between exactly 124.4063 and 129.5313) and
+  the derived `Fingerprint` id. What never moved (all 10 visits): UA,
+  languages, timezone, Client Rects, canvas, audio, WebGL/GPU, resolution,
+  device memory, cores, plugins, mime types, timing resolution. Whale ↔
+  `MX Score` 90 (vs 100) one-to-one. Correlates: being a returning visitor
+  (first visit of every profile was Trustworthy; later visits mostly
+  whale). Does NOT correlate: the voice list (whale with and without a
+  voices read; list already proven identical to stock), other browsing
+  (the iphey-only profile whales too), the Secure DNS switch, profile age
+  beyond the first visit. The two moving values are JS-engine/layout
+  measurements (stack depth depends on JIT tier; the SVG text metric
+  depends on font/layout timing), not anything our patches randomise.
+  Stock Chrome baseline: could not be measured by automation — 4/4 visits
+  in a fresh stock Chrome 157 session produced no iphey verdict within
+  90 s even with background throttling off (iphey stalls under CDP-driven
+  stock Chrome); the single stock reading from 2026-11-17 was Trustworthy.
+  Open question for a manual check: open iphey twice in a normal stock
+  Chrome window and see whether the second visit is also "whale".
 - [ ] **A4 — Speech voices** — no action (owner instruction): reproducible
   only with the owner's profile id + page. See the 2026-11-17 diagnosis
   above (22 voices, identical to stock Chrome on this machine).
+- [x] **C1 — Engine updates, one click** (`c7eeb2f`, async extraction
+  `8ab0389`) — `GET /engine/update` (manifest check:
+  current/available/error + running job), `POST /engine/update` (background
+  install via the existing sha256-pinned atomic `EngineInstaller`; 403
+  without Settings → Engine → "Allow engine binary downloads", 409 while
+  one runs, 403 cross-site via origin-deny). Manifest: repo raw URL by
+  default, `SPECTRA_ENGINE_MANIFEST` override. Settings → Engine card with
+  check / Install / live status. 5 new tests. Live (scratch API 50477,
+  manifest = repo `engines.manifest.json`, the real 283 MB qp.4 tarball):
+  `GET` → `available 0.5.5-qp.4, consent:false`; `POST` →
+  `403 ENGINE_DOWNLOAD_REQUIRES_CONSENT`; cross-site `POST` → `403
+  FORBIDDEN`; ticked the consent box in the dashboard → "Install update"
+  appeared → clicked → job `installed` in 7.7 s, `install.json` sha256
+  `dda72d52…c867`, `Fury/chrome.exe` present, card "Up to date". Found
+  live: the installer's synchronous `tar -xf` froze the whole API during
+  extraction (the UI never saw "Installing…"); now async — re-run:
+  `/health` answered in ~11 ms each second while the job was `running`,
+  installed in ~4 s. Scratch engines dir removed afterwards.
+  App updates: plan only — `docs/family-release.md` (recommendation:
+  release zip; every step needs owner decisions on hosting/builds).
+- [ ] **C2 — Profiles that follow you** — proposal in
+  `docs/family-release.md` (sync folder: export bundle on stop, restore on
+  the other machine via the existing `/bundles/restore`). Not implemented:
+  unattended export needs the bundle passphrase stored per machine (a
+  security decision), bundles carry cookies only, and the conflict rule is
+  the owner's call.
 - **D1 — Upstream scan since 2026-11-14 (report only, nothing vendored).**
   *Fury* (`furyteamtop/fury-antidetect-browser`, our base 0.5.5): releases
   v0.5.6 (2026-11-15) and v0.5.7 (2026-11-16). Commits: `8854023` "Real
