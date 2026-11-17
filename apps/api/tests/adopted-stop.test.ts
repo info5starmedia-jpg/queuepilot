@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { BrowserRun } from "@queuepilot/contracts";
 import {
@@ -118,9 +118,33 @@ describe("stop() on an adopted run", () => {
       expect(stopped?.status).toBe("stopped");
       expect(stopped?.lastError).toBeNull();
       expect(alive(child.pid!)).toBe(false);
-      expect(cdp.openConnectionCount).toBe(0);
+      // The server side of the socket closes a tick after the client does.
+      await vi.waitFor(() => expect(cdp.openConnectionCount).toBe(0));
     } finally {
       clearInterval(honor);
+      await cdp.stop();
+    }
+  });
+
+  it("right token + endpoint that ignores Browser.close: identity re-proven, then killed by PID", async () => {
+    const ctx = makeTestContext();
+    const cdp = new MockCdpServer(); // answers Browser.close but nothing exits
+    const { wsUrl } = await cdp.start();
+    const child = spawnSleeper();
+    try {
+      const { profileId } = await adoptedRun(
+        ctx,
+        child.pid!,
+        captureProcessStartToken(child.pid!),
+        wsUrl,
+      );
+
+      const stopped = await ctx.lifecycle.stop(profileId);
+
+      expect(cdp.callsFor("Browser.close")).toHaveLength(1);
+      expect(stopped?.lastError).toBeNull();
+      expect(alive(child.pid!)).toBe(false);
+    } finally {
       await cdp.stop();
     }
   });

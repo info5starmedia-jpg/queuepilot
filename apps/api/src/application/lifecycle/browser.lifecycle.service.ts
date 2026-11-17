@@ -446,9 +446,15 @@ export class BrowserLifecycleService {
       return "engine PID was reused by another process; nothing was stopped";
     }
     const grace = this.adoptedStopGraceMs;
+    const unproven =
+      `engine (pid ${pid}) may still be running: its identity could not be proven ` +
+      `(${run.processToken ? "start time unreadable" : "no start token on record"}), ` +
+      "so it was not killed by PID — close the browser window manually";
+    let waited = false;
     if (run.wsEndpoint) {
       try {
         const conn = await CdpConnection.connect(run.wsEndpoint, 3_000);
+        waited = true;
         try {
           // The socket drops as the browser exits, so a rejected call is
           // expected — what counts is whether the process goes away.
@@ -461,18 +467,24 @@ export class BrowserLifecycleService {
         // No DevTools endpoint answering — fall through to the PID path.
       }
     }
-    if (identity !== "match") {
-      return (
-        `engine (pid ${pid}) may still be running: its identity could not be proven ` +
-        `(${run.processToken ? "start time unreadable" : "no start token on record"}), ` +
-        "so it was not killed by PID — close the browser window manually"
-      );
+    if (identity !== "match") return unproven;
+    // Identity is re-proven immediately before EVERY kill: any wait above is
+    // long enough for the engine to exit and its PID to be handed to someone
+    // else. Gone or reused → our engine is dead, nothing to do. Unreadable →
+    // no longer provable, so no kill.
+    const reprove = (): string | null | "kill" => {
+      const again = checkProcessIdentity(pid, run.processToken);
+      if (again === "dead" || again === "mismatch") return null;
+      return again === "match" ? "kill" : unproven;
+    };
+    if (waited) {
+      const verdict = reprove();
+      if (verdict !== "kill") return verdict;
     }
     await terminateProcess(pid, false);
     if (await waitForProcessExit(pid, grace)) return null;
-    // Re-prove identity before forcing: the grace window is long enough for
-    // the engine to exit and the PID to be handed to someone else.
-    if (checkProcessIdentity(pid, run.processToken) !== "match") return null;
+    const verdict = reprove();
+    if (verdict !== "kill") return verdict;
     await terminateProcess(pid, true);
     if (await waitForProcessExit(pid, grace)) return null;
     return `engine (pid ${pid}) did not exit after a forced stop`;
