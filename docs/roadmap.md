@@ -1254,3 +1254,50 @@ the same shape and is fixed by the mock-CDP-server change in `adb0b32`.
 
 Open after this item: Phase 2 continues with warmup console UX, tab-ops
 depth, and the canvas cross-context engine item.
+
+## Phase 2 item 2 — Warmup console UX (DONE 2026-11-17, branch `warmup-console`)
+
+The warmup recorder + player shipped API-only in v0.16.0 (`97dad9f`); the
+console had no way to reach it. Standing rule applies: a box is ticked only
+with code + tests + docs + live verification + the commit hash.
+
+- [x] **Warmups view in the ops console** (`300caca`) — sidebar entry
+  (shortcut `W`, between Cookies and Providers), recipes table (name, steps,
+  total dwell, created, Run / Delete with confirm), record controls for a
+  running profile with an in-progress countdown while the request is held
+  open, and a run modal (any profile, stop-after, elapsed timer, per-step
+  results). Dashboard only — no API change, no new CSS tokens. New
+  `dashboard-views` wiring guard: every view has its section, nav button and
+  a unique shortcut matching its `<kbd>` hint; every id app.js looks up
+  exists.
+- [x] **Body-less console requests fixed** (`04b6efd`) — found by this
+  item's live check. The console's `api()` helper sent
+  `content-type: application/json` on every request since v0.8.0
+  (`df45475`); Fastify answers a body-less request that claims JSON with a
+  500, so every body-less button failed: profile delete, profile stop, proxy
+  test, provider refresh, tab close, and the new recipe delete. The header
+  is now sent only with a body. New `dashboard-api-helper` test runs the real
+  `api()` source against the API — it fails on the old helper with the exact
+  live error and passes on the fix.
+
+**Live verification, 2026-11-17, live API on 50325 (current `main`), fury,
+throwaway profiles only.** The live API serves the dashboard from the
+working copy on `main`, so this branch's three dashboard files were served
+by a small static preview on port 50478 that forwarded every API call
+unchanged to 50325 (no database, no engine; stopped afterwards). No API
+restart was needed or done.
+
+| Check | Result |
+| --- | --- |
+| `W` opens Warmups; running-profile picker | only the running throwaway profile listed |
+| Record 25 s while two real pages were opened | button disabled with countdown; recipe saved: 2 steps (`example.com`, `example.org`), 36 s total dwell; list refreshed |
+| Run on a second, idle throwaway profile with stop-after | button disabled with elapsed timer; 2/2 steps ok with dwell shown; "profile was started by this run"; profile ran and was back to `idle` (run `stopped`, `lastError: null`) |
+| Recipe Delete (first build) | **failed** — HTTP 500 "Body cannot be empty…" → fix `04b6efd` |
+| After the fix: record 20 s, then Delete from the table | confirm shown; recipe gone; empty state back |
+| After the fix: profile Stop and Delete from the Profiles table | profile stopped (`idle` on the API), then deleted (404) |
+
+Clean-up: all three throwaway profiles and both test recipes deleted; the
+existing `detect-test` profiles were never touched.
+
+Gates on the final branch: 639/639 API tests (626 + 10 view wiring + 3 api
+helper), 20/20 server, `tsc --noEmit` clean, `npm run build` clean.
