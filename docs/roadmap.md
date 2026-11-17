@@ -1751,7 +1751,9 @@ scan 2026-11-17). Owner decisions recorded:
   handling). A proxy-provider refresh keeps each proxy's group (host+port).
   Dashboard: group chip tabs with counts + ✎ rename, Group column, "Move to
   group" for the selection (select-all = visible tab), Group field in the
-  Import dialog, empty-group message. 8 new tests; gates 689/689 API (one
+  Import dialog, empty-group message. 8 new tests (7 in
+  `proxy-groups.test.ts`, 1 provider-refresh test in `providers.test.ts`);
+  gates 689/689 API (one
   rerun after the A1 worker-exit flake hit `proxy-relay.test.ts`), 20/20
   server, tsc, build; e2e GREEN (32, incl. move-to-group and tab switch).
   Live (scratch API 50477, dummy TEST-NET proxies): API import into
