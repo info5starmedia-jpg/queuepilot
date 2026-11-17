@@ -1549,12 +1549,15 @@ Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
   not what stock Windows Chrome shows (it lists local Microsoft voices).
   Our engine build lacks the Windows SAPI speech component. Engine-level
   (component inclusion in the build manifest).
-- [ ] **No-proxy profiles default to UTC** — aliasmode flags "Browser runs
-  at UTC+0 but the IP is at UTC-5" for any profile without a proxy and no
-  pinned timezone. App-level fix: default the launch timezone to the
-  host's own (`Intl.DateTimeFormat().resolvedOptions().timeZone`) when no
-  proxy and no pin (proxy-timezone precedence chain already covers the
-  proxied case).
+- [x] **No-proxy profiles default to UTC** — FIXED 2026-11-17 (code in this
+  commit). aliasmode flagged "Browser runs at UTC+0 but the IP is at UTC-5"
+  for any profile without a proxy and no pinned timezone. The launch
+  timezone chain now reads: profile pin > proxy's timezone field > exit-IP
+  lookup > **host's own timezone when no proxy** (source `host`) > identity
+  default. A direct connection's IP is the machine's, so the machine's zone
+  is the only coherent answer; fallback to the identity default only when
+  the host zone is unreadable. Two new tests; gates 668/668 API, 20/20
+  server, tsc, build clean.
 - [ ] **One-off zero-outer-geometry window** — one scratch-instance launch
   reported `outerWidth/outerHeight = 0` (aliasmode reads that as headless)
   while a second launch on the same instance and two on the live instance

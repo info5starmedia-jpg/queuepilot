@@ -183,6 +183,14 @@ export class BrowserLifecycleService {
      * no lookup; the proxy's own timezone field and pins still apply.
      */
     private readonly proxyTimezoneLookup?: (proxy: LaunchProxyEndpoint) => Promise<string | null>,
+    /**
+     * The machine's own timezone, for direct (no-proxy) launches: a direct
+     * connection's IP is the machine's, so the coherent clock is the
+     * machine's — anything else (e.g. the identity's UTC default) is a
+     * contradiction checkers flag. Defaults to the real system zone;
+     * injectable so tests are machine-independent.
+     */
+    private readonly hostTimezone: () => string | null = systemHostTimezone,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -538,17 +546,27 @@ export class BrowserLifecycleService {
    * The timezone this launch should present, and why. A profile pin always
    * wins; then the proxy's own timezone field (the operator knows better than
    * any database); then the exit IP's timezone looked up through the proxy;
-   * otherwise the identity default. A failed lookup is never a launch
-   * failure — the clock may not match, but nothing leaks.
+   * with no proxy, the machine's own timezone (a direct connection's IP is
+   * the machine's — only the identity default would contradict it, as
+   * AliasMode's check flags "Browser UTC, IP America/Toronto"); otherwise
+   * the identity default. A failed lookup is never a launch failure — the
+   * clock may not match, but nothing leaks.
    */
   private async resolveLaunchTimezone(
     identity: FingerprintIdentityWithOverrides | null,
     proxy: LaunchProxyEndpoint | null,
     proxyTimezone: string | null,
-  ): Promise<{ timezone: string | null; source: "pinned" | "proxy" | "exit-ip" | "identity" }> {
+  ): Promise<{
+    timezone: string | null;
+    source: "pinned" | "proxy" | "exit-ip" | "host" | "identity";
+  }> {
     if (!identity) return { timezone: null, source: "identity" };
     if (identity.overrides?.timezone) return { timezone: identity.timezone, source: "pinned" };
-    if (!proxy) return { timezone: identity.timezone, source: "identity" };
+    if (!proxy) {
+      const host = this.hostTimezone();
+      if (host && isValidTimezone(host)) return { timezone: host, source: "host" };
+      return { timezone: identity.timezone, source: "identity" };
+    }
     if (proxyTimezone && isValidTimezone(proxyTimezone)) return { timezone: proxyTimezone, source: "proxy" };
     if (this.proxyTimezoneLookup) {
       const looked = await this.proxyTimezoneLookup(proxy).catch(() => null);
@@ -1262,6 +1280,21 @@ function isValidTimezone(tz: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The machine's own IANA timezone (what a direct — no-proxy — connection
+ * presents). Node ships full ICU, so this resolves everywhere we run; a
+ * stripped runtime returns null and the caller falls back to the identity
+ * default. Injectable on the lifecycle (like proxyTimezoneLookup) so tests
+ * are machine-independent.
+ */
+export function systemHostTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+  } catch {
+    return null;
   }
 }
 

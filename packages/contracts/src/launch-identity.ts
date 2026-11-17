@@ -54,10 +54,12 @@ export const LaunchIdentitySnapshotSchema = z.object({
   /**
    * Where this run's browser timezone came from: "pinned" (profile pin),
    * "proxy" (the proxy's own timezone field), "exit-ip" (looked up for the
-   * proxy's exit IP at launch), "identity" (the fingerprint default — no
-   * proxy, or the lookup failed). Absent on snapshots before this field.
+   * proxy's exit IP at launch), "host" (no proxy — the machine's own
+   * timezone, so a direct connection never contradicts its own IP),
+   * "identity" (the fingerprint default — only when nothing else answers).
+   * Absent on snapshots before this field.
    */
-  timezoneSource: z.enum(["pinned", "proxy", "exit-ip", "identity"]).optional(),
+  timezoneSource: z.enum(["pinned", "proxy", "exit-ip", "host", "identity"]).optional(),
   capturedAt: z.string().datetime(),
 });
 export type LaunchIdentitySnapshot = z.infer<

@@ -98,14 +98,30 @@ describe("browser timezone follows the proxy", () => {
     }
   });
 
-  it("no proxy: no lookup, identity timezone", async () => {
+  it("no proxy: the machine's own timezone, no lookup", async () => {
     const ctx = makeTestContext();
     const calls = withLookup(ctx, () => "America/New_York");
     const p = ctx.profiles.create({ name: "direct", generateFingerprint: true });
+    Reflect.set(ctx.lifecycle, "hostTimezone", () => "America/Toronto");
 
     await ctx.lifecycle.start(p.id);
 
     expect(calls).toHaveLength(0);
+    // The identity default (UTC) would contradict the direct connection's
+    // real IP — the host zone is the coherent answer.
+    expect(launchedTz(ctx)).toBe("America/Toronto");
+    expect(ctx.lifecycle.egressDiagnostics(p.id)!.timezoneSource).toBe("host");
+  });
+
+  it("no proxy but no usable host timezone: falls back to the identity default", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "direct-nozone", generateFingerprint: true });
+    Reflect.set(ctx.lifecycle, "hostTimezone", () => null);
+
+    await ctx.lifecycle.start(p.id);
+
+    const identityTz = (await ctx.app.inject({ method: "GET", url: `/profiles/${p.id}/identity` })).json().identity.timezone;
+    expect(launchedTz(ctx)).toBe(identityTz);
     expect(ctx.lifecycle.egressDiagnostics(p.id)!.timezoneSource).toBe("identity");
   });
 
