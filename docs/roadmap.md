@@ -1609,3 +1609,78 @@ Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
 Everything else in the battery passed: TLS/JA3 byte-identical to stock
 Chrome, H2 clean, WebRTC shows only the proxy IP, UA/CH/language coherent,
 automation clean, canvas/audio/fonts/screen agree.
+
+## Hosted team deployment (owner-directed 2026-11-17) — the "server" track
+
+Owner's direction: the main deployment is hosted on the owner's server.
+Clients (team members' PCs) download the app, sign in, and connect.
+Profiles/proxies live on the server; invited team members see and work
+with them under role-based permissions. Terminology: invitees are **team
+members**, not "family and friends". This track supersedes the local-first
+framing for deployments; it builds ON the existing P5 team server rather
+than replacing it. Priority: AHEAD of the AI agent (P9) — it is the
+foundation the agent and family rollout sit on.
+
+### Permission tiers (owner-specified, three levels + owner)
+
+- **L1 — read & use**: see profiles/proxies, LAUNCH and use them, change
+  nothing. (Launching mutates run state only, never profile data.)
+- **L2 — editor ("co-worker")**: edit names, notes, tags, fields,
+  fingerprints; may NOT delete profiles/proxies, may NOT add new ones.
+- **L3 — manager ("team lead")**: everything L2, plus add and delete
+  profiles/proxies, manage warmups/plugins.
+- **Owner**: invites/revokes team members, mints tokens, server admin.
+- Delta from today's roles: the team server ships viewer/operator/admin;
+  the L2 no-delete / L3 add-delete split needs a permissions matrix (one
+  decision to record in the server, enforced server-side — the client is
+  untrusted).
+
+### What already exists (P5, v0.16.0)
+
+- Self-hosted sync server: encrypted profile bundles end-to-end
+  (server stores opaque bytes, no decrypt path), SHA-256-hashed bearer
+  tokens, three roles, optimistic concurrency (409 on stale revision).
+- Multi-user launch leases with TTL/renew/takeover, force-release.
+- Client: pull+rebase+retry, background sync loop, lease guard on start.
+
+### New work, in order
+
+1. **Account + sign-in layer** — today there are no accounts, only
+   per-machine tokens. Need: owner-created team-member accounts on the
+   server (invite by email/username, owner mints credentials), sign-in
+   from the client, session tokens. All identity stays on the owner's
+   server — no third party, no phone-home. Owner decision: email+password
+   (server-side Argon2id, Fury's recovery-key design from 0.5.5 as
+   reference) vs invite-link-only.
+2. **Permissions matrix** — replace the three flat roles with the L1/L2/L3
+   + owner matrix above; enforce server-side on every mutating route
+   (profile create/update/delete, proxy create/update/delete, warmup/
+   plugin management, member management). Launch allowed at L1+.
+3. **Server as source of truth** — "store on cloud" per profile at creation
+   (the owner's ask): cloud profiles live server-side and sync to whatever
+   machine launches them (encrypted bundle hand-off, lease still guards
+   double-launch). Local-only profiles stay possible for solo use.
+4. **Update distribution on the server** — the server hosts app releases
+   and engine core dists; the client checks version at launch, downloads,
+   verifies checksum (the engine installer already checksum-pins), and
+   restarts. Owner publishes; team members are pure consumers. This is the
+   auto-update-on-reopen requirement.
+5. **Compiled, minified client** — ship the client runtime as a compiled
+   single executable (not readable source) to raise the cost of copying.
+   HONEST LIMIT, recorded so the expectation stays right: any code that
+   runs on someone else's machine can eventually be reverse-engineered.
+   What the server model genuinely protects: profiles, proxies, cookies,
+   credentials, plugins, and all data (they never live client-side beyond
+   an encrypted launch), plus the engine patch series stays ours in the
+   build tree. The Chromium engine itself is BSD-licensed open source by
+   design (that IS our legal foundation) — it was never the secret; the
+   workflow, data, and infrastructure are.
+6. **Rename** — all "family/friends" copy → "team member" (docs, start
+   script strings, README).
+
+### Open questions for the owner
+
+- Server OS + exposure: LAN-only or internet-reachable (TLS + domain
+  needed)? Always-on?
+- Rough team size (affects token/account design, not architecture).
+- Confirm L1 may LAUNCH profiles (stated above as yes).
