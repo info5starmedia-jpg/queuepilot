@@ -1050,10 +1050,24 @@ fixed in `347d885`; 598 API + 20 server tests green; tsc + build clean.
    token); team-sync watermark file written `0o600`; session-bundle
    PBKDF2 (310k iterations) moved off the event loop (`createSessionBundle`
    /`openSessionBundle` now async).
+5. ✅ **Stability batch** (`e90e073`) — SSE dead clients pruned on every
+   broadcast + 30s heartbeat (interval cleared on close); plugin
+   `store.json` read-modify-write serialized through a per-file write
+   chain (concurrent sets no longer drop keys); `withTimeout` timer
+   declared honestly; `parseCsv` keeps embedded newlines in quoted fields
+   and normalizes CRLF→LF; new `writeFileAtomic` (tmp + fsync + rename +
+   dir fsync) applied to launch snapshots, bookmark sets, team-sync
+   watermark, and oscrypt.key — power-loss durable; proxy latency read
+   once instead of twice.
+6. ✅ **Stale `docs/parity.md` corrected** (`e90e073`) — egress diagnostics,
+   extensions registry, TOTP, portable bundles, cookie Netscape/JSON +
+   trash/restore, and the warmup recorder were BUILT but marked missing.
+   The only genuinely-missing Jancy row left is **xlsx import**.
 
-Remaining audit items (owner picks next): stability batch (#5 — SSE dead-
-client pruning, plugin store race, `withTimeout` timer, CSV newlines,
-fsync, double latency calc) and stale `docs/parity.md` corrections (#6).
+The GPT-5.4 audit is now fully actioned (findings 1–6). Finding 7's
+"worth building later" Jancy-parity items — tab ops depth, warmup console
+UX, xlsx import — remain the only open parity gaps, all owner-priority
+calls.
 
 ## v0.14 — Persona fields / 2FA layer (first item)
 
