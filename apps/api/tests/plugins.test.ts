@@ -212,4 +212,27 @@ describe("PluginRegistry", () => {
     expect(scan.loaded).toBe(0);
     expect(scan.errors[0]!.error).toMatch(/already registered/);
   });
+
+  it("concurrent store.set calls from a plugin lose no keys (audit 5b)", async () => {
+    const pdir = writePlugin("racy", `
+      export const queuepilotProps = { registryVersion: 1, enabled: true };
+      export async function onEnabled(ctx) {
+        // Two overlapping read-modify-write sequences against store.json.
+        // Without the write chain, one of these keys silently disappears.
+        ctx.store.set("a", 1);
+        ctx.store.set("b", 2);
+        await new Promise((r) => setTimeout(r, 20));
+        ctx.store.set("c", 3);
+        ctx.store.set("d", 4);
+      }
+    `);
+    const { plugins } = makeReg();
+    await plugins.rescan();
+    // The sets enqueue as microtasks/macrotasks behind onEnabled; give the
+    // write chain a beat to drain, then read the file the way the next
+    // process boot would.
+    await new Promise((r) => setTimeout(r, 150));
+    const store = JSON.parse(fs.readFileSync(path.join(pdir, "store.json"), "utf8"));
+    expect(store).toEqual({ a: 1, b: 2, c: 3, d: 4 });
+  });
 });

@@ -147,16 +147,20 @@ export class ProxyService {
       probeUrl,
       timeoutMs,
     );
+    // Audit GPT-5.4 finding 5f: latency was Date.now()-based twice (once
+    // for the health record, once for the response) — read it once so the
+    // two can never disagree.
+    const latencyMs = r.ok ? Date.now() - started : null;
     this.health?.record({
       proxyId: id,
       checkedAt: new Date().toISOString(),
       ok: r.ok,
-      latencyMs: r.ok ? Date.now() - started : null,
+      latencyMs,
       exitIp: r.exitIp,
       geo: r.geo,
       error: r.error,
     });
-    return { ok: r.ok, latencyMs: r.ok ? Date.now() - started : null, error: r.error, exitIp: r.exitIp, geo: r.geo };
+    return { ok: r.ok, latencyMs, error: r.error, exitIp: r.exitIp, geo: r.geo };
   }
 
   /** Validation history, newest first (empty when no health repo is wired). */

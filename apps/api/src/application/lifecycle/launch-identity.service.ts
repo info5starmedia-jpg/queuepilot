@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
 import {
   LaunchIdentitySnapshotSchema,
   computeIdentityDrift,
@@ -54,10 +55,7 @@ export class LaunchIdentityService {
       capturedAt: new Date().toISOString(),
     };
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);
-    const file = this.fileFor(args.runId);
-    const tmp = `${file}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(validated, null, 2));
-    fs.renameSync(tmp, file);
+    writeFileAtomic(this.fileFor(args.runId), JSON.stringify(validated, null, 2));
     return validated;
   }
 

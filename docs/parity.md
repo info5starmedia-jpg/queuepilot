@@ -101,11 +101,12 @@ trust in the binary — acceptable short-term, tracked below to close.
 | Host-wide lifecycle admission slots (concurrency guard) | ✅ | ✅ `QUEUEPILOT_MAX_CONCURRENT_PROFILES`, atomic count+insert (BEGIN IMMEDIATE) at the storage layer; per-profile guard unchanged | ✅ v0.12.4 |
 | Window fit (window ≤ claimed screen) | ✅ `window-fit.ts` | ✅ ported (Apache-2.0 attribution) + CDP watcher + fitted launch size; pre-maximize restore is P2 polish | ✅ v0.12.3 |
 | Session bundle export/import (cookies via CDP, roaming) | ✅ | ✅ encrypted `.qpbundle` (PBKDF2 + AES-256-GCM, passphrase), CDP Network.getAllCookies/setCookies against the live engine; local-first — operator-carried, no server | ✅ v0.12.6 |
-| Egress diagnostics (per-profile exit IP/geo proof) | ✅ | 🟡 harness-level `egress-via-proxy` claim; no per-profile API yet | ❌ P2 |
-| Per-profile extensions registry | ✅ | ❌ | ❌ P2 |
-| TOTP 2FA per profile | ✅ | ❌ | ❌ P2 |
-| Portable profile bundles (cross-machine) | ✅ (needs os-crypt wiring) | ❌ | ❌ P2 |
-| xlsx import, trash/undo | ✅ | ❌ | ❌ P3 |
+| Egress diagnostics (per-profile exit IP/geo proof) | ✅ | ✅ `GET /profiles/:id/egress` — live exit IP/geo vs the expected proxy, running-state aware (v0.16 P7.3) | ✅ |
+| Per-profile extensions registry | ✅ | ✅ v0.16 P7.5 — registry + API routes, Fury 0.5.4 v2 semantics | ✅ |
+| TOTP 2FA per profile | ✅ | ✅ persona TOTP field + `TotpService` + `/profiles/:id/totp` routes (v0.16) | ✅ |
+| Portable profile bundles (cross-machine) | ✅ | ✅ v0.16 — oscrypt key travels with the profile (P7.1) + session bundles v2 (tabs/proxy ref/metadata) | ✅ |
+| Cookie import/export (Netscape/JSON), profile trash/restore | ✅ | ✅ cookie formats v0.15.1 (`/profiles/:id/cookies/import|export`); trash → restore → permanent-delete-from-trash-only (v0.16) | ✅ |
+| xlsx import | ✅ | ❌ | ❌ P3 |
 | socks5 upstream proxies | ✅ | ✅ relay speaks RFC 1928 + 1929; live `egress-via-socks5` PASS | ✅ P7.2 |
 
 ### P0 — the proxy leak (found in this audit 2026-11-10, FIXED v0.12.0)
@@ -146,7 +147,7 @@ Fix shape (AliasMode's proven pattern, re-implemented):
 | Resolver registry (2FA/captcha etc.) | 🟡 | static/env/webhook/imap/gmail + plugin-registered; captcha-provider APIs = plugin content |
 | Parser registry (per-site extractors) | ✅ | `ParserRegistry` user `.mjs`; `/parsers/:name/run` |
 | Plugin system | ✅ | `.mjs` plugins, namespaced resolvers, enable/disable, logs |
-| Warmup recorder | ❌ |
+| Warmup recorder | ✅ | v0.16.0 (`97dad9f`) — record a live profile's URL/dwell sequence, replay with jitter (`POST /warmups/:id/run`) |
 | Console UX depth (bulk ops, search, health badges) | 🟡 vanilla dashboard now; React migration per ADR-0005 |
 
 ---

@@ -16,6 +16,17 @@ describe("parseCsv", () => {
       ["c", "d", ""],
     ]);
   });
+
+  it("keeps embedded newlines inside quotes and normalizes CRLF to LF (audit 5d)", () => {
+    const rows = parseCsv('name,notes\r\nalice,"line1\r\nline2"\r\nbob,plain');
+    expect(rows).toEqual([
+      ["name", "notes"],
+      ["alice", "line1\nline2"],
+      ["bob", "plain"],
+    ]);
+    // No stray carriage returns survive inside the value.
+    expect(rows[1]![1]).not.toContain("\r");
+  });
 });
 
 describe("parseProxySpec", () => {

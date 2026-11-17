@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
+import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
 
 /**
  * Bookmark sets — Fury 0.5.3's "named link folders deployed at launch"
@@ -140,10 +141,7 @@ function loadKnownSetIds(machineStateDir: string): Set<string> {
 
 function saveKnownSetIds(machineStateDir: string, ids: Set<string>): void {
   fs.mkdirSync(machineStateDir, { recursive: true });
-  const file = path.join(machineStateDir, KNOWN_IDS_FILE);
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify([...ids], null, 2), "utf8");
-  fs.renameSync(tmp, file);
+  writeFileAtomic(path.join(machineStateDir, KNOWN_IDS_FILE), JSON.stringify([...ids], null, 2));
 }
 
 function folderNode(set: BookmarkSet): BookmarkNode {
@@ -221,7 +219,5 @@ export function applyBookmarkSets(
   // Chromium regenerates the checksum; a stale one is worse than none.
   delete doc.checksum;
 
-  const tmp = `${bookmarksPath}.qp-tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(doc, null, 2), "utf8");
-  fs.renameSync(tmp, bookmarksPath);
+  writeFileAtomic(bookmarksPath, JSON.stringify(doc, null, 2));
 }

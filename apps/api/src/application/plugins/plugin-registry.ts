@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
 import { ResolverRegistry } from "../resolvers/resolver-registry.js";
 import { ParserRegistry, type ParserDefinition } from "../parsers/parser-registry.js";
 
@@ -64,6 +65,14 @@ export interface PluginContext {
 }
 
 export class PluginRegistry {
+  /**
+   * Per-store-file write chains (audit GPT-5.4 finding 5b): `store.set` used
+   * to be read-modify-write with no lock, so two concurrent sets (two
+   * endpoint handlers, a command racing a macro) both read the old file and
+   * the second write silently dropped the first key. Serializing each
+   * file's writes through a promise chain makes every set see the previous.
+   */
+  private readonly storeChains = new Map<string, Promise<void>>();
   private readonly plugins = new Map<string, {
     info: PluginInfo;
     module: PluginModule | null;
@@ -140,9 +149,25 @@ export class PluginRegistry {
       store: {
         get: (key) => readStore()[key],
         set: (key, value) => {
-          const all = readStore();
-          all[key] = value;
-          fs.writeFileSync(storeFile, JSON.stringify(all, null, 2));
+          // Enqueue on the file's write chain so concurrent sets serialize
+          // (5b). Errors are captured into the chain's log instead of
+          // surfacing as unhandled rejections — plugin stores are
+          // best-effort persistence.
+          const prev = this.storeChains.get(storeFile) ?? Promise.resolve();
+          const next = prev.then(() => {
+            const all = readStore();
+            all[key] = value;
+            writeFileAtomic(storeFile, JSON.stringify(all, null, 2));
+          });
+          this.storeChains.set(
+            storeFile,
+            next.catch((err) => {
+              this.logs.push(
+                `[${id}] store write failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              if (this.logs.length > 500) this.logs.shift();
+            }),
+          );
         },
       },
       resolvers: {

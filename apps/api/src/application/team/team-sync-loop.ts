@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BundleService } from "../bundles/bundle.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
+import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
 import { TeamServerClient } from "./team-client.js";
 import { TeamSyncService } from "./team-sync.js";
 
@@ -67,12 +68,11 @@ export class TeamSyncLoop {
   }
 
   private saveState(state: SyncState): void {
-    const tmp = `${this.stateFile}.tmp`;
-    // Audit GPT-5.4 finding 4c: the watermark maps profile ids to server
+    // Audit GPT-5.4 findings 4c/5e: the watermark maps profile ids to server
     // revisions — metadata about the team's fleet — so it is owner-read
-    // only (0o600), matching the oscrypt.key treatment.
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, this.stateFile);
+    // only (0o600), and the write is atomic + fsync'd so a power loss can't
+    // leave a stale or half-written watermark behind.
+    writeFileAtomic(this.stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
   }
 
   /** One pass. Safe to call manually; never throws on remote errors. */

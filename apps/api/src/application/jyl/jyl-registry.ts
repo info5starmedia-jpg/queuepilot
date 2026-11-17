@@ -388,7 +388,11 @@ export class JylRegistry {
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
-  let t: NodeJS.Timeout;
+  // Audit GPT-5.4 finding 5c: `t` used to be declared without an initial
+  // value and force-unwrapped in finally. The race executor runs
+  // synchronously so it happened to be set, but the definite-assignment
+  // lie is exactly the kind of thing a future edit turns into a real bug.
+  let t: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       p,
@@ -397,7 +401,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promi
       }),
     ]);
   } finally {
-    clearTimeout(t!);
+    if (t !== undefined) clearTimeout(t);
   }
 }
 

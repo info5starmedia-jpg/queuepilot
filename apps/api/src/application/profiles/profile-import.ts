@@ -72,7 +72,9 @@ const COLUMNS = [
 const PlatformEnum = z.enum(["windows", "macos", "linux"]);
 const ProxyTypeEnum = z.enum(["http", "https", "socks5"]);
 
-/** Minimal RFC-4180 parser: quotes, escaped quotes, CRLF. No embedded newlines. */
+/** Minimal RFC-4180 parser: quotes, escaped quotes, CRLF. Quoted fields may
+ *  embed newlines; CRLF inside a quoted field is normalized to LF (audit
+ *  GPT-5.4 finding 5d). */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -98,6 +100,14 @@ export function parseCsv(text: string): string[][] {
           continue;
         }
         inQuotes = false;
+        i++;
+        continue;
+      }
+      // Inside quotes a newline is data, not a row boundary. Normalize
+      // CRLF (and lone CR) to LF so a value never carries "\r".
+      if (c === "\r") {
+        if (text[i + 1] === "\n") i++;
+        field += "\n";
         i++;
         continue;
       }

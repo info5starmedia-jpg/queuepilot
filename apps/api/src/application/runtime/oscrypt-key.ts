@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
 
 /**
  * Per-profile os-crypt key (Fury parity 0110) — the key that encrypts the
@@ -51,6 +52,6 @@ export function getOrCreateOscryptKey(profileDataDir: string): string {
   } catch {
     /* absent — create below */
   }
-  fs.writeFileSync(keyPath, crypto.randomBytes(KEY_SIZE), { mode: 0o600 });
+  writeFileAtomic(keyPath, crypto.randomBytes(KEY_SIZE), { mode: 0o600 });
   return keyPath;
 }

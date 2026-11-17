@@ -9,12 +9,35 @@ import type { BrowserLifecycleService } from "../application/lifecycle/browser.l
 export function registerEventRoutes(app: FastifyInstance, lifecycle: BrowserLifecycleService): void {
   const clients = new Set<FastifyReply>();
 
+  /**
+   * Audit GPT-5.4 finding 5a: dead clients used to linger forever — a
+   * closed dashboard tab stayed in the set and every lifecycle event
+   * wrote into a dead socket. A reply is pruned when its underlying
+   * response has ended or been destroyed.
+   */
+  const pruneDead = (): void => {
+    for (const reply of clients) {
+      if (reply.raw.destroyed || reply.raw.writableEnded) clients.delete(reply);
+    }
+  };
+
   lifecycle.events.on("lifecycle", (event: LifecycleEvent) => {
+    pruneDead();
     const line = `data: ${JSON.stringify(event)}\n\n`;
     for (const reply of clients) {
       reply.raw.write(line);
     }
   });
+
+  // Heartbeat every 30s: keeps intermediaries honest and doubles as the
+  // slow prune sweep for quiet installs (no events → no broadcast prune).
+  const heartbeat = setInterval(() => {
+    pruneDead();
+    for (const reply of clients) {
+      reply.raw.write(`: ping\n\n`);
+    }
+  }, 30_000);
+  app.addHook("onClose", async () => clearInterval(heartbeat));
 
   app.get("/events", (req, reply) => {
     reply.raw.writeHead(200, {
