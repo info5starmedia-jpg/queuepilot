@@ -1254,3 +1254,15 @@ the same shape and is fixed by the mock-CDP-server change in `adb0b32`.
 
 Open after this item: Phase 2 continues with warmup console UX, tab-ops
 depth, and the canvas cross-context engine item.
+
+## Phase 2 item 2 — Warmup console UX (branch `warmup-console`)
+
+The warmup recorder + player shipped API-only in v0.16.0 (`97dad9f`); the
+console had no way to reach it. Standing rule applies: the box is ticked
+only with code + tests + docs + live verification + the commit hash.
+
+- [ ] **Warmups view in the ops console** — sidebar entry (shortcut `W`,
+  between Cookies and Providers), recipes table (name, steps, total dwell,
+  Run / Delete), record controls for a running profile with an in-progress
+  state while the request is held open, and a run modal (profile picker,
+  stop-after, per-step results). Dashboard only — no API change.
