@@ -1509,3 +1509,58 @@ app once this branch is deployed.
 
 Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 
+## v0.16.5 — deviceMemory heap-cap coherence (2026-11-17, `134b8d9`)
+
+AliasMode's full check flagged the proxied LeakTest profile:
+"deviceMemory 4 · heap 4.09 GiB". V8 caps its JS heap near 4.09 GiB on any
+host with >= 8 GB RAM and page JS can read that limit, so a 4 GB claim is
+UNDER what the heap reveals — self-contradicting on every big-RAM machine,
+independent of how many browsers run (deviceMemory is a reported value, not
+an allocation; browser count is unaffected).
+
+- [x] **Never claim 4 GB on >= 8 GB hosts** (`134b8d9`) — the existing
+  host-memory clamp only ruled out claiming MORE than host RAM; extended
+  with the heap-cap rule: when host RAM is known and >= 8 GB, drop the 4 GB
+  bucket (8 is the smallest Chrome bucket above the cap; 8/16/32 are always
+  coherent). Sub-8 GB hosts keep claiming 4, where V8 derives a smaller
+  heap. Every new identity now automatically matches whatever machine it
+  is generated on — portable across the owner's machines, zero per-profile
+  work.
+- [x] **Tests** (`134b8d9`) — 8 generator tests, incl. 8/16/32 GB hosts
+  never drawing 4. Gates: 667/667 API, tsc, build clean.
+
+**Live verify (scratch API on 50326, fury qp.4, throwaway profile, real
+window):** aliasmode.com/check/ read `deviceMemory 8`, heap 4.09 GiB,
+hwConcurrency 8 — coherent; the memory finding did not appear. 22 checks,
+2 unrelated items below. Throwaway cleaned up.
+
+## Findings from the live leak battery (2026-11-17, recorded, not yet shipped)
+
+Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
+7 ISP proxies added to the live app):
+
+- [ ] **DNS leak through the HTTP proxy (the one "problem" on the proxied
+  run)** — page DNS resolved via Cloudflare US resolvers while the proxy
+  exits in CA. Almost certainly Chromium Secure DNS (DoH) bypassing the
+  proxy. Fix is engine-level (`C:\queuepilot-engine`): policy/patch to
+  disable Secure DNS or force DNS through the proxy. Highest impact —
+  affects every proxied profile.
+- [ ] **Speech voices: only online Google voices, no Microsoft voice** —
+  not what stock Windows Chrome shows (it lists local Microsoft voices).
+  Our engine build lacks the Windows SAPI speech component. Engine-level
+  (component inclusion in the build manifest).
+- [ ] **No-proxy profiles default to UTC** — aliasmode flags "Browser runs
+  at UTC+0 but the IP is at UTC-5" for any profile without a proxy and no
+  pinned timezone. App-level fix: default the launch timezone to the
+  host's own (`Intl.DateTimeFormat().resolvedOptions().timeZone`) when no
+  proxy and no pin (proxy-timezone precedence chain already covers the
+  proxied case).
+- [ ] **One-off zero-outer-geometry window** — one scratch-instance launch
+  reported `outerWidth/outerHeight = 0` (aliasmode reads that as headless)
+  while a second launch on the same instance and two on the live instance
+  were all correct. Not reproducible on retry; watch item — if it recurs,
+  capture the launch args + persona config of the affected profile.
+
+Everything else in the battery passed: TLS/JA3 byte-identical to stock
+Chrome, H2 clean, WebRTC shows only the proxy IP, UA/CH/language coherent,
+automation clean, canvas/audio/fonts/screen agree.
