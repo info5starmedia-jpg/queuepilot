@@ -16,7 +16,13 @@ import {
   type SessionPartition,
   type TempProxyInput,
 } from "@queuepilot/contracts";
-import { checkProcessIdentity, startTokenForRun } from "../../infrastructure/process-inventory.js";
+import {
+  checkProcessIdentity,
+  startTokenForRun,
+  terminateProcess,
+  waitForProcessExit,
+} from "../../infrastructure/process-inventory.js";
+import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
@@ -92,6 +98,11 @@ export class BrowserLifecycleService {
     runsAdoptedUnverified: 0,
     runsReconciledCrashed: 0,
   };
+  /**
+   * How long an adopted engine gets to exit after each stop request
+   * (Browser.close, graceful kill, forced kill) before the next escalation.
+   */
+  private adoptedStopGraceMs = 10_000;
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
   /**
@@ -378,20 +389,89 @@ export class BrowserLifecycleService {
       this.markProfile(profile, "idle");
       this.tabRegistry.clearRun(run.id); // tabs die with the run
       await this.leaseGuard?.release(profileId).catch(() => {}); // TTL reaps a lost release
-      try {
-        await session?.stop();
-      } catch {
-        // Engine may already be gone; the row is already reconciled above.
+      let final = stopped;
+      if (session) {
+        try {
+          await session.stop();
+        } catch {
+          // Engine may already be gone; the row is already reconciled above.
+        }
+      } else {
+        // Adopted after an API restart: there is no session handle, but Stop
+        // must still mean "the browser is gone" (D-002 follow-up).
+        const note = await this.stopAdoptedEngine(run);
+        if (note) {
+          final = { ...stopped, lastError: note };
+          this.runs.update(final);
+        }
       }
       this.emit({
         type: "run.stopped",
         profileId,
         runId: run.id,
         at: now(),
-        detail: "",
+        detail: final.lastError ?? "",
       });
-      return stopped;
+      return final;
     });
+  }
+
+  /**
+   * Stop the engine of a run that has no in-memory session (adopted after an
+   * API restart). The PID on the row is only a number by now, so identity
+   * decides how far we may go:
+   *
+   *  1. Ask the engine itself: CDP `Browser.close` on the stored endpoint —
+   *     a clean shutdown, and it cannot hit a non-browser stranger.
+   *  2. Kill by PID ONLY when the start token proves the process is ours
+   *     ("match"), graceful first, forced after the grace window.
+   *  3. Otherwise never kill. A tokenless or unreadable process that ignored
+   *     Browser.close is left alone and the row says so.
+   *
+   * Returns null when the engine is gone, or a note for `lastError` when it
+   * may still be running.
+   */
+  private async stopAdoptedEngine(run: BrowserRun): Promise<string | null> {
+    const pid = run.pid;
+    if (!pid) return null; // died mid-launch before a PID was recorded
+    const identity = checkProcessIdentity(pid, run.processToken);
+    if (identity === "dead") return null;
+    if (identity === "mismatch") {
+      // Our engine is long gone; this PID (and likely the debug port) is
+      // somebody else's now. Touch nothing.
+      return "engine PID was reused by another process; nothing was stopped";
+    }
+    const grace = this.adoptedStopGraceMs;
+    if (run.wsEndpoint) {
+      try {
+        const conn = await CdpConnection.connect(run.wsEndpoint, 3_000);
+        try {
+          // The socket drops as the browser exits, so a rejected call is
+          // expected — what counts is whether the process goes away.
+          await conn.call("Browser.close", {}, 3_000).catch(() => {});
+        } finally {
+          conn.close();
+        }
+        if (await waitForProcessExit(pid, grace)) return null;
+      } catch {
+        // No DevTools endpoint answering — fall through to the PID path.
+      }
+    }
+    if (identity !== "match") {
+      return (
+        `engine (pid ${pid}) may still be running: its identity could not be proven ` +
+        `(${run.processToken ? "start time unreadable" : "no start token on record"}), ` +
+        "so it was not killed by PID — close the browser window manually"
+      );
+    }
+    await terminateProcess(pid, false);
+    if (await waitForProcessExit(pid, grace)) return null;
+    // Re-prove identity before forcing: the grace window is long enough for
+    // the engine to exit and the PID to be handed to someone else.
+    if (checkProcessIdentity(pid, run.processToken) !== "match") return null;
+    await terminateProcess(pid, true);
+    if (await waitForProcessExit(pid, grace)) return null;
+    return `engine (pid ${pid}) did not exit after a forced stop`;
   }
 
   activeRun(profileId: string): BrowserRun | null {

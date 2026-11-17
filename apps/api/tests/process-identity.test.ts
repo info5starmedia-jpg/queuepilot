@@ -16,7 +16,7 @@ import { makeTestContext, type TestContext } from "./helpers.js";
 
 const children: ChildProcess[] = [];
 
-export function spawnSleeper(): ChildProcess {
+function spawnSleeper(): ChildProcess {
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {
     stdio: "ignore",
   });
@@ -33,7 +33,7 @@ afterEach(() => {
  * launch on the fake runtime, point the run row at a real process, and drop
  * the in-memory session (a fresh API process has none).
  */
-export async function adoptedRun(
+async function adoptedRun(
   ctx: TestContext,
   name: string,
   pid: number,

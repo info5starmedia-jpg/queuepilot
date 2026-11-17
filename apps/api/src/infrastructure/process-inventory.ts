@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 
 /**
@@ -142,4 +142,41 @@ function bootTimeTicks(): number | null {
     cachedBtime = null;
   }
   return cachedBtime;
+}
+
+/**
+ * Ask a process to exit. Windows: taskkill /T (without /F it posts WM_CLOSE,
+ * which Chromium treats as a clean shutdown; /F terminates). POSIX: SIGTERM,
+ * or SIGKILL when forced. Resolves when the request was made, not when the
+ * process is gone — pair with waitForProcessExit.
+ *
+ * NEVER call this on a PID whose identity is not a proven "match": after an
+ * API restart a PID is just a number, and it may belong to a stranger.
+ */
+export function terminateProcess(pid: number, force: boolean): Promise<void> {
+  if (process.platform !== "win32") {
+    try {
+      process.kill(pid, force ? "SIGKILL" : "SIGTERM");
+    } catch {
+      /* already gone */
+    }
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const args = ["/PID", String(pid), "/T"];
+    if (force) args.push("/F");
+    const p = spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
+    p.once("exit", () => resolve());
+    p.once("error", () => resolve());
+  });
+}
+
+/** Poll until `pid` is gone. True = exited within the window. */
+export async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (checkProcessIdentity(pid) === "dead") return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
