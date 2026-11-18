@@ -10,6 +10,16 @@
       "sizeBytes": 283394952,
       "archive": "tar.xz",
       "binaryPath": "Fury/chrome.exe"
+    },
+    {
+      "kind": "fury-core",
+      "version": "0.5.6-qp.1",
+      "platform": "windows-x64",
+      "url": "file:///C:/queuepilot-engine/dist/queuepilot-core-0.5.6-qp.1-windows-x64.tar.xz",
+      "sha256": "d4f5916c1451325d87c73960b462a43ff99b78a322c71a18eab5fe9f08b33c0a",
+      "sizeBytes": 283449488,
+      "archive": "tar.xz",
+      "binaryPath": "Fury/chrome.exe"
     }
   ]
 }
