@@ -22,6 +22,12 @@ export interface TeamServerConfig {
   adminToken: string | null;
   /** Machine name recorded as `updatedBy` on pushes this server initiates. */
   machineName: string;
+  /**
+   * One-time owner bootstrap code (env QUEUEPILOT_SERVER_BOOTSTRAP_CODE).
+   * POST /auth/bootstrap accepts it ONLY while no owner account exists, and
+   * only when it is set — after the owner exists the endpoint is dead.
+   */
+  bootstrapCode?: string | null;
 }
 
 export function teamServerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): TeamServerConfig {
@@ -31,6 +37,7 @@ export function teamServerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): T
     dbPath: env.QUEUEPILOT_TEAM_DB ?? "team-server.db",
     adminToken: env.QUEUEPILOT_TEAM_ADMIN_TOKEN ?? null,
     machineName: env.QUEUEPILOT_TEAM_MACHINE ?? "server",
+    bootstrapCode: env.QUEUEPILOT_SERVER_BOOTSTRAP_CODE ?? null,
   };
 }
 

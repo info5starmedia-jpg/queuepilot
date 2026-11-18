@@ -1,0 +1,31 @@
+# QueuePilot team server — the hosted deployment on the owner's Ubuntu box.
+# Lives at /root/queuepilot-server/ on 107.172.193.23. This box is SHARED
+# with taskpilot/codes-bot/sol-auto-trader/linktrack — this compose file
+# touches only its own service, volume, and (via deploy) its own nginx vhost.
+
+services:
+  queuepilot-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    image: queuepilot-server:latest
+    container_name: queuepilot-server
+    restart: unless-stopped
+    ports:
+      # Loopback-only on purpose: the internet reaches it through nginx
+      # (TLS) at queuepilot.taskpilot.tech, never directly.
+      - "127.0.0.1:3010:3010"
+    volumes:
+      - /root/queuepilot-server/data:/app/data
+    environment:
+      # One-time owner bootstrap code (see deploy/README.md). Remove the
+      # line after the owner account exists — the endpoint is dead anyway.
+      - QUEUEPILOT_SERVER_BOOTSTRAP_CODE=${QUEUEPILOT_SERVER_BOOTSTRAP_CODE:-}
+      # Optional legacy device-token bootstrap for machines that sync
+      # bundles without a human sign-in. Null by default.
+      - QUEUEPILOT_TEAM_ADMIN_TOKEN=${QUEUEPILOT_TEAM_ADMIN_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

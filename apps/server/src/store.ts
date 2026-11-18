@@ -27,6 +27,12 @@ export interface BundleHead {
   updatedBy: string;
   updatedAt: string;
   size: number;
+  /**
+   * Optional client-supplied JSON metadata ({name, tags, ...}). The server
+   * never interprets it — it exists so the dashboard can LIST profiles by
+   * name without downloading sealed payloads. Max 4 KiB.
+   */
+  meta: string | null;
 }
 
 /**
@@ -60,6 +66,7 @@ interface BundleRow {
   revision: number;
   updated_by: string;
   updated_at: string;
+  meta: string | null;
 }
 
 interface LeaseRow {
@@ -82,10 +89,23 @@ function toLease(r: LeaseRow): LeaseRecord {
 
 export class TeamServerStore {
   private readonly db: Database.Database;
+  private readonly ownsConnection: boolean;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+  /**
+   * Accepts a path (owns the connection, applies WAL pragma) or an existing
+   * better-sqlite3 connection (shared with AuthStore so both see the same
+   * database — required for ":memory:" test databases, where two connections
+   * would be two distinct databases).
+   */
+  constructor(dbOrPath: string | Database.Database) {
+    if (typeof dbOrPath === "string") {
+      this.ownsConnection = true;
+      this.db = new Database(dbOrPath);
+      this.db.pragma("journal_mode = WAL");
+    } else {
+      this.ownsConnection = false;
+      this.db = dbOrPath;
+    }
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS bundles (
@@ -111,10 +131,16 @@ export class TeamServerStore {
         expires_at TEXT NOT NULL
       );
     `);
+    // Hosted-track migration: bundle listing metadata. Idempotent — adds the
+    // column only when the table predates it.
+    const cols = this.db.prepare("PRAGMA table_info(bundles)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "meta")) {
+      this.db.exec("ALTER TABLE bundles ADD COLUMN meta TEXT");
+    }
   }
 
   close(): void {
-    this.db.close();
+    if (this.ownsConnection) this.db.close();
   }
 
   static hashToken(token: string): string {
@@ -193,6 +219,7 @@ export class TeamServerStore {
     payload: Buffer,
     updatedBy: string,
     baseRevision?: number,
+    meta?: string,
   ): { revision: number } | { conflict: number } {
     const tx = this.db.transaction((): { revision: number } | { conflict: number } => {
       const existing = this.getRow(profileId);
@@ -203,9 +230,9 @@ export class TeamServerStore {
         const revision = existing.revision + 1;
         this.db
           .prepare(
-            "UPDATE bundles SET payload=?, revision=?, updated_by=?, updated_at=? WHERE profile_id=?",
+            "UPDATE bundles SET payload=?, revision=?, updated_by=?, updated_at=?, meta=? WHERE profile_id=?",
           )
-          .run(payload.toString("base64"), revision, updatedBy, new Date().toISOString(), profileId);
+          .run(payload.toString("base64"), revision, updatedBy, new Date().toISOString(), meta ?? existing.meta, profileId);
         return { revision };
       }
       if (baseRevision !== undefined && baseRevision !== 0) {
@@ -213,9 +240,9 @@ export class TeamServerStore {
       }
       this.db
         .prepare(
-          "INSERT INTO bundles (profile_id, payload, revision, updated_by, updated_at) VALUES (?,?,?,?,?)",
+          "INSERT INTO bundles (profile_id, payload, revision, updated_by, updated_at, meta) VALUES (?,?,?,?,?,?)",
         )
-        .run(profileId, payload.toString("base64"), 1, updatedBy, new Date().toISOString());
+        .run(profileId, payload.toString("base64"), 1, updatedBy, new Date().toISOString(), meta ?? null);
       return { revision: 1 };
     });
     return tx();
@@ -226,28 +253,27 @@ export class TeamServerStore {
     if (!row) return null;
     return {
       payload: Buffer.from(row.payload, "base64"),
-      head: {
-        profileId: row.profile_id,
-        revision: row.revision,
-        updatedBy: row.updated_by,
-        updatedAt: row.updated_at,
-        size: Buffer.from(row.payload, "base64").length,
-      },
+      head: this.headFromRow(row),
+    };
+  }
+
+  private headFromRow(r: BundleRow): BundleHead {
+    return {
+      profileId: r.profile_id,
+      revision: r.revision,
+      updatedBy: r.updated_by,
+      updatedAt: r.updated_at,
+      size: Buffer.from(r.payload, "base64").length,
+      meta: r.meta,
     };
   }
 
   listBundles(): BundleHead[] {
     return (
       this.db
-        .prepare("SELECT profile_id, revision, updated_by, updated_at, payload FROM bundles ORDER BY profile_id")
+        .prepare("SELECT * FROM bundles ORDER BY profile_id")
         .all() as BundleRow[]
-    ).map((r) => ({
-      profileId: r.profile_id,
-      revision: r.revision,
-      updatedBy: r.updated_by,
-      updatedAt: r.updated_at,
-      size: Buffer.from(r.payload, "base64").length,
-    }));
+    ).map((r) => this.headFromRow(r));
   }
 
   deleteBundle(profileId: string): boolean {

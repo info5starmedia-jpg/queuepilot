@@ -1697,12 +1697,59 @@ foundation the agent and family rollout sit on.
 6. **Rename** — all "family/friends" copy → "team member" (docs, start
    script strings, README).
 
-### Open questions for the owner
+### Owner answers (2026-11-17 evening) + status after this build
 
-- Server OS + exposure: LAN-only or internet-reachable (TLS + domain
-  needed)? Always-on?
-- Rough team size (affects token/account design, not architecture).
-- Confirm L1 may LAUNCH profiles (stated above as yes).
+- Server: Ubuntu 24.04 shared box at `107.172.193.23` (also runs
+  taskpilot/codes-bot/sol-auto-trader/linktrack — deploy must not disturb
+  them). Domain: `queuepilot.taskpilot.tech` (A record → the box, certbot
+  TLS via the existing shared nginx). Always-on: yes, docker
+  `restart: unless-stopped`. Team cap: **10 members**. Invitees called
+  **team members**.
+- **DONE (server-side, this build, commit pending):**
+  1. Accounts + sign-in — `apps/server/src/auth-store.ts`: Argon2id
+     passwords, one-time owner bootstrap (`POST /auth/bootstrap`, env
+     bootstrap code, dead after the owner exists), email+password signin,
+     30-day sliding sessions stored as SHA-256 hashes (`qps_` tokens),
+     rate-limited public auth routes. Device tokens (`qpt_`) unchanged.
+  2. Permissions matrix — enforced server-side: L1 = read listings + run
+     leases (task/warmup execution); L2 = + push/rebase bundles (edit);
+     L3 = + create/delete bundles; owner = + team/token management.
+     Team routes: `GET /team/members`, `POST/GET/DELETE /team/invites`,
+     `PATCH/DELETE /team/members/:id`; cap of 10 enforced at mint AND
+     redeem; owner account immutable. Bundle `meta` (name/tags) rides
+     listings so profiles can be listed by name without decrypting.
+     HONEST LIMIT: the server cannot distinguish a warmup/task run from
+     an interactive launch (both pull the bundle + lease) — the "L1
+     doesn't browse" rule is enforced client-side in the app UI; the
+     server enforces everything it can actually see.
+  3. Cloud profile storage — server already IS the source of truth for
+     synced profiles (sealed bundles + revision concurrency); meta + tier
+     rules close the gap. "Store on cloud" toggle per profile is a
+     client-side setting (sync on/off), not server work.
+  4. Update distribution — the shipped client contract is an
+     `engines.manifest.json` + tarballs, so the server hosts them as
+     static files behind nginx (`deploy/publish-engine.mjs` uploads a
+     build, verifies sha256, rewrites manifest URLs). Settings → Engine →
+     Update server URL already ships client-side.
+  5. Deploy artifacts — `deploy/`: Dockerfile.server (node:24-slim,
+     dist-only runtime, non-root, healthcheck), docker-compose.yml
+     (loopback-only port 3010, `/root/queuepilot-server/data` volume),
+     nginx-queuepilot.conf (static /updates + proxy, 512m body, certbot),
+     README.md runbook (ship → build → TLS → owner bootstrap → invites →
+     publish engine → backup/ops).
+- **STILL OPEN (next, in order):**
+  1. DNS A record `queuepilot.taskpilot.tech` (owner, registrar) → then
+     the live deploy + certbot per `deploy/README.md`.
+  2. Client-side sign-in UI (app connects with email+password → `qps_`
+     session instead of device token; Team panel for owner).
+  3. L1 client enforcement (hide interactive launch; allow warmup/task
+     runs only).
+  4. Per-profile "store on cloud" toggle in the client.
+  5. Compiled/minified client packaging (honest limit already recorded).
+  6. Rename family/friends copy → "team member" sweep.
+- Housekeeping on the box done 2026-11-17: removed the unused
+  buddy-browser containers/volumes/`/opt/buddy-browser` at the owner's
+  direction (freed port 8443 + its ufw rule). Nothing else touched.
 
 ## P9 — Local AI agent (owner-directed build 2026-11-17, IN PROGRESS via Claude)
 
