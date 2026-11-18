@@ -2,6 +2,10 @@ import Fastify, { type FastifyInstance } from "fastify";
 import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { EngineUpdateService, DEFAULT_MANIFEST_URL } from "./application/engine/engine-update.service.js";
+import { createProvider, type ModelProvider } from "./application/agent/provider.js";
+import { buildAgentTools } from "./application/agent/agent-tools.js";
+import { AgentService } from "./application/agent/agent.service.js";
+import { registerAgentRoutes } from "./http/agent.routes.js";
 import type { AppConfig } from "./config/config.js";
 import { createApiLogger } from "./http/logger.js";
 import { registerScriptingOriginDeny } from "./http/scripting-origin-deny.js";
@@ -70,6 +74,8 @@ export interface AppDeps {
   settingsStore?: SettingsService;
   /** C1 engine updates; built from config + settings when absent. */
   engineUpdate?: EngineUpdateService;
+  /** P9: model provider override (tests inject a scripted fake). */
+  agentProvider?: () => ModelProvider;
   secrets?: SecretStore;
   /** Email accounts for the IMAP resolver (Settings → Integrations). */
   emailAccounts?: EmailAccountService;
@@ -160,13 +166,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
-  registerEngineRoutes(
-    app,
-    deps.engineHealth,
-    deps.engineUpdate ?? engineUpdateServiceFor(deps.config, deps.settingsStore),
-  );
+  const engineUpdate = deps.engineUpdate ?? engineUpdateServiceFor(deps.config, deps.settingsStore);
+  registerEngineRoutes(app, deps.engineHealth, engineUpdate);
   registerTabRoutes(app, deps.lifecycle);
-  registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));
+  const warmups = new WarmupService(deps.lifecycle, deps.config.dataDir);
+  registerWarmupRoutes(app, warmups);
+  if (deps.plugins) {
+    // P9 local agent: tools call these same services in-process.
+    const providerFor =
+      deps.agentProvider ??
+      (() => {
+        const s = deps.settingsStore?.get("agent");
+        return createProvider({ kind: "ollama", url: s?.providerUrl ?? "http://127.0.0.1:11434", model: s?.model ?? "qwen2.5:7b-instruct" });
+      });
+    const tools = buildAgentTools({
+      profiles: deps.profiles,
+      proxies: deps.proxies,
+      lifecycle: deps.lifecycle,
+      warmups,
+      plugins: deps.plugins,
+      engineUpdate,
+      assertScriptingEnabled: scriptingGate(deps.settingsStore, { hasApiToken: Boolean(deps.config.apiToken) }),
+    });
+    registerAgentRoutes(app, new AgentService(deps.config.dataDir, tools, providerFor), providerFor);
+  }
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.

@@ -14,6 +14,7 @@ export const SETTINGS_SECTIONS = [
   "team",
   "integrations",
   "automation",
+  "agent",
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -91,6 +92,39 @@ export const AutomationSettingsSchema = z.object({
 });
 export type AutomationSettings = z.infer<typeof AutomationSettingsSchema>;
 
+/** True for http(s) URLs whose host is this machine (127.x, localhost, ::1). */
+export function isLoopbackUrl(v: string): boolean {
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    return h === "localhost" || h === "[::1]" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * P9 local AI agent. The model runs on this machine (Ollama by default);
+ * the provider URL is LOOPBACK-ONLY by schema so no setting can send a
+ * conversation off the machine. A cloud provider is a reserved kind in the
+ * agent code, not a setting.
+ */
+export const AgentSettingsSchema = z.object({
+  providerUrl: z
+    .string()
+    .max(200)
+    .refine(isLoopbackUrl, "must be a loopback URL (127.0.0.1, localhost or ::1) — the agent's model runs on this machine")
+    .default("http://127.0.0.1:11434"),
+  model: z
+    .string()
+    .min(1)
+    .max(120)
+    .regex(/^[a-zA-Z0-9._:/-]+$/, "model names are letters, digits and . _ : / -")
+    .default("qwen2.5:7b-instruct"),
+});
+export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
+
 export const SettingsSchema = z.object({
   general: GeneralSettingsSchema.default({}),
   engine: EngineSettingsSchema.default({}),
@@ -98,6 +132,7 @@ export const SettingsSchema = z.object({
   team: TeamSettingsSchema.default({}),
   integrations: IntegrationsSettingsSchema.default({}),
   automation: AutomationSettingsSchema.default({}),
+  agent: AgentSettingsSchema.default({}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -109,4 +144,5 @@ export const SettingsPatchSchemas = {
   team: TeamSettingsSchema.partial(),
   integrations: IntegrationsSettingsSchema.partial(),
   automation: AutomationSettingsSchema.partial(),
+  agent: AgentSettingsSchema.partial(),
 } as const;

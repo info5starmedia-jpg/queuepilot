@@ -84,6 +84,8 @@ export interface TestContext {
 export function makeTestContext(
   runtime: FakeBrowserRuntime = new FakeBrowserRuntime(),
   configPatch: Partial<AppConfig> = {},
+  /** Extra buildApp deps (e.g. a scripted agent model provider). */
+  depsPatch: Partial<Parameters<typeof buildApp>[0]> = {},
 ): TestContext {
   const db = openTestDatabase();
   const profileRepo = new ProfileRepository(db);
@@ -166,6 +168,7 @@ export function makeTestContext(
     settingsStore: settings,
     secrets,
     emailAccounts,
+    ...depsPatch,
   });
   return {
     app,

@@ -72,8 +72,10 @@ describe("settings HTTP routes", () => {
     const body = res.json();
     expect(body.general.theme).toBe("jancy");
     expect(Object.keys(body).sort()).toEqual(
-      ["automation", "engine", "general", "integrations", "launch", "team"],
+      ["agent", "automation", "engine", "general", "integrations", "launch", "team"],
     );
+    // P9: the agent's model is local by default.
+    expect(body.agent).toEqual({ providerUrl: "http://127.0.0.1:11434", model: "qwen2.5:7b-instruct" });
   });
 
   it("PATCH merges then GET returns the merged document", async () => {

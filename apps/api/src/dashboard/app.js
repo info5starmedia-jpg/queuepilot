@@ -1780,6 +1780,17 @@ function renderIntegrationsInfo() {
     renderPluginsCard(box);
     return;
   }
+  if (settingsSection === "general" && storedToken() !== null) {
+    /* The sidebar's Sign out is hidden on narrow windows; this one is not. */
+    box.innerHTML = `
+      <div class="info-card" id="session-card">
+        <h4>Signed in</h4>
+        <p>This browser holds the API token ${(() => { try { return localStorage.getItem(TOKEN_KEY) ? "on this computer (remembered)" : "for this tab only"; } catch { return ""; } })()}.</p>
+        <button type="button" id="signout-settings">Sign out</button>
+      </div>`;
+    $("#signout-settings").addEventListener("click", signOut);
+    return;
+  }
   if (settingsSection !== "integrations") {
     box.innerHTML = "";
     return;
