@@ -6,19 +6,22 @@
 #   docker compose -f deploy/docker-compose.yml up -d
 #
 # Two stages: compile TS with dev deps, then run dist/ on a slim runtime.
-# node:24-slim (glibc) is deliberate: better-sqlite3 and @node-rs/argon2
-# ship prebuilt binaries for linux-x64-gnu; alpine/musl would compile from
-# source and slow/break the build.
+# Build stages use the FULL node:24 image on purpose: better-sqlite3
+# compiles from source for node 24 (no matching prebuild), which needs
+# python3/make/g++ — all present in the full image, absent in -slim.
+# The final runtime stays slim; it only runs the compiled JS + native
+# .node files copied out of the build stages.
 
-FROM node:24-slim AS build
+FROM node:24 AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/server/package.json apps/server/
 RUN npm ci --workspace apps/server
 COPY apps/server apps/server
+COPY tsconfig.base.json ./tsconfig.base.json
 RUN npm run build -w apps/server
 
-FROM node:24-slim AS deps
+FROM node:24 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/

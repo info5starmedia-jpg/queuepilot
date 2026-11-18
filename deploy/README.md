@@ -12,7 +12,7 @@ family PCs ──HTTPS──> nginx (shared, TLS via Let's Encrypt)
                           ├── /engines.manifest.json, /updates/*  (static files)
                           └── everything else ──> 127.0.0.1:3010 (queuepilot-server container)
                                                         │
-                                              /root/queuepilot-server/data  (SQLite + updates)
+                                              /opt/queuepilot-server/data  (SQLite + updates)
 ```
 
 ## 0. Prereqs (one-time, on the server)
@@ -20,23 +20,26 @@ family PCs ──HTTPS──> nginx (shared, TLS via Let's Encrypt)
 - DNS: `queuepilot.taskpilot.tech` A record → `107.172.193.23` (owner, at the
   registrar; verify with `getent hosts queuepilot.taskpilot.tech`).
 - Docker + docker compose plugin (already installed on this box).
-- `/root/queuepilot-server/data` exists (`mkdir -p`).
+- `/opt/queuepilot-server/data` exists (`mkdir -p`).
 
 ## 1. Ship the server (repo → server)
 
 ```bash
 # on your PC, from the repo root:
 scp -r deploy root@107.172.193.23:/root/queuepilot-server/deploy
-ssh root@107.172.193.23 "mkdir -p /root/queuepilot-server/app"
-# ship the build context the Dockerfile needs:
-tar --exclude=node_modules --exclude=.git -czf - . | ssh root@107.172.193.23 "tar -xzf - -C /root/queuepilot-server/app"
+ssh root@107.172.193.23 "mkdir -p /opt/queuepilot-server/app"
+# ship the build context the Dockerfile needs (root manifests + tsconfig
+# base + the server workspace + deploy):
+tar --exclude=node_modules --exclude=.git -czf - \
+  package.json package-lock.json tsconfig.base.json apps/server deploy \
+  | ssh root@107.172.193.23 "tar -xzf - -C /opt/queuepilot-server/app"
 ```
 
 ## 2. Build + start
 
 ```bash
 ssh root@107.172.193.23
-cd /root/queuepilot-server/app
+cd /opt/queuepilot-server/app
 export QUEUEPILOT_SERVER_BOOTSTRAP_CODE='<pick-a-long-random-code>'
 docker compose -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:3010/health        # → {"ok":true}
@@ -49,7 +52,7 @@ line from your shell history afterwards.
 ## 3. TLS via certbot (needs the DNS record live)
 
 ```bash
-cp /root/queuepilot-server/app/deploy/nginx-queuepilot.conf /etc/nginx/sites-enabled/queuepilot.conf
+cp /opt/queuepilot-server/app/deploy/nginx-queuepilot.conf /etc/nginx/sites-enabled/queuepilot.conf
 nginx -t && systemctl reload nginx          # reload, NOT restart (shared box)
 certbot --nginx -d queuepilot.taskpilot.tech
 curl -s https://queuepilot.taskpilot.tech/health   # → {"ok":true}

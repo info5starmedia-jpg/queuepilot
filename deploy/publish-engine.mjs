@@ -18,7 +18,7 @@
  * Optional env:
  *   QP_SSH_KEY         path to a private key (default: ssh agent/password)
  *   QP_MANIFEST        local manifest path (default: ./engines.manifest.json)
- *   QP_REMOTE_DIR      server updates dir (default: /root/queuepilot-server/data/updates)
+ *   QP_REMOTE_DIR      server updates dir (default: /opt/queuepilot-server/data/updates)
  *
  * Idempotent: re-publishing the same version just rewrites the same file.
  */
@@ -37,7 +37,7 @@ const onlyVersion = flag("version");
 const HOST = process.env.QP_SERVER_HOST;
 const DOMAIN = process.env.QP_SERVER_DOMAIN ?? "queuepilot.taskpilot.tech";
 const MANIFEST_PATH = resolve(process.env.QP_MANIFEST ?? "engines.manifest.json");
-const REMOTE_DIR = process.env.QP_REMOTE_DIR ?? "/root/queuepilot-server/data/updates";
+const REMOTE_DIR = process.env.QP_REMOTE_DIR ?? "/opt/queuepilot-server/data/updates";
 const ssh = (cmd) => {
   const opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
   if (process.env.QP_SSH_KEY) opts.push("-i", process.env.QP_SSH_KEY);

@@ -16,7 +16,7 @@ services:
       # (TLS) at queuepilot.taskpilot.tech, never directly.
       - "127.0.0.1:3010:3010"
     volumes:
-      - /root/queuepilot-server/data:/app/data
+      - /opt/queuepilot-server/data:/app/data
     environment:
       # One-time owner bootstrap code (see deploy/README.md). Remove the
       # line after the owner account exists — the endpoint is dead anyway.
