@@ -372,6 +372,27 @@
       </form>
     </div>
 
+    <!-- P9 local agent: launcher + side panel -->
+    <button id="agent-launcher" type="button" title="Ask the local assistant (A)">✦ Assistant</button>
+    <aside id="agent-panel" hidden aria-label="Assistant">
+      <div class="agent-head">
+        <h3>Assistant · local model</h3>
+        <button id="agent-new" class="ghost" type="button" title="start a new conversation">New chat</button>
+        <button id="agent-close" class="ghost" type="button" title="close">✕</button>
+      </div>
+      <div class="agent-tabs">
+        <button type="button" data-agent-tab="chat" class="active">Chat</button>
+        <button type="button" data-agent-tab="actions">Action log</button>
+      </div>
+      <div id="agent-status">checking the local model…</div>
+      <div id="agent-messages"></div>
+      <div id="agent-actions" hidden></div>
+      <form id="agent-form" autocomplete="off">
+        <textarea id="agent-input" rows="1" maxlength="4000" placeholder="Tell the assistant what to do…"></textarea>
+        <button type="submit" class="primary" id="agent-send">Send</button>
+      </form>
+    </aside>
+
     <!-- token sign-in (shown only when the API answers 401) -->
     <div id="signin" class="overlay" hidden>
       <form id="signin-form" class="drawer" style="width:420px;margin:12vh auto 0;height:auto" autocomplete="off">

@@ -1582,6 +1582,10 @@ const SETTINGS_FIELDS = {
     { key: "enabledPlugins", label: "Enabled plugins (comma-separated)", type: "text", placeholder: "plugin file names" },
     { key: "enabledJyl", label: "Enabled JYL commands (comma-separated)", type: "text", placeholder: "command names" },
   ],
+  agent: [
+    { key: "providerUrl", label: "Model server URL (loopback only — Ollama's default is http://127.0.0.1:11434)", type: "text", placeholder: "http://127.0.0.1:11434" },
+    { key: "model", label: "Model name", type: "text", placeholder: "qwen2.5:7b-instruct" },
+  ],
 };
 const SETTINGS_SECTIONS = Object.keys(SETTINGS_FIELDS);
 let settingsData = null;
@@ -1780,6 +1784,10 @@ function renderIntegrationsInfo() {
     renderPluginsCard(box);
     return;
   }
+  if (settingsSection === "agent") {
+    renderAgentCard(box);
+    return;
+  }
   if (settingsSection === "general" && storedToken() !== null) {
     /* The sidebar's Sign out is hidden on narrow windows; this one is not. */
     box.innerHTML = `
@@ -1928,6 +1936,7 @@ async function persistSetting(key, field) {
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
     if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
+    if (settingsSection === "agent") refreshAgentCard();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */
@@ -2214,6 +2223,240 @@ function onEventMessage(raw) {
     } catch {
       /* malformed event — ignore */
     }
+  }
+}
+
+
+/* ======================= P9 local assistant panel ======================== */
+/* The assistant runs on THIS machine's local model (Settings → Agent). It
+   acts only through the QueuePilot tool catalog; deletes and engine
+   installs stop and ask here (Approve / Decline) before anything happens. */
+
+let agentChatId = null;
+let agentBusy = false;
+
+const AGENT_EXAMPLES = [
+  "Which proxies are in the worst health?",
+  "Create a profile named Demo-1 in group demo",
+  "List my running profiles",
+];
+
+function agentEl(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  if (text !== undefined) d.textContent = text;
+  $("#agent-messages").appendChild(d);
+  $("#agent-messages").scrollTop = $("#agent-messages").scrollHeight;
+  return d;
+}
+
+function agentEmptyState() {
+  const box = $("#agent-messages");
+  box.innerHTML = "";
+  const e = document.createElement("div");
+  e.className = "agent-empty";
+  e.innerHTML = `<p>Ask in plain English. The assistant can list, create, start and stop profiles, check proxy health, run warmups and more. Deleting anything asks you first.</p>`;
+  for (const ex of AGENT_EXAMPLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = ex;
+    b.addEventListener("click", () => {
+      $("#agent-input").value = ex;
+      $("#agent-input").focus();
+    });
+    e.appendChild(b);
+  }
+  box.appendChild(e);
+}
+
+async function agentStatusLine() {
+  try {
+    const s = await api("/agent/status");
+    $("#agent-status").textContent = s.reachable
+      ? s.modelPresent
+        ? `${s.provider} ${s.version ?? ""} · ${s.model} · ready`
+        : `${s.provider} reachable · model ${s.model} not downloaded — Settings → Agent → Download model`
+      : `local model not reachable — ${s.error ?? "is Ollama running?"}`;
+    return s;
+  } catch (err) {
+    $("#agent-status").textContent = err.message;
+    return null;
+  }
+}
+
+/* POST that answers NDJSON: one AgentEvent per line, handled as it arrives. */
+async function agentStream(path, body) {
+  agentBusy = true;
+  $("#agent-send").disabled = true;
+  let bubble = null;
+  const chips = new Map();
+  try {
+    const res = await fetch(path, { method: "POST", headers: authHeaders({ "content-type": "application/json" }), body: JSON.stringify(body) });
+    if (!res.ok || !res.body) {
+      const j = await res.json().catch(() => ({}));
+      agentEl("agent-msg assistant", `⚠ ${j.error?.message ?? `HTTP ${res.status}`}`);
+      return;
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const e = JSON.parse(line);
+        if (e.type === "token") {
+          bubble ??= agentEl("agent-msg assistant", "");
+          bubble.textContent += e.text;
+        } else if (e.type === "message") {
+          if (!bubble) agentEl("agent-msg assistant", e.text);
+          else bubble.textContent = e.text;
+          bubble = null;
+        } else if (e.type === "tool_call") {
+          bubble = null;
+          chips.set(e.id, agentEl("agent-chip run", e.summary));
+        } else if (e.type === "tool_result") {
+          const chip = chips.get(e.id) ?? agentEl("agent-chip", e.tool);
+          chip.className = "agent-chip " + (e.ok ? "ok" : "fail");
+          chip.textContent = `${e.ok ? "✓" : "✕"} ${e.summary}`;
+        } else if (e.type === "confirm") {
+          agentConfirm(e.pending);
+        } else if (e.type === "done" && e.outcome === "error" && e.reason) {
+          agentEl("agent-msg assistant", `⚠ ${e.reason}`);
+        }
+      }
+    }
+  } catch (err) {
+    agentEl("agent-msg assistant", `⚠ ${err.message}`);
+  } finally {
+    agentBusy = false;
+    $("#agent-send").disabled = false;
+    if (!$("#agent-actions").hidden) agentLoadActions();
+  }
+}
+
+function agentConfirm(pending) {
+  const box = agentEl("agent-confirm");
+  box.innerHTML = `<b>Needs your approval:</b> ${esc(pending.summary)}<div class="hint">Nothing happens unless you approve.</div>
+    <div class="actions"><button type="button" class="danger" data-a="yes">Approve</button><button type="button" data-a="no">Decline</button></div>`;
+  for (const b of box.querySelectorAll("button")) {
+    b.addEventListener("click", async () => {
+      const approve = b.dataset.a === "yes";
+      box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      box.insertAdjacentHTML("beforeend", `<div class="hint">${approve ? "Approved." : "Declined — nothing was done."}</div>`);
+      await agentStream(`/agent/chats/${agentChatId}/confirm`, { pendingId: pending.id, approve });
+    });
+  }
+}
+
+async function agentLoadActions() {
+  const box = $("#agent-actions");
+  try {
+    const { actions } = await api("/agent/actions?limit=200");
+    box.innerHTML = actions.length
+      ? actions
+          .map(
+            (a) =>
+              `<div class="agent-action">${esc(a.at.slice(11, 19))} <span class="o-${esc(a.outcome)}">${esc(a.outcome)}</span> <b>${esc(a.tool)}</b> — ${esc(a.summary)}</div>`,
+          )
+          .join("")
+      : `<p class="hint">No actions yet.</p>`;
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
+async function agentOpen() {
+  $("#agent-panel").hidden = false;
+  $("#agent-launcher").hidden = true;
+  await agentStatusLine();
+  if (!agentChatId) agentEmptyState();
+  $("#agent-input").focus();
+}
+
+$("#agent-launcher").addEventListener("click", agentOpen);
+$("#agent-close").addEventListener("click", () => {
+  $("#agent-panel").hidden = true;
+  $("#agent-launcher").hidden = false;
+});
+$("#agent-new").addEventListener("click", () => {
+  agentChatId = null;
+  agentEmptyState();
+});
+for (const b of document.querySelectorAll("[data-agent-tab]")) {
+  b.addEventListener("click", () => {
+    const tab = b.dataset.agentTab;
+    document.querySelectorAll("[data-agent-tab]").forEach((x) => x.classList.toggle("active", x === b));
+    $("#agent-messages").hidden = tab !== "chat";
+    $("#agent-form").hidden = tab !== "chat";
+    $("#agent-actions").hidden = tab !== "actions";
+    if (tab === "actions") agentLoadActions();
+  });
+}
+$("#agent-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("#agent-form").requestSubmit();
+  }
+});
+$("#agent-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("#agent-input").value.trim();
+  if (!text || agentBusy) return;
+  if (!agentChatId) {
+    $("#agent-messages").innerHTML = "";
+    agentChatId = (await api("/agent/chats", { method: "POST" })).id;
+  }
+  $("#agent-input").value = "";
+  agentEl("agent-msg user", text);
+  await agentStream(`/agent/chats/${agentChatId}/messages`, { text });
+});
+
+/* Settings → Agent card: status, model download. */
+async function renderAgentCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="agent-card">
+      <h4>Local AI assistant</h4>
+      <p>The assistant's model runs on this machine through <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>. Nothing is sent off the machine: the provider URL must be a loopback address.</p>
+      <div id="agent-card-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="agent-check">Check again</button>
+        <button type="button" class="primary" id="agent-pull" hidden>Download model</button>
+      </div>
+    </div>`;
+  $("#agent-check").addEventListener("click", () => refreshAgentCard());
+  $("#agent-pull").addEventListener("click", async () => {
+    try {
+      await api("/agent/pull", { method: "POST" });
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    refreshAgentCard();
+  });
+  await refreshAgentCard();
+}
+
+let agentCardPoll = null;
+async function refreshAgentCard() {
+  const line = $("#agent-card-status");
+  if (!line) return;
+  clearTimeout(agentCardPoll);
+  try {
+    const s = await api("/agent/status");
+    const pull = s.pull && !s.pull.done
+      ? ` Downloading ${esc(s.pull.model)}: ${esc(s.pull.status)}${s.pull.total ? ` ${Math.round((100 * (s.pull.completed ?? 0)) / s.pull.total)}%` : ""}…`
+      : s.pull?.error ? ` Last download failed: ${esc(s.pull.error)}` : "";
+    line.innerHTML = s.reachable
+      ? `Ollama ${esc(s.version ?? "")} reachable at ${esc(s.url)} · model <b>${esc(s.model)}</b> ${s.modelPresent ? "installed ✓" : "not downloaded"}.${pull}<br><span style="color:var(--faint)">Installed: ${esc(s.installedModels.join(", ") || "none")}</span>`
+      : `Not reachable: ${esc(s.error ?? "")}`;
+    $("#agent-pull").hidden = !(s.reachable && !s.modelPresent && !(s.pull && !s.pull.done));
+    if (s.pull && !s.pull.done) agentCardPoll = setTimeout(refreshAgentCard, 2000);
+  } catch (err) {
+    line.textContent = err.message;
   }
 }
 
