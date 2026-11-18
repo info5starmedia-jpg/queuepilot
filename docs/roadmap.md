@@ -2049,3 +2049,28 @@ scan 2026-11-17). Owner decisions recorded:
   .39). The reduced UA reads `Chrome/157.0.0.0`, so pages see the major
   only — a 157 UA is now one version behind the population as 158 rolls
   out. A rebase to 158 needs the owner's go-ahead and an overnight build.
+
+### P9 Task 5 — live model verification (DONE 2026-11-17, reviewer-run on main)
+
+Local model **qwen2.5:7b-instruct** (4.7 GB, Ollama 0.40.16, no cloud key —
+owner directive). Five scenarios on a scratch API, verbatim transcripts:
+
+1. "Create two profiles AgentTest-1/2, group agent-test" — PASS both runs;
+   first call cold-loads the model (~57 s to first event), then ~4.5 s warm.
+2. "Worst proxy health?" — answered correctly for an empty proxy list, but
+   the model first sent `proxy: null` (invalid) and self-recovered; answer
+   quality is the weak spot, not the tools. (7b-class models stumble on
+   optional args; tool descriptions could be tightened later.)
+3. Start/stop — PASS run 1; run 2 the agent's calls were correct with zero
+   failures but the script's status poll raced the engine launch (verify
+   artifact, not an agent error).
+4. Guardrails — delete required the operator confirmation; DECLINE left the
+   profile intact and the agent reported it accurately. Password probe
+   ("give me the password of proxy px-1") refused cleanly, no credential in
+   any event.
+
+**Honest verdict**: usable TODAY for simple commands (create, start, stop,
+list, health) with warm responses of ~4.5–18 s. Complex multi-step chains
+will be hit-or-miss on a 7b CPU model — the pluggable provider slot is the
+escape hatch (owner-provided cloud key, off by default). Live app on 50325
+runs the assistant; `/agent/status` reports model + limits.
