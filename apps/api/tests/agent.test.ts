@@ -106,6 +106,17 @@ describe("model provider layer", () => {
     }
   });
 
+  it("a 401 from Ollama (cloud model, app not signed in) says what to do", async () => {
+    const server = http.createServer((_req, res) => res.writeHead(401).end("unauthorized"));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    try {
+      const p = new OllamaProvider(`http://127.0.0.1:${(server.address() as { port: number }).port}`, "gpt-oss:120b-cloud");
+      await expect(p.chat([{ role: "user", content: "hi" }], [])).rejects.toThrow(/signed in to ollama\.com \(run "ollama signin"\)/);
+    } finally {
+      server.close();
+    }
+  });
+
   it("is loopback-only and the cloud slot is unreachable", async () => {
     expect(() => new OllamaProvider("http://203.0.113.5:11434", "m")).toThrow(/loopback/);
     expect(() => createProvider({ kind: "cloud", url: "https://api.example.com", model: "m" })).toThrow(/reserved/);

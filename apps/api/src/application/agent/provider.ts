@@ -110,6 +110,9 @@ export class OllamaProvider implements ModelProvider {
         tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } })),
       }),
     });
+    if (res.status === 401) {
+      throw new Error(`Ollama refused the model call (401): "${this.model}" needs the Ollama app signed in to ollama.com (run "ollama signin")`);
+    }
     if (!res.ok || !res.body) {
       const detail = await res.text().catch(() => "");
       throw new Error(`model call failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);

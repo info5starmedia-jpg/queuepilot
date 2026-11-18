@@ -2274,7 +2274,7 @@ async function agentStatusLine() {
     const s = await api("/agent/status");
     $("#agent-status").textContent = s.reachable
       ? s.modelPresent
-        ? `${s.provider} ${s.version ?? ""} · ${s.model} · ready`
+        ? `${s.provider} ${s.version ?? ""} · ${s.model} · ready${/-cloud$|:cloud$/.test(s.model) ? " · CLOUD model (runs on ollama.com)" : ""}`
         : `${s.provider} reachable · model ${s.model} not downloaded — Settings → Agent → Download model`
       : `local model not reachable — ${s.error ?? "is Ollama running?"}`;
     return s;
@@ -2421,7 +2421,8 @@ async function renderAgentCard(box) {
   box.innerHTML = `
     <div class="info-card" id="agent-card">
       <h4>Local AI assistant</h4>
-      <p>The assistant's model runs on this machine through <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>. Nothing is sent off the machine: the provider URL must be a loopback address.</p>
+      <p>The assistant talks only to the <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> app on this machine (the URL must be a loopback address). A local model keeps everything on this PC; a model whose name ends in <code>-cloud</code> is run by ollama.com, so your requests and the profile/proxy names in them leave the machine.</p>
+      <div id="agent-card-cloud" class="hint" style="color:var(--amber)" hidden></div>
       <div id="agent-card-status" class="hint">Checking…</div>
       <div class="actions" style="margin-top:10px">
         <button type="button" id="agent-check">Check again</button>
@@ -2454,6 +2455,11 @@ async function refreshAgentCard() {
       ? `Ollama ${esc(s.version ?? "")} reachable at ${esc(s.url)} · model <b>${esc(s.model)}</b> ${s.modelPresent ? "installed ✓" : "not downloaded"}.${pull}<br><span style="color:var(--faint)">Installed: ${esc(s.installedModels.join(", ") || "none")}</span>`
       : `Not reachable: ${esc(s.error ?? "")}`;
     $("#agent-pull").hidden = !(s.reachable && !s.modelPresent && !(s.pull && !s.pull.done));
+    const cloud = /-cloud$|:cloud$/.test(s.model);
+    $("#agent-card-cloud").hidden = !cloud;
+    $("#agent-card-cloud").textContent = cloud
+      ? `⚠ ${s.model} is an Ollama CLOUD model: conversations are processed on ollama.com, not on this PC (the Ollama app must be signed in).`
+      : "";
     if (s.pull && !s.pull.done) agentCardPoll = setTimeout(refreshAgentCard, 2000);
   } catch (err) {
     line.textContent = err.message;
