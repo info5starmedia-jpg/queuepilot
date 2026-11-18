@@ -310,6 +310,20 @@ export async function runConsoleSmoke({ base, ok }) {
     const removed = await waitFor(async () => ((await api("GET", "/email-accounts")).json?.accounts ?? []).length === 0);
     ok("Remove deletes the email account", Boolean(removed));
 
+    // P9 assistant panel: opens from the launcher, offers 3 example
+    // commands, and reports the local model's state (no model is needed
+    // here — without Ollama the status line must say so, not hang).
+    await page.evaluate(`document.querySelector('#agent-launcher').click(); true`);
+    const panel = await waitFor(() =>
+      page.evaluate(`(() => {
+        const p = document.querySelector('#agent-panel');
+        const s = document.querySelector('#agent-status').textContent;
+        const ex = document.querySelectorAll('.agent-empty button').length;
+        return !p.hidden && ex === 3 && !/checking/.test(s) ? s : undefined;
+      })()`),
+    );
+    ok("assistant panel opens with 3 example commands and a model status", Boolean(panel), panel ?? "");
+
     ok("no uncaught exceptions in the console page", page.exceptions.length === 0, page.exceptions.slice(0, 3).join(" | "));
   } finally {
     page?.close();

@@ -86,6 +86,9 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
   });
 
   app.post("/plugins/:id/enable", async (req) => {
+    // Since B3 a switched-off plugin is not imported, so enabling is where
+    // its code first runs (onInit/onEnabled) — same gate as rescan.
+    assertScriptingEnabled();
     const { id } = req.params as { id: string };
     const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
     await plugins.setEnabled(id, body.enabled);

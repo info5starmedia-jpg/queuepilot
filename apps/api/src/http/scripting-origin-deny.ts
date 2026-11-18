@@ -23,7 +23,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 // "/engine/update" (C1) installs a browser binary; a page must not be able
 // to start one either.
-const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases", "/engine/update"];
+// "/agent" (P9): the local agent can start, change and (with confirmation)
+// delete things — a page inside a profile browser must never command it.
+const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases", "/engine/update", "/agent"];
 
 function isScriptingUrl(url: string): boolean {
   const path = url.split("?")[0] ?? url;

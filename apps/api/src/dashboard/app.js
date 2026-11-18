@@ -8,20 +8,74 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+/* ---- P9 Task 0: token sign-in ------------------------------------------
+   An install started with SPECTRA_API_TOKEN serves this page without the
+   token but refuses every API call without it. The operator's token lives
+   only in this browser: sessionStorage (closes with the tab) unless they
+   tick "Remember on this computer" (localStorage). It is sent as a Bearer
+   header to this same origin and nowhere else. No token configured on the
+   server = no prompt, nothing stored. */
+const TOKEN_KEY = "queuepilot.apiToken";
+function storedToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+function authHeaders(extra = {}) {
+  const t = storedToken();
+  return t ? { ...extra, authorization: `Bearer ${t}` } : extra;
+}
+
 async function api(path, opts = {}) {
   /* JSON content-type only when there IS a body: Fastify answers a body-less
      request that claims application/json with a 500, which broke every
      body-less DELETE/POST in the console (delete, stop, proxy test, …). */
   const res = await fetch(path, {
     ...opts,
-    headers: opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers },
+    headers: authHeaders(opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers }),
   });
+  if (res.status === 401) showSignIn(storedToken() ? "That token was refused — sign in again." : "");
   if (res.status === 204) return null;
   const body = await res.json();
   if (!res.ok) {
     throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
   }
   return body;
+}
+
+function showSignIn(message) {
+  const box = $("#signin");
+  if (!box) return;
+  box.hidden = false;
+  $("#signin-error").textContent = message;
+  $("#signin-token").focus();
+}
+
+async function signIn(token, remember) {
+  /* Probe with the candidate token before keeping it. */
+  const res = await fetch("/engine/health", { headers: { authorization: `Bearer ${token}` } });
+  if (res.status === 401) return false;
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
+  } catch {
+    /* storage blocked: the token cannot be kept — say so */
+    return false;
+  }
+  return true;
+}
+
+function signOut() {
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* nothing stored */
+  }
+  location.reload();
 }
 
 const esc = (s) =>
@@ -1230,7 +1284,7 @@ async function onTabAction(profileId, tab, act, btn) {
       await api(`/profiles/${profileId}/tabs/${tab.id}/close`, { method: "POST" });
     } else if (act === "screenshot") {
       /* fetch, not a plain <img src>: the bearer-token hook applies to images too */
-      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`);
+      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`, { headers: authHeaders() });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
@@ -1454,7 +1508,7 @@ $("#cookies-export").addEventListener("click", async () => {
   if (!profileId) return;
   const format = $("#cookies-export-format").value;
   try {
-    const res = await fetch(`/profiles/${profileId}/cookies/export?format=${format}`);
+    const res = await fetch(`/profiles/${profileId}/cookies/export?format=${format}`, { headers: authHeaders() });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
@@ -1527,6 +1581,10 @@ const SETTINGS_FIELDS = {
     { key: "scriptingEndpoints", label: "Enable scripting endpoints (JYL run, plugins/parsers/resolvers, aliases) — runs code, keep off unless needed", type: "checkbox" },
     { key: "enabledPlugins", label: "Enabled plugins (comma-separated)", type: "text", placeholder: "plugin file names" },
     { key: "enabledJyl", label: "Enabled JYL commands (comma-separated)", type: "text", placeholder: "command names" },
+  ],
+  agent: [
+    { key: "providerUrl", label: "Model server URL (loopback only — Ollama's default is http://127.0.0.1:11434)", type: "text", placeholder: "http://127.0.0.1:11434" },
+    { key: "model", label: "Model name", type: "text", placeholder: "qwen2.5:7b-instruct" },
   ],
 };
 const SETTINGS_SECTIONS = Object.keys(SETTINGS_FIELDS);
@@ -1640,6 +1698,79 @@ async function refreshEngineUpdate() {
   }
 }
 
+/* Settings → Automation: Plugins (B3b). Import needs the scripting switch
+   above AND a token-protected install (the API refuses otherwise and says
+   why). An imported plugin lands disabled; its code first runs when the
+   owner flips it on here. */
+async function renderPluginsCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="plugins-card">
+      <h4>Plugins</h4>
+      <p>Upload a script (<code>.mjs</code>/<code>.js</code>) or a zipped plugin folder. It is installed <b>switched off</b> — nothing runs until you turn it on below.</p>
+      <table class="import-table" id="plugins-table"><tbody></tbody></table>
+      <p id="plugins-empty" class="hint" hidden>No plugins installed.</p>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="primary" id="plugin-import">⇪ Import plugin</button>
+        <input type="file" id="plugin-file" accept=".mjs,.js,.zip" multiple hidden />
+      </div>
+      <div id="plugin-import-result"></div>
+    </div>`;
+  $("#plugin-import").addEventListener("click", () => $("#plugin-file").click());
+  $("#plugin-file").addEventListener("change", async (ev) => {
+    const files = [...ev.target.files];
+    ev.target.value = "";
+    const rows = [];
+    for (const f of files) {
+      try {
+        const res = await fetch(`/plugins/import?filename=${encodeURIComponent(f.name)}`, {
+          method: "POST",
+          headers: authHeaders({ "content-type": "application/octet-stream" }),
+          body: f,
+        });
+        const body = await res.json().catch(() => ({}));
+        for (const i of body.installed ?? []) rows.push(`<tr><td>${esc(i.file)}</td><td>installed as <b>${esc(i.id)}</b> — switched off</td></tr>`);
+        for (const r of body.rejected ?? []) rows.push(`<tr class="import-err"><td>${esc(r.file)}</td><td>rejected: ${esc(r.reason)}</td></tr>`);
+        if (!body.installed && !body.rejected) rows.push(`<tr class="import-err"><td>${esc(f.name)}</td><td>${esc(body.error?.message ?? `HTTP ${res.status}`)}</td></tr>`);
+      } catch (err) {
+        rows.push(`<tr class="import-err"><td>${esc(f.name)}</td><td>${esc(err.message)}</td></tr>`);
+      }
+    }
+    $("#plugin-import-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
+    await refreshPluginsTable();
+  });
+  await refreshPluginsTable();
+}
+
+async function refreshPluginsTable() {
+  const tbody = $("#plugins-table tbody");
+  if (!tbody) return;
+  let plugins = [];
+  try {
+    ({ plugins } = await api("/plugins"));
+  } catch (err) {
+    tbody.innerHTML = `<tr class="import-err"><td colspan="3">${esc(err.message)}</td></tr>`;
+    return;
+  }
+  $("#plugins-empty").hidden = plugins.length !== 0;
+  tbody.innerHTML = "";
+  for (const p of plugins) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><b>${esc(p.id)}</b> <span style="color:var(--faint)">${esc(p.version)}</span></td>
+      <td>${p.error ? `<span style="color:var(--red)">${esc(p.error)}</span>` : p.loaded ? "loaded" : "not loaded"}</td>
+      <td><label class="check"><input type="checkbox" ${p.enabled ? "checked" : ""} /> enabled</label></td>`;
+    tr.querySelector("input").addEventListener("change", async (e) => {
+      try {
+        await api(`/plugins/${encodeURIComponent(p.id)}/enable`, { method: "POST", body: JSON.stringify({ enabled: e.target.checked }) });
+        toast(`plugin ${p.id} ${e.target.checked ? "enabled" : "disabled"}`);
+      } catch (err) {
+        toast(err.message, "error");
+      }
+      await refreshPluginsTable();
+    });
+    tbody.appendChild(tr);
+  }
+}
+
 /* Integrations gets a read-only reference card for the email resolvers —
    there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
    the scripting layer. This card documents the URL shapes. */
@@ -1647,6 +1778,25 @@ function renderIntegrationsInfo() {
   const box = $("#integrations-info");
   if (settingsSection === "engine") {
     renderEngineUpdateCard(box);
+    return;
+  }
+  if (settingsSection === "automation") {
+    renderPluginsCard(box);
+    return;
+  }
+  if (settingsSection === "agent") {
+    renderAgentCard(box);
+    return;
+  }
+  if (settingsSection === "general" && storedToken() !== null) {
+    /* The sidebar's Sign out is hidden on narrow windows; this one is not. */
+    box.innerHTML = `
+      <div class="info-card" id="session-card">
+        <h4>Signed in</h4>
+        <p>This browser holds the API token ${(() => { try { return localStorage.getItem(TOKEN_KEY) ? "on this computer (remembered)" : "for this tab only"; } catch { return ""; } })()}.</p>
+        <button type="button" id="signout-settings">Sign out</button>
+      </div>`;
+    $("#signout-settings").addEventListener("click", signOut);
     return;
   }
   if (settingsSection !== "integrations") {
@@ -1786,6 +1936,7 @@ async function persistSetting(key, field) {
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
     if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
+    if (settingsSection === "agent") refreshAgentCard();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */
@@ -2021,19 +2172,44 @@ function pushEvent(e) {
   while (list.children.length > 50) list.lastChild.remove();
 }
 
-function connectEvents() {
-  const es = new EventSource("/events");
-  es.onopen = () => {
-    $("#sse").textContent = "live";
-    $("#sse-dot").className = "dot dot-on";
+/* SSE over fetch (P9 Task 0): EventSource cannot send an Authorization
+   header, so a token-protected install read the stream as 401 forever.
+   Same events, same handler; reconnects after 3 s like EventSource. */
+async function connectEvents() {
+  const setLive = (on) => {
+    $("#sse").textContent = on ? "live" : "offline";
+    $("#sse-dot").className = "dot " + (on ? "dot-on" : "dot-off");
   };
-  es.onerror = () => {
-    $("#sse").textContent = "offline";
-    $("#sse-dot").className = "dot dot-off";
-  };
-  es.onmessage = (msg) => {
+  try {
+    const res = await fetch("/events", { headers: authHeaders({ accept: "text/event-stream" }) });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    setLive(true);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let cut;
+      while ((cut = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        const data = frame.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+        if (data) onEventMessage(data);
+      }
+    }
+  } catch {
+    /* fall through to reconnect */
+  }
+  setLive(false);
+  /* While the sign-in is up there is nothing to reconnect with. */
+  if ($("#signin").hidden) setTimeout(connectEvents, 3000);
+}
+
+function onEventMessage(raw) {
+  {
     try {
-      const e = JSON.parse(msg.data);
+      const e = JSON.parse(raw);
       if (e.detail === "connected") return;
       pushEvent(e);
       /* run/tab transitions change the grids; reload lazily */
@@ -2047,8 +2223,267 @@ function connectEvents() {
     } catch {
       /* malformed event — ignore */
     }
-  };
+  }
 }
+
+
+/* ======================= P9 local assistant panel ======================== */
+/* The assistant runs on THIS machine's local model (Settings → Agent). It
+   acts only through the QueuePilot tool catalog; deletes and engine
+   installs stop and ask here (Approve / Decline) before anything happens. */
+
+let agentChatId = null;
+let agentBusy = false;
+
+const AGENT_EXAMPLES = [
+  "Which proxies are in the worst health?",
+  "Create a profile named Demo-1 in group demo",
+  "List my running profiles",
+];
+
+function agentEl(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  if (text !== undefined) d.textContent = text;
+  $("#agent-messages").appendChild(d);
+  $("#agent-messages").scrollTop = $("#agent-messages").scrollHeight;
+  return d;
+}
+
+function agentEmptyState() {
+  const box = $("#agent-messages");
+  box.innerHTML = "";
+  const e = document.createElement("div");
+  e.className = "agent-empty";
+  e.innerHTML = `<p>Ask in plain English. The assistant can list, create, start and stop profiles, check proxy health, run warmups and more. Deleting anything asks you first.</p>`;
+  for (const ex of AGENT_EXAMPLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = ex;
+    b.addEventListener("click", () => {
+      $("#agent-input").value = ex;
+      $("#agent-input").focus();
+    });
+    e.appendChild(b);
+  }
+  box.appendChild(e);
+}
+
+async function agentStatusLine() {
+  try {
+    const s = await api("/agent/status");
+    $("#agent-status").textContent = s.reachable
+      ? s.modelPresent
+        ? `${s.provider} ${s.version ?? ""} · ${s.model} · ready${/-cloud$|:cloud$/.test(s.model) ? " · CLOUD model (runs on ollama.com)" : ""}`
+        : `${s.provider} reachable · model ${s.model} not downloaded — Settings → Agent → Download model`
+      : `local model not reachable — ${s.error ?? "is Ollama running?"}`;
+    return s;
+  } catch (err) {
+    $("#agent-status").textContent = err.message;
+    return null;
+  }
+}
+
+/* POST that answers NDJSON: one AgentEvent per line, handled as it arrives. */
+async function agentStream(path, body) {
+  agentBusy = true;
+  $("#agent-send").disabled = true;
+  let bubble = null;
+  let lastText = null;
+  const chips = new Map();
+  try {
+    const res = await fetch(path, { method: "POST", headers: authHeaders({ "content-type": "application/json" }), body: JSON.stringify(body) });
+    if (!res.ok || !res.body) {
+      const j = await res.json().catch(() => ({}));
+      agentEl("agent-msg assistant", `⚠ ${j.error?.message ?? `HTTP ${res.status}`}`);
+      return;
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const e = JSON.parse(line);
+        if (e.type === "token") {
+          bubble ??= agentEl("agent-msg assistant", "");
+          bubble.textContent += e.text;
+        } else if (e.type === "message") {
+          if (!bubble) agentEl("agent-msg assistant", e.text);
+          else bubble.textContent = e.text;
+          bubble = null;
+          lastText = e.text;
+        } else if (e.type === "tool_call") {
+          bubble = null;
+          chips.set(e.id, agentEl("agent-chip run", e.summary));
+        } else if (e.type === "tool_result") {
+          const chip = chips.get(e.id) ?? agentEl("agent-chip", e.tool);
+          chip.className = "agent-chip " + (e.ok ? "ok" : "fail");
+          chip.textContent = `${e.ok ? "✓" : "✕"} ${e.summary}`;
+        } else if (e.type === "confirm") {
+          agentConfirm(e.pending);
+        } else if (e.type === "done" && e.outcome === "error" && e.reason && e.reason !== lastText) {
+          /* Only errors the loop did not already say as a message. */
+          agentEl("agent-msg assistant", `⚠ ${e.reason}`);
+        }
+      }
+    }
+  } catch (err) {
+    agentEl("agent-msg assistant", `⚠ ${err.message}`);
+  } finally {
+    agentBusy = false;
+    $("#agent-send").disabled = false;
+    if (!$("#agent-actions").hidden) agentLoadActions();
+  }
+}
+
+function agentConfirm(pending) {
+  const box = agentEl("agent-confirm");
+  box.innerHTML = `<b>Needs your approval:</b> ${esc(pending.summary)}<div class="hint">Nothing happens unless you approve.</div>
+    <div class="actions"><button type="button" class="danger" data-a="yes">Approve</button><button type="button" data-a="no">Decline</button></div>`;
+  for (const b of box.querySelectorAll("button")) {
+    b.addEventListener("click", async () => {
+      const approve = b.dataset.a === "yes";
+      box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      box.insertAdjacentHTML("beforeend", `<div class="hint">${approve ? "Approved." : "Declined — nothing was done."}</div>`);
+      await agentStream(`/agent/chats/${agentChatId}/confirm`, { pendingId: pending.id, approve });
+    });
+  }
+}
+
+async function agentLoadActions() {
+  const box = $("#agent-actions");
+  try {
+    const { actions } = await api("/agent/actions?limit=200");
+    box.innerHTML = actions.length
+      ? actions
+          .map(
+            (a) =>
+              `<div class="agent-action">${esc(a.at.slice(11, 19))} <span class="o-${esc(a.outcome)}">${esc(a.outcome)}</span> <b>${esc(a.tool)}</b> — ${esc(a.summary)}</div>`,
+          )
+          .join("")
+      : `<p class="hint">No actions yet.</p>`;
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
+async function agentOpen() {
+  $("#agent-panel").hidden = false;
+  $("#agent-launcher").hidden = true;
+  await agentStatusLine();
+  if (!agentChatId) agentEmptyState();
+  $("#agent-input").focus();
+}
+
+$("#agent-launcher").addEventListener("click", agentOpen);
+$("#agent-close").addEventListener("click", () => {
+  $("#agent-panel").hidden = true;
+  $("#agent-launcher").hidden = false;
+});
+$("#agent-new").addEventListener("click", () => {
+  agentChatId = null;
+  agentEmptyState();
+});
+for (const b of document.querySelectorAll("[data-agent-tab]")) {
+  b.addEventListener("click", () => {
+    const tab = b.dataset.agentTab;
+    document.querySelectorAll("[data-agent-tab]").forEach((x) => x.classList.toggle("active", x === b));
+    $("#agent-messages").hidden = tab !== "chat";
+    $("#agent-form").hidden = tab !== "chat";
+    $("#agent-actions").hidden = tab !== "actions";
+    if (tab === "actions") agentLoadActions();
+  });
+}
+$("#agent-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("#agent-form").requestSubmit();
+  }
+});
+$("#agent-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("#agent-input").value.trim();
+  if (!text || agentBusy) return;
+  if (!agentChatId) {
+    $("#agent-messages").innerHTML = "";
+    agentChatId = (await api("/agent/chats", { method: "POST" })).id;
+  }
+  $("#agent-input").value = "";
+  agentEl("agent-msg user", text);
+  await agentStream(`/agent/chats/${agentChatId}/messages`, { text });
+});
+
+/* Settings → Agent card: status, model download. */
+async function renderAgentCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="agent-card">
+      <h4>Local AI assistant</h4>
+      <p>The assistant talks only to the <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> app on this machine (the URL must be a loopback address). A local model keeps everything on this PC; a model whose name ends in <code>-cloud</code> is run by ollama.com, so your requests and the profile/proxy names in them leave the machine.</p>
+      <div id="agent-card-cloud" class="hint" style="color:var(--amber)" hidden></div>
+      <div id="agent-card-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="agent-check">Check again</button>
+        <button type="button" class="primary" id="agent-pull" hidden>Download model</button>
+      </div>
+    </div>`;
+  $("#agent-check").addEventListener("click", () => refreshAgentCard());
+  $("#agent-pull").addEventListener("click", async () => {
+    try {
+      await api("/agent/pull", { method: "POST" });
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    refreshAgentCard();
+  });
+  await refreshAgentCard();
+}
+
+let agentCardPoll = null;
+async function refreshAgentCard() {
+  const line = $("#agent-card-status");
+  if (!line) return;
+  clearTimeout(agentCardPoll);
+  try {
+    const s = await api("/agent/status");
+    const pull = s.pull && !s.pull.done
+      ? ` Downloading ${esc(s.pull.model)}: ${esc(s.pull.status)}${s.pull.total ? ` ${Math.round((100 * (s.pull.completed ?? 0)) / s.pull.total)}%` : ""}…`
+      : s.pull?.error ? ` Last download failed: ${esc(s.pull.error)}` : "";
+    line.innerHTML = s.reachable
+      ? `Ollama ${esc(s.version ?? "")} reachable at ${esc(s.url)} · model <b>${esc(s.model)}</b> ${s.modelPresent ? "installed ✓" : "not downloaded"}.${pull}<br><span style="color:var(--faint)">Installed: ${esc(s.installedModels.join(", ") || "none")}</span>`
+      : `Not reachable: ${esc(s.error ?? "")}`;
+    $("#agent-pull").hidden = !(s.reachable && !s.modelPresent && !(s.pull && !s.pull.done));
+    const cloud = /-cloud$|:cloud$/.test(s.model);
+    $("#agent-card-cloud").hidden = !cloud;
+    $("#agent-card-cloud").textContent = cloud
+      ? `⚠ ${s.model} is an Ollama CLOUD model: conversations are processed on ollama.com, not on this PC (the Ollama app must be signed in).`
+      : "";
+    if (s.pull && !s.pull.done) agentCardPoll = setTimeout(refreshAgentCard, 2000);
+  } catch (err) {
+    line.textContent = err.message;
+  }
+}
+
+/* Sign-in overlay (P9 Task 0). Shown only when the API answers 401. */
+$("#signin-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const token = $("#signin-token").value.trim();
+  if (!token) return;
+  $("#signin-error").textContent = "Checking…";
+  if (await signIn(token, $("#signin-remember").checked)) {
+    location.reload();
+  } else {
+    $("#signin-error").textContent = "Sign-in failed: that token was refused (401). Check SPECTRA_API_TOKEN on the API and try again.";
+    $("#signin-token").select();
+  }
+});
+$("#signout").addEventListener("click", signOut);
+$("#signout").hidden = storedToken() === null;
 
 /* ================================ boot ================================= */
 

@@ -28,6 +28,7 @@
         <div><span id="google-dot" class="dot dot-off"></span><span id="google">google …</span></div>
         <div><span id="sse-dot" class="dot dot-off"></span><span id="sse">offline</span></div>
         <div class="plan">LOCAL · FAMILY USE</div>
+        <button id="signout" class="ghost" type="button" hidden title="forget the API token in this browser">Sign out</button>
       </div>
     </aside>
 
@@ -367,6 +368,42 @@
           <button type="submit" class="primary">Save</button>
           <button type="button" id="pf-delete" class="danger">Delete profile</button>
           <span id="panel-status" class="hint"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- P9 local agent: launcher + side panel -->
+    <button id="agent-launcher" type="button" title="Ask the assistant">✦ Assistant</button>
+    <aside id="agent-panel" hidden aria-label="Assistant">
+      <div class="agent-head">
+        <h3>Assistant · local model</h3>
+        <button id="agent-new" class="ghost" type="button" title="start a new conversation">New chat</button>
+        <button id="agent-close" class="ghost" type="button" title="close">✕</button>
+      </div>
+      <div class="agent-tabs">
+        <button type="button" data-agent-tab="chat" class="active">Chat</button>
+        <button type="button" data-agent-tab="actions">Action log</button>
+      </div>
+      <div id="agent-status">checking the local model…</div>
+      <div id="agent-messages"></div>
+      <div id="agent-actions" hidden></div>
+      <form id="agent-form" autocomplete="off">
+        <textarea id="agent-input" rows="1" maxlength="4000" placeholder="Tell the assistant what to do…"></textarea>
+        <button type="submit" class="primary" id="agent-send">Send</button>
+      </form>
+    </aside>
+
+    <!-- token sign-in (shown only when the API answers 401) -->
+    <div id="signin" class="overlay" hidden>
+      <form id="signin-form" class="drawer" style="width:420px;margin:12vh auto 0;height:auto" autocomplete="off">
+        <div class="drawer-head"><h3>Sign in</h3></div>
+        <p class="hint">This QueuePilot runs with an API token (<code>SPECTRA_API_TOKEN</code>). Enter it to use the console.</p>
+        <label>API token <input id="signin-token" type="password" required maxlength="500" autocomplete="current-password" /></label>
+        <label class="check"><input id="signin-remember" type="checkbox" /> Remember on this computer</label>
+        <div class="hint">Kept only in this browser — for this tab unless you tick "Remember". Sent only to this QueuePilot.</div>
+        <div class="actions">
+          <button type="submit" class="primary">Sign in</button>
+          <span class="hint" id="signin-error" role="alert"></span>
         </div>
       </form>
     </div>

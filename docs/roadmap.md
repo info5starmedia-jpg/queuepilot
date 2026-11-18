@@ -1724,6 +1724,61 @@ scan 2026-11-17). Owner decisions recorded:
 - Priority: AFTER the hosted team deployment track (it is the foundation
   family rollout and the agent's audience both sit on).
 
+### P9 build (2026-11-18, branch `p9-agent`)
+
+- [x] **Task 0 — Dashboard sign-in + plugin import UI (completes B3b)**
+  (`94c86f3`, Settings sign-out card in `3968a22`) — the static console
+  (`/`, `/dashboard/<file>`, code only) loads without the token; every API
+  route incl. `/events` still needs it. One-field sign-in shown on a 401
+  (probe before keep; sessionStorage, localStorage only on "Remember");
+  sign-out clears both; tokenless installs never prompt. `/events` moved to
+  a fetch-based SSE reader (EventSource cannot send headers). Settings →
+  Automation → Plugins card: list, enable toggle, "Import plugin".
+  `POST /plugins/:id/enable` now behind the scripting gate (enabling is
+  where an imported plugin's code first runs). Threat model in the commit.
+  Live (scratch 50477, token mode): `GET /` 200, `GET /profiles` 401;
+  wrong token → "Sign-in failed: that token was refused (401)…"; right
+  token → token in sessionStorage only, SSE "live"; UI import of
+  `ui-greeter.mjs` → "installed as ui-greeter — switched off" and
+  `evil.zip` → "rejected: path traversal rejected: ../../escape.mjs";
+  resolver `#NO RESOLVER` before the checkbox, `hi from the UI import`
+  after; Sign out → both stores null, sign-in shown.
+- [x] **Tasks 1–3 — provider layer, agent core, guardrails** (`3968a22`,
+  `04b9307`, `5a56038`) — `ModelProvider` with one Ollama implementation
+  (cloud kind reserved, refused); Settings → Agent (loopback-only URL by
+  schema + provider check; default model `qwen2.5:7b-instruct`);
+  `GET /agent/status`, `POST /agent/pull`. 20 in-process tools (read /
+  mutate / destructive), name-addressed, zod-validated; loop capped at 12
+  steps / 120 s with plain "I stopped because…"; action log
+  `<dataDir>/agent/actions.jsonl`; chats capped at 200; NDJSON streaming.
+  Guardrails in code: destructive → pending + human Approve/Decline (both
+  logged); tool results built from public fields + `scrubSecrets()`;
+  unknown tools refused; resolvers deliberately excluded (one-time codes /
+  alias secrets); plugin toggles keep the scripting gate; `/agent` on the
+  browser-origin deny list. 19 tests. Live without a usable model:
+  status `reachable:true, version 0.40.16, modelPresent:false`; a command
+  → one message "I could not use the model: the model
+  "qwen2.5:7b-instruct" is not downloaded yet — Settings → Agent →
+  Download model" (was shown twice as raw JSON before `5a56038`);
+  cross-site `POST /agent/chats` → 403; non-loopback `providerUrl` → 400.
+- [x] **Task 4 — assistant side panel + Settings → Agent** (`093bae4`) —
+  launcher, streamed text, tool chips, Approve/Decline prompt, action-log
+  tab, 3 example commands, status line; Settings card with reachability,
+  installed models, Download model. Screenshots in the P9 report.
+- [ ] **Task 5 — live scenarios with a real model: NOT RUN.** Ollama
+  0.40.16 was installed on the build machine (owner-approved, official
+  winget package). Owner then chose an Ollama **cloud** model via an Ollama
+  key (`gpt-oss:120b-cloud` manifest registered; owner decision recorded:
+  cloud models process conversations on ollama.com, overriding the
+  local-only line above — the UI now says so), but the Ollama app was not
+  signed in (`/api/chat` → 401) and the owner chose to skip for now. No
+  local model was downloaded. The scenario script is ready
+  (`scratchpad/p9-live.mjs`: create two grouped profiles, worst proxy
+  health vs `/proxies/:id/health`, start/stop, delete → confirm → decline,
+  password probe). To run: sign the Ollama app in (`ollama signin`) and set
+  Settings → Agent → Model to `gpt-oss:120b-cloud`, or download a local
+  model there.
+
 ## Phase A+B — owner gaps and watch items (2026-11-18, branch `phase-ab`)
 
 - [x] **B1 — Proxy list text import** (`dce10f2`) — `POST /proxies/import`
