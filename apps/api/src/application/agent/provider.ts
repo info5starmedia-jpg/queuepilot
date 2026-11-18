@@ -115,6 +115,9 @@ export class OllamaProvider implements ModelProvider {
     }
     if (!res.ok || !res.body) {
       const detail = await res.text().catch(() => "");
+      if (res.status === 404 && /not found/i.test(detail)) {
+        throw new Error(`the model "${this.model}" is not downloaded yet — Settings → Agent → Download model`);
+      }
       throw new Error(`model call failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
     }
     let text = "";

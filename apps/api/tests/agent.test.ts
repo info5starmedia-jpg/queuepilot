@@ -106,6 +106,17 @@ describe("model provider layer", () => {
     }
   });
 
+  it("a 404 'model not found' says to download the model", async () => {
+    const server = http.createServer((_req, res) => res.writeHead(404).end(JSON.stringify({ error: "model 'qwen2.5:7b-instruct' not found" })));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    try {
+      const p = new OllamaProvider(`http://127.0.0.1:${(server.address() as { port: number }).port}`, "qwen2.5:7b-instruct");
+      await expect(p.chat([{ role: "user", content: "hi" }], [])).rejects.toThrow(/is not downloaded yet — Settings → Agent → Download model/);
+    } finally {
+      server.close();
+    }
+  });
+
   it("a 401 from Ollama (cloud model, app not signed in) says what to do", async () => {
     const server = http.createServer((_req, res) => res.writeHead(401).end("unauthorized"));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

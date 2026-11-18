@@ -2289,6 +2289,7 @@ async function agentStream(path, body) {
   agentBusy = true;
   $("#agent-send").disabled = true;
   let bubble = null;
+  let lastText = null;
   const chips = new Map();
   try {
     const res = await fetch(path, { method: "POST", headers: authHeaders({ "content-type": "application/json" }), body: JSON.stringify(body) });
@@ -2316,6 +2317,7 @@ async function agentStream(path, body) {
           if (!bubble) agentEl("agent-msg assistant", e.text);
           else bubble.textContent = e.text;
           bubble = null;
+          lastText = e.text;
         } else if (e.type === "tool_call") {
           bubble = null;
           chips.set(e.id, agentEl("agent-chip run", e.summary));
@@ -2325,7 +2327,8 @@ async function agentStream(path, body) {
           chip.textContent = `${e.ok ? "✓" : "✕"} ${e.summary}`;
         } else if (e.type === "confirm") {
           agentConfirm(e.pending);
-        } else if (e.type === "done" && e.outcome === "error" && e.reason) {
+        } else if (e.type === "done" && e.outcome === "error" && e.reason && e.reason !== lastText) {
+          /* Only errors the loop did not already say as a message. */
           agentEl("agent-msg assistant", `⚠ ${e.reason}`);
         }
       }

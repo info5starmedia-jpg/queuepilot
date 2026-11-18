@@ -231,7 +231,7 @@ export class AgentService {
           if (abort.signal.aborted) {
             return stop(`I stopped because the ${this.limits.wallMs / 1000}-second time limit for one command ran out.`);
           }
-          const reason = `I could not reach the local model: ${err instanceof Error ? err.message : String(err)}`;
+          const reason = `I could not use the model: ${err instanceof Error ? err.message : String(err)}`;
           chat.messages.push({ role: "assistant", content: reason });
           emit({ type: "message", text: reason });
           emit({ type: "done", outcome: "error", reason });
