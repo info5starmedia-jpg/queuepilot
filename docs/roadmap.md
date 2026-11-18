@@ -1738,15 +1738,29 @@ foundation the agent and family rollout sit on.
      README.md runbook (ship → build → TLS → owner bootstrap → invites →
      publish engine → backup/ops).
 - **STILL OPEN (next, in order):**
-  1. DNS A record `queuepilot.taskpilot.tech` (owner, registrar) → then
-     the live deploy + certbot per `deploy/README.md`.
-  2. Client-side sign-in UI (app connects with email+password → `qps_`
-     session instead of device token; Team panel for owner).
-  3. L1 client enforcement (hide interactive launch; allow warmup/task
-     runs only).
-  4. Per-profile "store on cloud" toggle in the client.
-  5. Compiled/minified client packaging (honest limit already recorded).
-  6. Rename family/friends copy → "team member" sweep.
+  1. ~~DNS A record~~ **DONE 2026-11-17 22:15** — `queuepilot.taskpilot.tech`
+     live with a Let's Encrypt cert (auto-renewing, valid to 2026-02-16);
+     public `https://queuepilot.taskpilot.tech/health` verified from outside;
+     shared-nginx neighbors (taskpilot/codes-bot/sol-auto-trader) confirmed
+     undisturbed.
+  2. ~~Live deploy + certbot~~ **DONE 2026-11-17 22:20** — container live
+     behind nginx; loopback port 3010, static `/updates` + manifest served
+     from `/opt/queuepilot-server/data/updates`.
+  3. ~~Owner bootstrap~~ **DONE 2026-11-17 22:25** — owner account created;
+     sign-in + `/auth/me` + `/team/members` verified against the live URL;
+     bootstrap code confirmed dead (409); env var removed from the
+     container on recreate. 9 remaining member slots.
+  4. Client-side sign-in UI (app connects with email+password → `qps_`
+     session instead of device token; Team panel for owner) — **IN PROGRESS
+     overnight via Claude (Track B of the overnight prompt)**.
+  5. L1 client enforcement (hide interactive launch; allow warmup/task
+     runs only) — overnight via Claude.
+  6. Per-profile "store on cloud" toggle in the client — overnight via Claude.
+  7. Compiled/minified client packaging (honest limit already recorded).
+  8. Rename family/friends copy → "team member" sweep — overnight via Claude.
+- **Also running overnight (Track A):** Chromium 158 rebase — sync →
+  rebase 43-patch series → rebuild → detection battery, with a
+  check-in/re-sync failure policy; report `claude-report-engine158.md`.
 - Housekeeping on the box done 2026-11-17: removed the unused
   buddy-browser containers/volumes/`/opt/buddy-browser` at the owner's
   direction (freed port 8443 + its ufw rule). Nothing else touched.
