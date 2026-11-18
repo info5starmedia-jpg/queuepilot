@@ -1750,17 +1750,65 @@ foundation the agent and family rollout sit on.
      sign-in + `/auth/me` + `/team/members` verified against the live URL;
      bootstrap code confirmed dead (409); env var removed from the
      container on recreate. 9 remaining member slots.
-  4. Client-side sign-in UI (app connects with email+password → `qps_`
-     session instead of device token; Team panel for owner) — **IN PROGRESS
-     overnight via Claude (Track B of the overnight prompt)**.
-  5. L1 client enforcement (hide interactive launch; allow warmup/task
-     runs only) — overnight via Claude.
-  6. Per-profile "store on cloud" toggle in the client — overnight via Claude.
+  4. ~~Client-side sign-in UI (app connects with email+password → `qps_`
+     session instead of device token; Team panel for owner)~~ **DONE
+     2026-11-18 (Track B, commit 38be560)**: Settings → Team sign-in,
+     owner team panel (invites/tiers/revoke), tier badge + UI gating,
+     store-on-cloud per-profile toggle, rename sweep. Gates re-run by
+     Kimi: 747/747 api, 29/29 server, tsc×2, build, e2e GREEN.
+  5. ~~L1 client enforcement~~ — included in Track B (`data-tier` CSS
+     gating; server enforces the real rules).
+  6. ~~Per-profile "store on cloud" toggle~~ — included in Track B
+     (pull-side filter; push-side filter still open when sync gains push).
   7. Compiled/minified client packaging (honest limit already recorded).
-  8. Rename family/friends copy → "team member" sweep — overnight via Claude.
-- **Also running overnight (Track A):** Chromium 158 rebase — sync →
-  rebase 43-patch series → rebuild → detection battery, with a
-  check-in/re-sync failure policy; report `claude-report-engine158.md`.
+  8. ~~Rename family/friends copy → "team member" sweep~~ — done in Track B.
+
+### Engine 158 rebase — outcome and the shipping decision (2026-11-18)
+
+Overnight run (Claude, report `claude-report-engine158.md`): all **44/44
+patches rebased onto 158.0.8127.66** (6 needed real work; 0071 needed a
+semantic fix for upstream's new `PortParametersRef.callbacks` or WebRTC
+would have silently produced zero candidates). Build succeeded (~15 h
+with one diagnosed retry), tarball `0.5.6-qp.1` packed and installed
+through the client installer.
+
+**Decision: NOT shipped.** Two reasons, both fingerprint-level:
+1. `158.0.8127.66` was the newest 158 tag but **never shipped on any
+   channel** (Windows Stable 158 was .18/.36/.37). High-entropy client
+   hints expose the full build number — a site comparing against
+   Chrome's release history sees a build no real user runs.
+2. The build used the non-official config (no LTO/PGO), unlike qp.4.
+
+The work is preserved on branch **`engine-158`** (refreshed patches +
+CHROMIUM_VERSION + manifest entry), so the next cycle starts from it.
+
+**Battery results that matter:** round 2 (Norton Web Shield off) —
+CreepJS 0% headless/0% stealth, iphey Trustworthy MX 100, Cloudflare
+challenge + anti-bot bypassed with no interaction, TLS JA4 **byte-
+identical to stock Chrome**, aliasmode 23 passed, no regressions vs
+qp.4. **BrowserScan −5% canvas tampering** — the per-profile canvas
+noise is visible to detectors. Owner decision (agreed 2026-11-18):
+**keep the noise** (profiles stay unlinkable); the real fix is
+per-persona real-device canvas — a roadmap feature, not a patch tweak.
+
+**Also discovered (must ship in the next engine):** patch 0011 brand
+fix — Chromium-branded builds omit `"Google Chrome"` from the client
+hint brand list while every persona says Chrome in the UA; adding the
+brand (same string/shuffle as a branded build) **cleared iphey's
+"whale / inconsistent fingerprint" flag**. It is in the engine-158
+branch and must be in the 159 build (consider a 157 hotfix only if
+whale sightings matter before then).
+
+**Next engine cycle (needs an overnight window + owner go):**
+- Target a **shipped Windows Stable 159** build (not the newest tag —
+  verify against chromiumdash / chrome-for-testing stable channel
+  FIRST), official config (LTO/PGO, ~12.5 h on this box).
+- Carry the engine-158 branch forward (rebase 159 onto it).
+- Run the full two-round battery again, this time with the German
+  proxies imported into a scratch API and Norton off from hour zero.
+- Roadmap features to schedule: real-device canvas per persona.
+
+### Also running overnight (Track A): — DONE, see above
 - Housekeeping on the box done 2026-11-17: removed the unused
   buddy-browser containers/volumes/`/opt/buddy-browser` at the owner's
   direction (freed port 8443 + its ufw rule). Nothing else touched.
