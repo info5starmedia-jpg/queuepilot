@@ -53,6 +53,7 @@ import type { SettingsService } from "./application/settings/settings.service.js
 import type { SecretStore } from "./application/secrets/secret-store.js";
 import { WindowTilingService } from "./application/windows/window-tiling.service.js";
 import { registerWindowRoutes } from "./http/windows.routes.js";
+import { registerTeamRoutes } from "./http/team.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -234,6 +235,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store: deps.settingsStore,
       hasApiToken: Boolean(deps.config.apiToken),
     });
+    registerTeamRoutes(app, { settings: deps.settingsStore });
   }
 
   return app;

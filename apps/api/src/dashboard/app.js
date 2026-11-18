@@ -756,6 +756,7 @@ async function openProfilePanel(id) {
       .join("\n");
     $("#pf-starturls").value = (panelExtra.startUrls ?? []).join("\n");
     $("#pf-favorite").checked = panelExtra.favorite === true;
+    $("#pf-storeoncloud").checked = panelExtra.storeOnCloud !== false; /* default on */
     $("#pf-tabcolor").value = /^#[0-9a-fA-F]{6}$/.test(panelTabColor ?? "")
       ? panelTabColor
       : "#4a9eff";
@@ -811,6 +812,7 @@ $("#panel-form").addEventListener("submit", async (e) => {
       method: "PATCH",
       body: JSON.stringify({
         favorite: $("#pf-favorite").checked,
+        storeOnCloud: $("#pf-storeoncloud").checked,
         smsNumbers: sms,
         startUrls,
         phone: phone === "" ? null : phone,
@@ -945,7 +947,7 @@ async function loadProxies() {
       <td style="font-weight:600">${esc(p.name)}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
+      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
       <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
       <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>`;
@@ -1780,6 +1782,10 @@ function renderIntegrationsInfo() {
     renderEngineUpdateCard(box);
     return;
   }
+  if (settingsSection === "team") {
+    renderTeamCard(box);
+    return;
+  }
   if (settingsSection === "automation") {
     renderPluginsCard(box);
     return;
@@ -1937,6 +1943,7 @@ async function persistSetting(key, field) {
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
     if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
     if (settingsSection === "agent") refreshAgentCard();
+    if (settingsSection === "team" && (key === "serverUrl" || key === "token")) refreshTeamSession();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */
@@ -2485,6 +2492,204 @@ $("#signin-form").addEventListener("submit", async (ev) => {
 $("#signout").addEventListener("click", signOut);
 $("#signout").hidden = storedToken() === null;
 
+/* ===================== hosted team (2026-11-18) ========================
+   Sign-in, the owner's Team panel, and tier gating. Everything goes through
+   this API's /team/* routes, which relay to the team server — the browser
+   never talks to the team server and never holds the session token. With
+   no server configured, none of this shows and the console is unchanged. */
+
+const TIER_LABEL = { L1: "Staff", L2: "Editor", L3: "Manager", owner: "Owner" };
+let teamSession = null;
+let teamPromptDismissed = false;
+
+function teamTier() {
+  return teamSession?.account?.tier ?? null;
+}
+
+function applyTier() {
+  const tier = teamTier();
+  const badge = $("#tier-badge");
+  if (tier) {
+    document.body.dataset.tier = tier;
+    badge.textContent = TIER_LABEL[tier] ?? tier;
+    badge.hidden = false;
+  } else {
+    delete document.body.dataset.tier;
+    badge.hidden = true;
+  }
+  $("#plan-line").textContent = teamSession?.account
+    ? `TEAM · ${String(TIER_LABEL[tier] ?? tier ?? "").toUpperCase()}`
+    : teamSession?.source === "device"
+      ? "TEAM · DEVICE TOKEN"
+      : "LOCAL · TEAM USE";
+}
+
+async function refreshTeamSession() {
+  try {
+    teamSession = await api("/team/session");
+  } catch {
+    teamSession = null;
+  }
+  applyTier();
+  if (teamSession?.configured && teamSession.source === null && !teamPromptDismissed) openTeamSignIn(teamSession.message ?? "");
+  if (activeView === "settings" && settingsSection === "team") renderIntegrationsInfo();
+}
+
+function openTeamSignIn(message = "") {
+  $("#team-signin-server").textContent = `Team server: ${teamSession?.serverUrl ?? "?"}`;
+  $("#team-signin-error").textContent = message;
+  $("#team-signin").hidden = false;
+  $("#team-signin-email").focus();
+}
+
+function closeTeamSignIn() {
+  teamPromptDismissed = true;
+  $("#team-signin").hidden = true;
+}
+$("#team-signin-close").addEventListener("click", closeTeamSignIn);
+$("#team-signin-offline").addEventListener("click", closeTeamSignIn);
+$("#team-signin-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("#team-signin-error").textContent = "Signing in…";
+  try {
+    await api("/team/signin", {
+      method: "POST",
+      body: JSON.stringify({ email: $("#team-signin-email").value.trim(), password: $("#team-signin-password").value }),
+    });
+    $("#team-signin-password").value = "";
+    $("#team-signin").hidden = true;
+    await refreshTeamSession();
+    toast(`signed in as ${teamSession?.account?.email ?? "team member"}`);
+  } catch (err) {
+    /* plain text: "wrong email or password", "too many attempts…", unreachable */
+    $("#team-signin-error").textContent = err.message;
+    $("#team-signin-password").select();
+  }
+});
+
+function renderTeamCard(box) {
+  const s = teamSession;
+  if (!s?.configured) {
+    box.innerHTML = `<div class="info-card"><h4>Team server</h4><p>Not connected — QueuePilot runs fully offline. Enter your team server URL below to sign in.</p></div>`;
+    return;
+  }
+  if (!s.account) {
+    const how = s.source === "device" ? `<p>Connected with a device token${s.device?.role ? ` (role ${esc(s.device.role)})` : ""}.</p>` : "";
+    const reach = s.reachable === false ? `<p style="color:var(--red)">Server unreachable: ${esc(s.message ?? "")}</p>` : "";
+    box.innerHTML = `<div class="info-card" id="team-card"><h4>Team server</h4>${how}${reach}
+      <p>Sign in with the email and password your team owner set you up with.</p>
+      <button type="button" class="primary" id="team-card-signin">Sign in…</button></div>`;
+    $("#team-card-signin").addEventListener("click", () => openTeamSignIn());
+    return;
+  }
+  const a = s.account;
+  box.innerHTML = `<div class="info-card" id="team-card"><h4>Team server</h4>
+      <p>Signed in as <b>${esc(a.displayName)}</b> (${esc(a.email)}) — <span class="tier-badge">${esc(TIER_LABEL[a.tier] ?? a.tier)}</span></p>
+      <button type="button" id="team-signout">Sign out of team</button>
+    </div>${a.tier === "owner" ? `<div class="info-card" id="team-panel"><h4>Team</h4><div id="team-panel-body">loading…</div></div>` : ""}`;
+  $("#team-signout").addEventListener("click", async () => {
+    try {
+      await api("/team/signout", { method: "POST" });
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    teamPromptDismissed = true;
+    await refreshTeamSession();
+  });
+  if (a.tier === "owner") renderTeamPanel();
+}
+
+async function renderTeamPanel(notice = "") {
+  const body = $("#team-panel-body");
+  if (!body) return;
+  let members, invites;
+  try {
+    [members, invites] = await Promise.all([api("/team/members"), api("/team/invites")]);
+  } catch (err) {
+    body.innerHTML = `<p style="color:var(--red)">${esc(err.message)}</p>`;
+    return;
+  }
+  const tierSelect = (m) =>
+    `<select data-tm="role">${["L1", "L2", "L3"].map((t) => `<option value="${t}" ${m.tier === t ? "selected" : ""}>${t} · ${TIER_LABEL[t]}</option>`).join("")}</select>`;
+  const memberRows = members.members
+    .map((m) => `<tr data-id="${esc(m.id)}">
+        <td>${esc(m.email)}</td><td>${esc(m.displayName)}</td>
+        <td>${m.tier === "owner" ? "Owner" : tierSelect(m)}</td>
+        <td>${m.active ? "active" : `<span style="color:var(--faint)">deactivated</span>`}</td>
+        <td>${m.tier === "owner" ? "" : `<button type="button" data-tm="active">${m.active ? "Deactivate" : "Reactivate"}</button> <button type="button" class="danger" data-tm="remove">Remove</button>`}</td>
+      </tr>`)
+    .join("");
+  const now = Date.now();
+  const open = invites.invites.filter((i) => i.usedAt === null && Date.parse(i.expiresAt) > now);
+  const when = (iso) => esc(String(iso).slice(0, 16).replace("T", " "));
+  const inviteRows = open
+    .map((i) => `<tr data-id="${esc(i.id)}"><td>${esc(i.role)} · ${esc(TIER_LABEL[i.role] ?? "")}</td><td>${when(i.createdAt)}</td><td>${when(i.expiresAt)}</td><td><button type="button" class="danger" data-ti="revoke">Revoke</button></td></tr>`)
+    .join("");
+  body.innerHTML = `
+    <p class="hint">${members.members.length} of ${members.cap} members · ${open.length} outstanding invite${open.length === 1 ? "" : "s"}</p>
+    <table class="grid team-table"><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Status</th><th></th></tr></thead><tbody>${memberRows}</tbody></table>
+    <h4 style="margin-top:14px">Invite a team member</h4>
+    <div class="actions">
+      <select id="team-invite-role"><option value="L1">L1 · Staff (run warmups/tasks)</option><option value="L2">L2 · Editor (edit, no add/delete)</option><option value="L3">L3 · Manager (add/delete)</option></select>
+      <button type="button" class="primary" id="team-invite-go">Create invite</button>
+    </div>
+    <div id="team-invite-out"></div>
+    <div id="team-panel-notice" class="hint" role="alert">${esc(notice)}</div>
+    ${open.length ? `<h4 style="margin-top:14px">Outstanding invites</h4><table class="grid team-table"><thead><tr><th>Role</th><th>Created</th><th>Expires</th><th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ""}`;
+
+  const fail = (err) => {
+    $("#team-panel-notice").textContent = err.message; /* TEAM_FULL / OWNER_IMMUTABLE as plain text */
+  };
+  body.querySelectorAll("tr[data-id] [data-tm]").forEach((el) => {
+    const id = el.closest("tr").dataset.id;
+    const m = members.members.find((x) => x.id === id);
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "click", async () => {
+      try {
+        if (el.dataset.tm === "role") await api(`/team/members/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ role: el.value }) });
+        if (el.dataset.tm === "active") await api(`/team/members/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ active: !m.active }) });
+        if (el.dataset.tm === "remove") {
+          if (!window.confirm(`Remove ${m.email} from the team? Their account is deleted.`)) return;
+          await api(`/team/members/${encodeURIComponent(id)}`, { method: "DELETE" });
+        }
+        await renderTeamPanel("saved");
+      } catch (err) {
+        fail(err);
+      }
+    });
+  });
+  body.querySelectorAll("[data-ti='revoke']").forEach((el) =>
+    el.addEventListener("click", async () => {
+      try {
+        await api(`/team/invites/${encodeURIComponent(el.closest("tr").dataset.id)}`, { method: "DELETE" });
+        await renderTeamPanel("invite revoked");
+      } catch (err) {
+        fail(err);
+      }
+    }),
+  );
+  $("#team-invite-go").addEventListener("click", async () => {
+    try {
+      const r = await api("/team/invites", { method: "POST", body: JSON.stringify({ role: $("#team-invite-role").value }) });
+      await renderTeamPanel();
+      /* The code is shown ONCE — the server keeps only its hash. */
+      $("#team-invite-out").innerHTML = `
+        <p>Invite code for a <b>${esc(TIER_LABEL[r.invite.role] ?? r.invite.role)}</b> (expires ${esc(String(r.invite.expiresAt).slice(0, 10))}):</p>
+        <div class="actions"><span class="team-code" id="team-invite-code">${esc(r.code)}</span> <button type="button" id="team-invite-copy">Copy</button></div>
+        <p class="hint">Shown only this once. Hand it over out of band (in person, by phone, in a private message) — never post it anywhere shared.</p>`;
+      $("#team-invite-copy").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(r.code);
+          toast("invite code copied");
+        } catch {
+          toast("copy failed — select the code and copy it by hand", "error");
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+}
+
 /* ================================ boot ================================= */
 
 setView("profiles"); /* renders nav state, topbar actions, and stats */
@@ -2494,5 +2699,6 @@ loadProxies();
 loadProxyProviders();
 refreshTabsProfiles();
 loadSettings();
+refreshTeamSession();
 connectEvents();
 setInterval(refreshHealth, 30_000);

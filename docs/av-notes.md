@@ -2,7 +2,7 @@
 
 QueuePilot ships a **self-compiled, unsigned** Chromium-based engine. That is
 deliberate: the fingerprint protections are patched in at C++ level, and we do
-not pay for a code-signing certificate for a family-and-friends build. The
+not pay for a code-signing certificate for a team-member build. The
 downside is that antivirus products treat any new unsigned browser binary as
 suspicious. This page is the fix.
 
@@ -48,7 +48,7 @@ Add an exclusion for this folder (and only this folder):
 ## Why not just sign the binary?
 
 A code-signing certificate costs money and ties the binary to a legal
-identity. For a non-commercial build shared with family and friends, a
+identity. For a non-commercial build shared with team members, a
 folder exclusion is the proportionate fix. If this build is ever distributed
 more widely, buying a certificate and signing `chrome.exe` is the correct
 next step — the build script supports it unchanged.

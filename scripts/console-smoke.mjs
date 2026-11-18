@@ -1,6 +1,6 @@
 /**
  * Console smoke — drives the REAL dashboard in a headless Chromium and
- * clicks its buttons, the way a family member does.
+ * clicks its buttons, the way a team member does.
  *
  * Why it exists: from v0.8.0 to v0.16.4 every body-less console button
  * (profile Delete/Stop, proxy test, provider refresh, tab close) answered

@@ -124,7 +124,7 @@ describe("TeamSyncLoop", () => {
 
     const b = loopMachine({ configured: false });
     const res = await b.loop.tick();
-    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, pending: 0, failed: 0 });
+    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, pending: 0, failed: 0, skipped: 0 });
     expect(b.ctx.profiles.list()).toHaveLength(0);
   });
 

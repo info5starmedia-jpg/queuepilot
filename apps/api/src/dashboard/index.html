@@ -27,7 +27,7 @@
         <div><span id="engine-dot" class="dot dot-off"></span><span id="engine">engine…</span></div>
         <div><span id="google-dot" class="dot dot-off"></span><span id="google">google …</span></div>
         <div><span id="sse-dot" class="dot dot-off"></span><span id="sse">offline</span></div>
-        <div class="plan">LOCAL · FAMILY USE</div>
+        <div class="plan" id="plan-line">LOCAL · TEAM USE</div>
         <button id="signout" class="ghost" type="button" hidden title="forget the API token in this browser">Sign out</button>
       </div>
     </aside>
@@ -36,6 +36,7 @@
     <div id="main">
       <header id="topbar">
         <h2 id="view-title">Profiles</h2>
+        <span id="tier-badge" class="tier-badge" hidden title="your role on the team server"></span>
         <div id="view-stats"></div>
         <div id="topbar-actions"></div>
       </header>
@@ -363,6 +364,7 @@
           <label>start pages <textarea id="pf-starturls" rows="2" placeholder="one URL per line, opened at launch"></textarea></label>
           <label class="inline">tab color <input id="pf-tabcolor" type="color" /> <button type="button" id="pf-clearcolor" class="ghost">clear</button></label>
           <label class="check"><input id="pf-favorite" type="checkbox" /> favorite</label>
+          <label class="check" title="off = the team sync loop leaves this profile alone"><input id="pf-storeoncloud" type="checkbox" /> Store on cloud (team sync)</label>
         </fieldset>
         <div class="panel-actions">
           <button type="submit" class="primary">Save</button>
@@ -404,6 +406,22 @@
         <div class="actions">
           <button type="submit" class="primary">Sign in</button>
           <span class="hint" id="signin-error" role="alert"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- hosted team sign-in (2026-11-18): email + password on the team server -->
+    <div id="team-signin" class="overlay" hidden>
+      <form id="team-signin-form" class="drawer" style="width:420px;margin:12vh auto 0;height:auto" autocomplete="on">
+        <div class="drawer-head"><h3>Sign in to your team</h3><button type="button" id="team-signin-close" class="ghost" title="work offline">✕</button></div>
+        <p class="hint" id="team-signin-server"></p>
+        <label>Email <input id="team-signin-email" type="email" required maxlength="320" autocomplete="username" /></label>
+        <label>Password <input id="team-signin-password" type="password" required maxlength="500" autocomplete="current-password" /></label>
+        <div class="hint">Your session is kept by this QueuePilot (Settings → Team) and sent only to your team server.</div>
+        <div class="actions">
+          <button type="submit" class="primary">Sign in</button>
+          <button type="button" id="team-signin-offline" class="ghost">Work offline</button>
+          <span class="hint" id="team-signin-error" role="alert"></span>
         </div>
       </form>
     </div>

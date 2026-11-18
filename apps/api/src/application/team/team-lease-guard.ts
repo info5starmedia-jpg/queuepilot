@@ -4,6 +4,7 @@ import type { SettingsService } from "../settings/settings.service.js";
 import {
   TeamServerClient,
   TeamServerError,
+  teamCredential,
 } from "./team-client.js";
 
 /**
@@ -34,8 +35,9 @@ export class TeamLeaseGuard {
 
   private client(): TeamServerClient | null {
     const team = this.settings.get("team");
-    if (!team.serverUrl || !team.token) return null;
-    return new TeamServerClient(team.serverUrl, team.token);
+    const cred = teamCredential(team);
+    if (!team.serverUrl || !cred) return null;
+    return new TeamServerClient(team.serverUrl, cred.token);
   }
 
   async acquire(profileId: string): Promise<void> {

@@ -7,7 +7,7 @@ below touches only QueuePilot's own files, container, volume, and vhost.
 What runs where:
 
 ```
-family PCs ──HTTPS──> nginx (shared, TLS via Let's Encrypt)
+team PCs   ──HTTPS──> nginx (shared, TLS via Let's Encrypt)
                           │  queuepilot.taskpilot.tech
                           ├── /engines.manifest.json, /updates/*  (static files)
                           └── everything else ──> 127.0.0.1:3010 (queuepilot-server container)
@@ -103,7 +103,7 @@ node deploy/publish-engine.mjs --version 0.5.5-qp.4
 
 Uploads the tarball, verifies sha256, rewrites the manifest URLs to
 `https://queuepilot.taskpilot.tech/updates/...`, publishes the manifest.
-Family PCs pick it up when their Settings → Engine → Update server URL
+Team members' PCs pick it up when their Settings → Engine → Update server URL
 points at `https://queuepilot.taskpilot.tech/` (Settings → Engine in the
 app, or `QP_UPDATE_SERVER_URL`).
 

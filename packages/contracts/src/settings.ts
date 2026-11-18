@@ -66,6 +66,14 @@ export const TeamSettingsSchema = z.object({
    * treats this machine as inside the trust boundary.
    */
   syncPassphrase: z.string().max(200).nullable().default(null),
+  /**
+   * Hosted sign-in (2026-11-18): a `qps_` session token from POST
+   * /auth/signin on the team server. When present and unexpired it is the
+   * credential the client sends; otherwise `token` (the device token) is.
+   * Plaintext here for the same reason as `token`.
+   */
+  sessionToken: z.string().max(500).nullable().default(null),
+  sessionExpiresAt: z.string().max(64).nullable().default(null),
 });
 export type TeamSettings = z.infer<typeof TeamSettingsSchema>;
 

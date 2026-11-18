@@ -527,3 +527,61 @@ table.grid td.wrap { white-space: normal; }
 .agent-action .o-ok, .agent-action .o-approved { color: var(--green); }
 .agent-action .o-error, .agent-action .o-refused, .agent-action .o-invalid, .agent-action .o-declined, .agent-action .o-stopped { color: var(--red); }
 .agent-action .o-awaiting_confirmation { color: var(--amber); }
+
+/* ===== hosted team tiers (2026-11-18) =====
+   body[data-tier] is set only for a signed-in team ACCOUNT. No server, a
+   device token, or offline = no attribute = nothing hidden. This is UI
+   gating only — the team server enforces the real rules. */
+.tier-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  margin-left: 10px;
+}
+body[data-tier="owner"] .tier-badge { color: var(--green); border-color: var(--green); }
+.team-code { font-family: var(--mono); font-size: 15px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: var(--radius); user-select: all; }
+.team-table { width: 100%; margin-top: 8px; }
+.team-table td, .team-table th { padding: 4px 6px; text-align: left; }
+
+/* L1 staff: run warmups/tasks only — no browsing, no edits, no add/delete,
+   no proxy credentials. */
+body[data-tier="L1"] #nav button[data-view="tabs"],
+body[data-tier="L1"] #nav button[data-view="cookies"],
+body[data-tier="L1"] #tb-new,
+body[data-tier="L1"] #tb-import,
+body[data-tier="L1"] #tb-start,
+body[data-tier="L1"] #tb-delete,
+body[data-tier="L1"] #profiles-table [data-act="start"],
+body[data-tier="L1"] #profiles-table button[data-act="edit"],
+body[data-tier="L1"] #profiles-table [data-act="clone"],
+body[data-tier="L1"] #profiles-table [data-act="regen"],
+body[data-tier="L1"] #profiles-table [data-act="delete"],
+body[data-tier="L1"] #profile-panel,
+body[data-tier="L1"] #proxy-add-open,
+body[data-tier="L1"] #proxies-move,
+body[data-tier="L1"] #proxies-move-group,
+body[data-tier="L1"] #proxies-delete-selected,
+body[data-tier="L1"] #proxies [data-act="delete"],
+body[data-tier="L1"] .proxy-cred,
+body[data-tier="L1"] #warmup-record,
+body[data-tier="L1"] #warmups-table [data-act="delete"] { display: none !important; }
+body[data-tier="L1"] #profiles-table [data-act="edit"],
+body[data-tier="L1"] #profiles-table [data-act="favorite"] { pointer-events: none; cursor: default !important; }
+
+/* L2 editor: edits allowed, no add/delete. */
+body[data-tier="L2"] #tb-new,
+body[data-tier="L2"] #tb-import,
+body[data-tier="L2"] #tb-delete,
+body[data-tier="L2"] #profiles-table [data-act="clone"],
+body[data-tier="L2"] #profiles-table [data-act="delete"],
+body[data-tier="L2"] #pf-delete,
+body[data-tier="L2"] #proxy-add-open,
+body[data-tier="L2"] #proxies-delete-selected,
+body[data-tier="L2"] #proxies [data-act="delete"],
+body[data-tier="L2"] #warmup-record,
+body[data-tier="L2"] #warmups-table [data-act="delete"] { display: none !important; }

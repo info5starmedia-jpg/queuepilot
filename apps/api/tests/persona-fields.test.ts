@@ -24,6 +24,7 @@ describe("personaFieldsOf", () => {
       favorite: false,
       tabColor: null,
       windowBounds: null,
+      storeOnCloud: true,
     });
     expect(personaFieldsOf({})).toEqual(personaFieldsOf(null));
   });

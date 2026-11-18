@@ -51,7 +51,7 @@ import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
 import { TeamLeaseGuard } from "./application/team/team-lease-guard.js";
-import { TeamSyncLoop } from "./application/team/team-sync-loop.js";
+import { TeamSyncLoop, storeOnCloudOff } from "./application/team/team-sync-loop.js";
 import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
@@ -264,8 +264,15 @@ export async function main(): Promise<void> {
   // click). Off the startup path — a slow or unreachable server never delays boot.
   void engineUpdate.checkAtLaunch((line) => console.log(`[queuepilot] ${line}`)).catch(() => {});
   // P7.7c: background pull sync — enabled only when Settings → Team carries
-  // serverUrl + token + syncPassphrase; otherwise every tick is a no-op.
-  new TeamSyncLoop({ bundles, settings: settingsService, dataDir: config.dataDir }).start();
+  // serverUrl + a credential (session or device token) + syncPassphrase;
+  // otherwise every tick is a no-op. Profiles with "Store on cloud" off are
+  // skipped.
+  new TeamSyncLoop({
+    bundles,
+    settings: settingsService,
+    dataDir: config.dataDir,
+    skip: (id) => storeOnCloudOff(profiles, id),
+  }).start();
   console.log(
     `[queuepilot] API listening on http://${config.host}:${config.port} (runtime: ${runtime.kind})`,
   );

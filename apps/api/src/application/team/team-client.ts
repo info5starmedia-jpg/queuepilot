@@ -36,6 +36,46 @@ export interface TeamPullResult {
   updatedAt: string;
 }
 
+/** Human-account tiers on the hosted team server (apps/server auth-store). */
+export type TeamTier = "L1" | "L2" | "L3" | "owner";
+
+export interface TeamAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  tier: TeamTier;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface TeamInvite {
+  id: string;
+  role: TeamTier;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+  usedByEmail: string | null;
+}
+
+/**
+ * Token source (hosted sign-in, 2026-11-18): which bearer this machine sends.
+ * A signed-in `qps_` session wins while it is unexpired; otherwise the
+ * device token (Settings → Team → token) is used exactly as before. Null =
+ * no credential, team mode is off.
+ */
+export function teamCredential(
+  team: { token: string | null; sessionToken?: string | null; sessionExpiresAt?: string | null },
+  now: number = Date.now(),
+): { token: string; source: "session" | "device" } | null {
+  if (team.sessionToken) {
+    const exp = team.sessionExpiresAt ? Date.parse(team.sessionExpiresAt) : NaN;
+    if (Number.isNaN(exp) || exp > now) return { token: team.sessionToken, source: "session" };
+  }
+  if (team.token) return { token: team.token, source: "device" };
+  return null;
+}
+
 export class TeamServerClient {
   constructor(
     private readonly baseUrl: string,
@@ -53,7 +93,7 @@ export class TeamServerClient {
     path: string,
     opts: { body?: Buffer; query?: Record<string, string | number>; asJson?: boolean } = {},
   ): Promise<Response> {
-    const headers: Record<string, string> = { authorization: `Bearer ${this.token}` };
+    const headers: Record<string, string> = this.token ? { authorization: `Bearer ${this.token}` } : {};
     const init: RequestInit = { method, headers };
     if (opts.body) {
       headers["content-type"] = opts.asJson ? "application/json" : "application/octet-stream";
@@ -159,5 +199,57 @@ export class TeamServerClient {
   /** Admin force-release: evicts a stuck lease without being the holder. */
   async forceReleaseLease(profileId: string): Promise<void> {
     await this.req("DELETE", `/leases/${encodeURIComponent(profileId)}`);
+  }
+
+  // ---- hosted accounts (2026-11-18) ----
+
+  private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await this.req(
+      method,
+      path,
+      body === undefined ? {} : { body: Buffer.from(JSON.stringify(body)), asJson: true },
+    );
+    return (await res.json()) as T;
+  }
+
+  /** Email+password sign-in. Public route — the token passed in is ignored. */
+  static async signIn(
+    baseUrl: string,
+    email: string,
+    password: string,
+  ): Promise<{ token: string; expiresAt: string; account: TeamAccount }> {
+    return new TeamServerClient(baseUrl, "").json("POST", "/auth/signin", { email, password });
+  }
+
+  async me(): Promise<{ account?: TeamAccount | null; device?: { role: string | null; name: string } }> {
+    return this.json("GET", "/auth/me");
+  }
+
+  async signOut(): Promise<void> {
+    await this.json("POST", "/auth/signout");
+  }
+
+  async listMembers(): Promise<{ members: TeamAccount[]; cap: number }> {
+    return this.json("GET", "/team/members");
+  }
+
+  async updateMember(id: string, patch: { role?: TeamTier | undefined; active?: boolean | undefined }): Promise<{ account: TeamAccount; changed: boolean }> {
+    return this.json("PATCH", `/team/members/${encodeURIComponent(id)}`, patch);
+  }
+
+  async removeMember(id: string): Promise<void> {
+    await this.json("DELETE", `/team/members/${encodeURIComponent(id)}`);
+  }
+
+  async createInvite(role: TeamTier): Promise<{ code: string; invite: TeamInvite }> {
+    return this.json("POST", "/team/invites", { role });
+  }
+
+  async listInvites(): Promise<{ invites: TeamInvite[] }> {
+    return this.json("GET", "/team/invites");
+  }
+
+  async revokeInvite(id: string): Promise<void> {
+    await this.json("DELETE", `/team/invites/${encodeURIComponent(id)}`);
   }
 }

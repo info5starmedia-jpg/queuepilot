@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   QueuePilot engine packager (P5.5) — turns a locally built engine directory
-  into a shareable, self-installing zip for family & friends.
+  into a shareable, self-installing zip for team members.
 
 .DESCRIPTION
   Takes a Chromium/Fury-core build output directory (the one containing

@@ -1,6 +1,6 @@
 /**
  * Team server config (P7.7a). One self-hosted node that moves encrypted
- * session bundles between family/friends machines. The server never sees
+ * session bundles between team members' machines. The server never sees
  * plaintext: bundle payloads are opaque bytes (AES-256-GCM sealed by the
  * client, passphrase never transmitted), and auth is bearer tokens verified
  * as SHA-256 hashes.
