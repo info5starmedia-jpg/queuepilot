@@ -234,14 +234,45 @@ change is an owner decision, tracked as roadmap **SEC-2**.
 - **Gates:** 751/751 API + 20/20 server. The in-house audit is CLEAR with
   its follow-ups fixed.
 
-## Next, in order
+### 8. W1: the owner's warmer, finished (`91a2936`, `17f63ca`, `42518421`, `0716cad4`)
 
-1. Per-provider J2 schema files, once the owner shares each provider's
-   API docs; live-verify with their keys.
-2. W (warmer port).
-3. J3a tab-state core, then J6 (+ Discord), then DECK (test build, then
-   build; owner GO).
-4. J3b, J4, J5, J7, J8.
+- **Engine:** the owner's mlx-warmup is vendored under
+  `application/warmups/persona/`. It runs on QP profiles through
+  `PersonaWarmupService`: it starts an idle profile, attaches over CDP,
+  then stops the profile again.
+- **Walmart bot check:**
+  - Root cause: HUMAN/PerimeterX challenges CDP-synthesised mouse
+    *clicks*. Moves, wheel, navigation and `element.click()` all pass.
+  - The warmer now clicks elements, and a live re-run passed.
+  - The engine-level fix is roadmap **ENG-INPUT**.
+- **Per-country sites:** each site has a `urlByCountry` field, and the
+  run looks up the exit IP's country (ip-api), so a Canadian proxy
+  visits bestbuy.ca, not bestbuy.com's country splash page.
+- **Audit fixes:**
+  - The warmer, resolve and AYCD routes are browser-origin denied.
+  - Persona URLs must be public http(s).
+  - The consent clicker never presses Continue/OK, links, or form
+    buttons, and makes no generic match on account/cart/checkout pages.
+- **Console:** a Persona warmup panel in the Warmups view, plus
+  per-persona site settings (include/exclude/add/remove) in
+  `<dataDir>/persona-sites.json`. W2 moves both to the server.
+- **Gates:** 762 API + 20 server, tsc and build clean.
+  - Flakes seen once each under full-suite load, both green alone:
+    `bookmark-sets` EPERM on rename, and one server run cut short.
+  - Logged in the roadmap.
+
+## Next, in order (owner, 2026-11-19)
+
+1. **LIC:** accounts plus expiring licence keys on `apps/server`, with
+   strict per-account separation (the owner can't read testers' data,
+   and testers can't read the owner's).
+2. **W2:** server holds personas, site lists and planning; the local
+   side is a scrambled step runner.
+3. J3a tab-state core, then J6 (+ Discord), DECK (owner GO after the
+   test build), M4, M5.
+4. **R** release packaging (includes item #7: minified client) before
+   any tester gets QueuePilot.
+5. Per-provider J2 schema files once the owner shares provider API docs.
 
 ## Rules that still apply
 

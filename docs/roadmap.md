@@ -1593,11 +1593,24 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
   - Also fixed an older bug: `markProfile` wrote the status from the launch-start copy of the profile, wiping anything changed meanwhile (the pin, persona edits made while running).
   - 3 tests.
   - **Live 2026-11-19** (scratch API, fake runtime, isolated data and secret dirs): two sticky profiles kept 10.0.0.1 / 10.0.0.2 across launches; pin stored; re-roll → next pool entry.
-- [~] **W — Owner warmer as QP's warmup engine** (`91a2936`: engine vendored + persona warmup routes + 3 tests; audit, live run and console UI next window): port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
-  - [ ] **W1 — warmer finish (next window, before J3a):**
-    - In-house security audit, plus a live persona warmup on a real fury profile (isolated scratch dirs).
-    - Console **Warmup** panel: persona picker, start/stop, progress.
-    - **Site list settings** per persona: list sites, include/exclude each, add (URL, category, weight), remove. Saved as operator overrides in `<dataDir>/personas`; bundled originals untouched.
+- [~] **W — Owner warmer as QP's warmup engine** (W1 done; W2 next after LIC): port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
+  - [x] **W1 — warmer finish (DONE 2026-11-19: `17f63ca`, `42518421`, `0716cad4`):**
+    - [x] In-house security audit; all 3 MEDIUM findings fixed (`42518421`):
+      - Warmer, resolve and AYCD routes are browser-origin denied.
+      - Persona URLs must be public http(s) hosts.
+      - The consent clicker no longer matches bare Continue/OK, links or anything inside a form, and makes no generic match on account/cart/checkout pages.
+      - The link skip-list is broadened, and the status map is bounded.
+    - [x] Live persona warmup on a real fury profile; Walmart bot check root-caused and fixed (see ENG-INPUT).
+    - [x] **Per-country sites:** a Canadian exit IP visits bestbuy.ca / walmart.ca / amazon.ca (`urlByCountry` plus exit-IP country lookup), so the US "Choose a country" page no longer appears.
+    - [x] Console **Persona warmup** panel (Warmups view): profile, persona, sessions, keep-running, start, live status.
+    - [x] **Site settings** per persona: untick sites to skip them, add your own (public http(s)), remove added ones, save. Stored in `<dataDir>/persona-sites.json`; bundled personas untouched. `GET/PUT /warmups/personas/:id/sites`.
+    - Not done: a Stop button (a run ends after its sessions; stopping the profile ends it).
+    - Known LOW: the sessions count is effectively 1, because an immediate plan compiles one session per day.
+    - **Test flakes under full-suite load** (green when run alone):
+      - `bookmark-sets` EPERM on a temp-file rename (Windows file lock), 5/5 green alone.
+      - One server run showed 12/20 with no failure listed, 20/20 alone.
+      - Earlier: one "87/88 files" run.
+      - To investigate: retry-on-EPERM in atomic writes; vitest worker crash.
   - [ ] **W2 — server split + scrambled runner (owner decision 2026-11-19: options 1 + 3; right after W1, before J3a):**
     - Personas, site lists, planning and timing logic live **only on the QueuePilot server** (`apps/server`). The local QueuePilot authenticates with its team token and requests a plan.
     - The local side is a small, generic **step runner** (search / open / dwell / scroll / click same-site / consent), shipped compiled + minified + obfuscated, with no personas or planning code.
