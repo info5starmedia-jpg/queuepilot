@@ -206,11 +206,12 @@ export async function main(): Promise<void> {
     undefined, // leaseRenewIntervalMs default
     // D-003: rotation links resolve launch proxies from provider pools.
     proxyProviders,
-    // Browser timezone follows the proxy: look up the exit IP's timezone
-    // through the proxy itself at launch (same geo echo as the proxy Test).
+    // Browser timezone and locale follow the proxy: look up the exit IP's
+    // timezone and country through the proxy itself at launch (same geo echo
+    // as the proxy Test).
     async (proxy) => {
       const r = await probeProxy(proxy, DEFAULT_PROBE_URL, 8_000);
-      return r.ok ? (r.geo?.timezone ?? null) : null;
+      return r.ok && r.geo ? { timezone: r.geo.timezone, countryCode: r.geo.countryCode } : null;
     },
   );
 

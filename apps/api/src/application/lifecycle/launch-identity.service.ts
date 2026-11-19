@@ -42,6 +42,8 @@ export class LaunchIdentityService {
     egress?: LaunchIdentitySnapshot["egress"];
     /** Where the run's timezone came from (see the snapshot schema). */
     timezoneSource?: LaunchIdentitySnapshot["timezoneSource"];
+    /** Where the run's locale came from (see the snapshot schema). */
+    localeSource?: LaunchIdentitySnapshot["localeSource"];
   }): LaunchIdentitySnapshot {
     const snapshot: LaunchIdentitySnapshot = {
       id: randomUUID(),
@@ -56,6 +58,7 @@ export class LaunchIdentityService {
       proxySource: args.proxySource,
       ...(args.egress ? { egress: args.egress } : {}),
       ...(args.timezoneSource ? { timezoneSource: args.timezoneSource } : {}),
+      ...(args.localeSource ? { localeSource: args.localeSource } : {}),
       capturedAt: new Date().toISOString(),
     };
     const validated = LaunchIdentitySnapshotSchema.parse(snapshot);

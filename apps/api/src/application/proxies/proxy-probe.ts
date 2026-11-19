@@ -18,6 +18,8 @@ import tls from "node:tls";
 
 export interface ProxyGeo {
   country: string | null;
+  /** ISO 3166-1 alpha-2 (e.g. "DE"); drives the launch locale. */
+  countryCode: string | null;
   region: string | null;
   city: string | null;
   timezone: string | null;
@@ -169,6 +171,7 @@ function parseGeo(body: string): { exitIp: string | null; geo: ProxyGeo | null }
     const pick = (k: string) => (typeof j[k] === "string" ? (j[k] as string) : null);
     const geo: ProxyGeo = {
       country: pick("country"),
+      countryCode: pick("countryCode"),
       region: pick("regionName"),
       city: pick("city"),
       timezone: pick("timezone"),

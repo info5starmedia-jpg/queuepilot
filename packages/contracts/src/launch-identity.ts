@@ -60,6 +60,14 @@ export const LaunchIdentitySnapshotSchema = z.object({
    * Absent on snapshots before this field.
    */
   timezoneSource: z.enum(["pinned", "proxy", "exit-ip", "host", "identity"]).optional(),
+  /**
+   * Where this run's browser locale (Intl date/number formatting) came from:
+   * "pinned" (profile pin), "exit-ip" (derived from the proxy exit's country
+   * at launch), "identity" (the fingerprint's stored locale). An en-US locale
+   * behind a German exit is what iphey scores "Unreliable" (measured
+   * 2026-11-19). Absent on snapshots before this field.
+   */
+  localeSource: z.enum(["pinned", "exit-ip", "identity"]).optional(),
   capturedAt: z.string().datetime(),
 });
 export type LaunchIdentitySnapshot = z.infer<
