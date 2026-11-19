@@ -96,6 +96,20 @@ export const ImportedProfileSchema = z.object({
   favorite: z.boolean(),
   /** Named credit-card sets: `CC Number:<set>` + `CC CVV:<set>` (+optional fields). */
   creditCards: z.array(PersonaCreditCardSchema),
+  /**
+   * Jancy `Site:<x>` columns, keyed by the header text after `Site:`
+   * (`Ticketmaster`, `AXS`, `MLB`, `somesite.com; other.com`, `*`), in FILE
+   * ORDER — Jancy evaluates custom columns in column order, so `*` must stay
+   * last. Values are the raw resolver cells (`password=$x, emailcode=…`).
+   */
+  sites: z.record(z.string()).default({}),
+  /** `Persist Cookies` / `Persist Sessions`: 1 → true, 0 → false, anything else → null (follow the global setting). */
+  persistCookies: z.boolean().nullable().default(null),
+  persistSessions: z.boolean().nullable().default(null),
+  /** `Buyer`: comma-separated buyer ids allowed to use this profile. */
+  buyers: z.array(z.string()).default([]),
+  /** `Proxy Resolver`: a resolver spec that fetches this profile's proxy (tried before `Proxy`). */
+  proxyResolver: z.string().nullable().default(null),
 });
 export type ImportedProfile = z.infer<typeof ImportedProfileSchema>;
 
@@ -174,6 +188,54 @@ const norm = (s: string | undefined): string | null => {
   return v === "" ? null : v;
 };
 
+/* Jancy profile-CSV header grammar (docs.jancy.io/docs/optional-columns). */
+const SITE_HEADER = /^Site\s*:\s*(.+)$/;
+const SMS_HEADER = /^SMS Number/;
+/** `Proxy`, `Proxy 2`, `Proxy backup`, … — but not `Proxy Resolver`. */
+const PROXY_HEADER = /^Proxy(?! Resolver$)/;
+const KNOWN_PROFILE_HEADERS = new Set([
+  "Profile", "Name", "Email", "Group", "Tab Color",
+  "Address", "Address 2", "City", "State", "Zip Code",
+  "DOB", "Phone Number", "TOTP", "Notes", "URL", "Time Zone", "Favorite",
+  "Persist Cookies", "Persist Sessions", "Buyer", "Proxy Resolver",
+]);
+
+/** Jancy: `1` → on, `0` → off, anything else → follow the global setting. */
+function zeroOne(v: string | null): boolean | null {
+  return v === "1" ? true : v === "0" ? false : null;
+}
+
+/** Jancy strips a leading US country code: `11112223333` → `1112223333`. */
+function normalizePhone(v: string | null): string | null {
+  if (!v) return v;
+  const digits = v.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : v;
+}
+
+/**
+ * One `SMS Number…` cell. The country code (Jancy supports 1 and 44) may sit
+ * in the header after a colon (`SMS Number 3:44`) — header wins — or in the
+ * cell itself (`19998887777`, `447700900123`).
+ */
+function parseSmsCell(
+  header: string,
+  value: string,
+): { label: string; number: string; countryCode: string | null } {
+  const colon = header.lastIndexOf(":");
+  const tail = colon > 0 ? header.slice(colon + 1).trim() : "";
+  const headerCc = /^\d+$/.test(tail) ? tail : null;
+  const label = (headerCc ? header.slice(0, colon) : header).trim();
+  if (headerCc) return { label, number: value, countryCode: headerCc };
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return { label, number: digits.slice(1), countryCode: "1" };
+  }
+  if (digits.length === 12 && digits.startsWith("44")) {
+    return { label, number: digits.slice(2), countryCode: "44" };
+  }
+  return { label, number: value, countryCode: null };
+}
+
 /**
  * Parse a profile-provider CSV. Headers are matched by NAME (case-sensitive),
  * not position. Missing required headers (Profile, Name, Email) fail the
@@ -206,22 +268,35 @@ export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
     }
   }
 
-  // Multi-value and prefixed columns.
-  const smsCols = headers
-    .map((h, idx) => ({ h, idx }))
-    .filter(({ h }) => /^SMS Number( \d+(:\d+)?)?$/.test(h));
-  const passcodeCols = headers
-    .map((h, idx) => ({ h, idx }))
-    .filter(({ h }) => /^Passcode\d*$/.test(h));
-  const freeCols = headers
-    .map((h, idx) => ({ h, idx }))
-    .filter(({ h }) => /^Free (?:[1-9]|10)$/.test(h));
-  const proxyCols = headers
-    .map((h, idx) => ({ h, idx }))
-    .filter(({ h }) => /^Proxy( \d+)?$/.test(h));
-  const ccCols = headers
-    .map((h, idx) => ({ h, idx }))
-    .filter(({ h }) => /^CC [A-Za-z ]+:.+$/.test(h));
+  // Multi-value and prefixed columns. Jancy lets the text after `SMS Number`,
+  // `Passcode` and `Proxy` be anything ("change the text following…"); the
+  // order is left-to-right column order.
+  const indexed = headers.map((h, idx) => ({ h, idx }));
+  const smsCols = indexed.filter(({ h }) => SMS_HEADER.test(h));
+  const passcodeCols = indexed.filter(({ h }) => /^Passcode/.test(h));
+  const freeCols = indexed.filter(({ h }) => /^Free (?:[1-9]|10)$/.test(h));
+  const proxyCols = indexed.filter(({ h }) => PROXY_HEADER.test(h));
+  const ccCols = indexed.filter(({ h }) => /^CC [A-Za-z ]+:.+$/.test(h));
+  const siteCols = indexed
+    .map(({ idx, h }) => ({ idx, key: SITE_HEADER.exec(h)?.[1]?.trim() ?? "" }))
+    .filter(({ key }) => key !== "");
+
+  // Jancy silently ignores a header it doesn't know (case-sensitive), which
+  // is how a typo'd `site:Ticketmaster` loses a whole 2FA setup. Say so.
+  for (const h of headers) {
+    if (h === "" || KNOWN_PROFILE_HEADERS.has(h)) continue;
+    if (
+      SMS_HEADER.test(h) ||
+      /^Passcode/.test(h) ||
+      /^Free (?:[1-9]|10)$/.test(h) ||
+      PROXY_HEADER.test(h) ||
+      /^CC [A-Za-z ]+:.+$/.test(h) ||
+      SITE_HEADER.test(h)
+    ) {
+      continue;
+    }
+    issues.push({ line: 1, message: `unknown column "${h}" ignored (headers are case-sensitive)` });
+  }
 
   const profiles: ImportedProfile[] = [];
   for (let r = 1; r < rows.length; r++) {
@@ -244,12 +319,8 @@ export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
 
     const smsNumbers = smsCols
       .map(({ h, idx }) => {
-        const m = /^SMS Number(?: (\d+))?(?::(\d+))?$/.exec(h)!;
-        const label = m[1] ? `SMS Number ${m[1]}` : "SMS Number";
         const value = norm(cells[idx]);
-        return value
-          ? { label, number: value, countryCode: m[2] ?? null }
-          : null;
+        return value ? parseSmsCell(h, value) : null;
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
 
@@ -317,6 +388,12 @@ export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
           }
         : null;
 
+    const sites: Record<string, string> = {};
+    for (const { idx, key: siteKey } of siteCols) {
+      const v = norm(cells[idx]);
+      if (v) sites[siteKey] = v;
+    }
+
     const parsed = ImportedProfileSchema.safeParse({
       key,
       name,
@@ -325,7 +402,15 @@ export function parseProfileRows(rows: string[][]): ProfileCsvParseResult {
       tabColor: get("Tab Color"),
       address,
       dob: get("DOB"),
-      phone: get("Phone Number"),
+      phone: normalizePhone(get("Phone Number")),
+      sites,
+      persistCookies: zeroOne(get("Persist Cookies")),
+      persistSessions: zeroOne(get("Persist Sessions")),
+      buyers: (get("Buyer") ?? "")
+        .split(",")
+        .map((b) => b.trim())
+        .filter(Boolean),
+      proxyResolver: get("Proxy Resolver"),
       smsNumbers,
       passcodes,
       totp: get("TOTP"),

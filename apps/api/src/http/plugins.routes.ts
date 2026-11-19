@@ -3,7 +3,10 @@ import { z } from "zod";
 import { PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
 import type { PluginRegistry } from "../application/plugins/plugin-registry.js";
 import type { ResolverRegistry, ResolverContext } from "../application/resolvers/resolver-registry.js";
-import { resolveSiteField } from "../application/resolvers/resolver-registry.js";
+import {
+  resolveSiteField,
+  resolveSiteFieldForUrl,
+} from "../application/resolvers/resolver-registry.js";
 import type { ParserRegistry } from "../application/parsers/parser-registry.js";
 import type { AliasStore } from "../application/resolvers/token-aliases.js";
 import type { ProfileService } from "../application/profiles/profile.service.js";
@@ -30,6 +33,8 @@ const RunResolverSchema = z.object({
 const ResolveFieldSchema = z.object({
   /** Site column selector. Omit to resolve a well-known persona field. */
   site: z.string().min(1).max(200).optional(),
+  /** Tab URL — picks the Site column the Jancy way. Wins over `site`. */
+  url: z.string().url().max(4000).optional(),
   field: z.string().min(1).max(60),
 });
 
@@ -103,10 +108,14 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
     const profile = profiles.get(id);
     const ctx = resolverContext(id, profiles);
 
-    if (body.site) {
-      const sites = (profile.extra?.sites ?? undefined) as
-        | Record<string, string>
-        | undefined;
+    const sites = (profile.extra?.sites ?? undefined) as
+      | Record<string, string>
+      | undefined;
+    if (body.url) {
+      // Jancy's way: the tab URL picks the Site column (brands, then file order).
+      const out = await resolveSiteFieldForUrl(sites, body.url, body.field, ctx, resolvers, aliases);
+      if (out.found) return { ...out, profileId: id };
+    } else if (body.site) {
       const out = await resolveSiteField(
         sites,
         body.site,

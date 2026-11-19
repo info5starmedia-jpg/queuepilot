@@ -230,7 +230,16 @@ export class ProfileProviderService {
 
 /** Everything past the core fields rides in the profile's `extra` bag. */
 function extraOf(row: ImportedProfile): Record<string, unknown> {
+  // Jancy-only columns ride along only when the CSV has them, so profiles
+  // from CSVs without them keep the bag they had before v0.17.
+  const jancy: Record<string, unknown> = {};
+  if (Object.keys(row.sites).length > 0) jancy.sites = row.sites;
+  if (row.persistCookies !== null) jancy.persistCookies = row.persistCookies;
+  if (row.persistSessions !== null) jancy.persistSessions = row.persistSessions;
+  if (row.buyers.length > 0) jancy.buyers = row.buyers;
+  if (row.proxyResolver !== null) jancy.proxyResolver = row.proxyResolver;
   return {
+    ...jancy,
     tabColor: row.tabColor,
     address: row.address,
     dob: row.dob,

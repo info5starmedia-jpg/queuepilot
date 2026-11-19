@@ -23,6 +23,17 @@ export interface ResolverContext {
   /** Alias store forwarded by resolve() — resolvers like imap use it for
    *  `@alias` credentials inside their spec. */
   aliases?: import("./token-aliases.js").AliasStore | undefined;
+  /**
+   * Jancy's Resolver-object view of the same spec: `name:one:two:three` →
+   * `["one","two","three"]`. Filled by resolve(); Jancy-grammar resolvers
+   * (gmail:acct:parser:label, imap:host:port:user:pass:parser, sms
+   * providers) read this, older URL-style resolvers keep reading `args`.
+   */
+  resolverArgs?: string[] | undefined;
+  /** Jancy site kind for the matched Site column: ticketmaster | axs | other. */
+  siteKind?: "ticketmaster" | "axs" | "other" | undefined;
+  /** The tab URL the value is being resolved for (Jancy sets it for `other`). */
+  url?: string | undefined;
 }
 
 export type ResolverFn = (
@@ -58,21 +69,28 @@ export class ResolverRegistry {
 
   /** `spec` = `name:remainder` — the remainder is passed VERBATIM to the
    *  resolver, so values containing ':' (URLs, JSON paths, secrets) survive.
-   *  Each resolver parses its own remainder. */
+   *  Each resolver parses its own remainder. Jancy's static form `$literal`
+   *  returns everything after the `$` untouched (no alias expansion — it is
+   *  a literal). */
   async resolve(
     spec: string,
     ctx: ResolverContext,
     aliases?: AliasStore,
   ): Promise<string> {
+    if (spec.startsWith("$")) return spec.slice(1);
     const expanded = aliases ? substituteAliases(spec, aliases) : spec;
     const idx = expanded.indexOf(":");
     const name = idx === -1 ? expanded : expanded.slice(0, idx);
     const fn = this.resolvers.get(name);
     if (!fn) return `#NO RESOLVER ${name}`;
     const args = idx === -1 ? "" : expanded.slice(idx + 1);
-    const withAliases = aliases ? { ...ctx, aliases } : ctx;
+    const full: ResolverContext = {
+      ...ctx,
+      resolverArgs: args === "" ? [] : args.split(":"),
+      ...(aliases ? { aliases } : {}),
+    };
     try {
-      return await fn(args, withAliases);
+      return await fn(args, full);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return msg.startsWith("#") ? msg : `#API ERROR ${msg.slice(0, 200)}`;
@@ -133,11 +151,12 @@ export function registerBuiltinResolvers(reg: ResolverRegistry): void {
 /**
  * Parses a Jancy site-column spec into field→resolverSpec pairs:
  *   `password=static: hunter2, smscode=webhook:https://x/y:code, othercode=...`
- * Split on commas, then first '='. Values may contain ':' (resolver args).
+ * Split on a comma that starts the next `field=` (Jancy writes `, `), then
+ * the first '='. Values may contain ':' (resolver args) and stray commas.
  */
 export function parseSiteSpec(spec: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const part of spec.split(",")) {
+  for (const part of spec.split(/,\s*(?=[A-Za-z_][\w-]*\s*=)/)) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
     const field = part.slice(0, eq).trim();
@@ -167,4 +186,111 @@ export async function resolveSiteField(
   const resolverSpec = fields[field];
   if (!resolverSpec) return { found: false, spec };
   return { found: true, spec, value: await reg.resolve(resolverSpec, { ...ctx, site, field }, aliases) };
+}
+
+/**
+ * Jancy's built-in brand Site columns (docs.jancy.io/docs/resolver-columns).
+ * Jancy matches a brand when the URL merely CONTAINS one of its domains; we
+ * match at host-label boundaries instead (see hostMatchesDomain), because a
+ * Site column resolves PASSWORDS that autofill types into the page —
+ * `ticketmaster.com.evil.net` or `evil.net/?ticketmaster.com` must not get
+ * them. `am.ticketmaster.com` and `www.ticketmaster.com.mx` still match.
+ * MLB is ours (owner's site list); `Site:mlb.com` works too.
+ */
+const SITE_BRANDS: Record<string, { kind: "ticketmaster" | "axs" | "other"; domains: string[] }> = {
+  ticketmaster: {
+    kind: "ticketmaster",
+    domains: [
+      "ticketmaster.com", "ticketmaster.ca", "ticketmaster.nl", "ticketmaster.de",
+      "ticketmaster.co.uk", "ticketmaster.co.nz", "ticketmaster.be", "livenation.com",
+    ],
+  },
+  axs: { kind: "axs", domains: ["axs.com"] },
+  mlb: { kind: "other", domains: ["mlb.com"] },
+};
+
+export interface SiteMatch {
+  /** The Site column key as written after `Site:` in the CSV. */
+  column: string;
+  spec: string;
+  siteKind: "ticketmaster" | "axs" | "other";
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * `domain` matches `host` when it occupies whole labels: the host IS the
+ * domain, ends with `.domain`, or is (sub.)domain followed by exactly one
+ * 2–3 letter country label (`ticketmaster.com.mx`, `….com.au`). Anything with
+ * more labels after the domain (`ticketmaster.com.evil.net`) does not match.
+ */
+export function hostMatchesDomain(host: string, domain: string): boolean {
+  const d = domain.toLowerCase().replace(/^\.+|\.+$/g, "");
+  if (!host || !d) return false;
+  if (host === d || host.endsWith(`.${d}`)) return true;
+  return new RegExp(`^(?:.+\\.)?${escapeRegex(d)}\\.[a-z]{2,3}$`).test(host);
+}
+
+/**
+ * Picks the Site column that applies to a tab URL, Jancy's rules:
+ *  1. brand columns (`Ticketmaster`, `AXS`, `MLB`, any case) match by domain;
+ *  2. every other column is evaluated IN FILE ORDER: `*` matches anything; a
+ *     domain-style pattern (no `/`) matches the host at label boundaries; a
+ *     pattern containing `/` keeps Jancy's literal `^.*<pattern>.*$` test on
+ *     the full URL (that is the only way to target a path). Hence `Site:*`
+ *     must come last.
+ */
+export function matchSiteColumn(
+  sites: Record<string, string> | undefined,
+  url: string,
+): SiteMatch | null {
+  if (!sites) return null;
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    host = "";
+  }
+  for (const [column, spec] of Object.entries(sites)) {
+    const brand = SITE_BRANDS[column.trim().toLowerCase()];
+    if (brand && brand.domains.some((d) => hostMatchesDomain(host, d))) {
+      return { column, spec, siteKind: brand.kind };
+    }
+  }
+  for (const [column, spec] of Object.entries(sites)) {
+    if (SITE_BRANDS[column.trim().toLowerCase()]) continue;
+    const patterns = column.split(";").map((p) => p.trim()).filter(Boolean);
+    const hit = patterns.some(
+      (p) =>
+        p === "*" ||
+        (p.includes("/")
+          ? new RegExp(`^.*${escapeRegex(p)}.*$`, "i").test(url)
+          : hostMatchesDomain(host, p)),
+    );
+    if (hit) return { column, spec, siteKind: "other" };
+  }
+  return null;
+}
+
+/** URL-driven variant of resolveSiteField — what a tab-aware caller uses. */
+export async function resolveSiteFieldForUrl(
+  sites: Record<string, string> | undefined,
+  url: string,
+  field: string,
+  ctx: ResolverContext,
+  reg: ResolverRegistry,
+  aliases?: AliasStore,
+): Promise<{ found: boolean; value?: string; spec?: string; column?: string }> {
+  const match = matchSiteColumn(sites, url);
+  if (!match) return { found: false };
+  const resolverSpec = parseSiteSpec(match.spec)[field];
+  if (!resolverSpec) return { found: false, spec: match.spec, column: match.column };
+  const value = await reg.resolve(
+    resolverSpec,
+    { ...ctx, site: match.siteKind, siteKind: match.siteKind, url, field },
+    aliases,
+  );
+  return { found: true, spec: match.spec, column: match.column, value };
 }
