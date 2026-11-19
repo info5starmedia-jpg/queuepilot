@@ -95,6 +95,10 @@ describe("aycd resolver", () => {
         fakeInbox(() => ({ status: "error", results: { errorStatus: "invalid task template", errorMessage: "…" } })),
       ).reg.resolve("aycd:K", TM),
     ).toBe("#BAD ACCT invalid task template");
+    // Real AYCD reply for an unknown address (seen live 2026-11-19).
+    expect(
+      await setup(fakeInbox(() => ({ status: "error", results: { errorStatus: "not found" } }))).reg.resolve("aycd:K", TM),
+    ).toBe("#BAD ACCT fan@example.com is not an account in AYCD Inbox (or use a Mail Task Template id)");
     expect(await setup(fakeInbox(() => ({ status: "success", results: {} }))).reg.resolve("aycd:K", TM)).toBe("#PARSE FAILED");
     expect(await setup(fakeInbox(() => "401")).reg.resolve("aycd:K", TM)).toMatch(/^#BAD ACCT AYCD Inbox rejected the API key/);
   });

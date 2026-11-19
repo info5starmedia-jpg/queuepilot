@@ -176,6 +176,12 @@ export function registerProfileRoutes(
     return { link: rotationLinkOf(profile.extra) };
   });
 
+  // P-LOCK: explicit IP change for a sticky (locked) link.
+  app.post("/profiles/:id/rotation-link/reroll", async (req) => {
+    const { id } = req.params as { id: string };
+    return service.rerollRotationLink(id);
+  });
+
   app.delete("/profiles/:id/rotation-link", async (req) => {
     const { id } = req.params as { id: string };
     return service.clearRotationLink(id);

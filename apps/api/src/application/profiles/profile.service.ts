@@ -328,6 +328,25 @@ export class ProfileService {
   }
 
   /**
+   * P-LOCK re-roll: the ONLY way a locked (sticky) profile changes IP. Clears
+   * the pin; the next launch picks a new endpoint from the pool and pins it.
+   * Refused while the profile runs — the live session keeps its IP.
+   */
+  rerollRotationLink(id: string): Profile {
+    const p = this.get(id);
+    const link = rotationLinkOf(p.extra);
+    if (!link || link.mode !== "sticky") {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, "profile has no sticky (locked-IP) rotation link to re-roll");
+    }
+    if (p.status === "running") {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, "stop the profile before re-rolling its IP");
+    }
+    const next = withRotationLink(p, { ...link, pinned: null });
+    this.profiles.update(next);
+    return next;
+  }
+
+  /**
    * Typed merge of the Jancy 2FA/persona columns (address/DOB/phone/SMS/
    * passcodes/Free). Only the keys present in `input` change; the rest of the
    * extra bag rides through untouched.

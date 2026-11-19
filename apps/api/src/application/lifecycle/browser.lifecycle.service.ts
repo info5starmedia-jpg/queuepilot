@@ -280,6 +280,41 @@ export class BrowserLifecycleService {
       const rotated = rotationLink
         ? this.rotationProviders!.resolveRotation(rotationLink)
         : null;
+      // P-LOCK: the first launch of a sticky link pins the endpoint it got,
+      // so every later launch of this profile gets the same IP. Written to
+      // the fresh row so nothing else on the profile is clobbered.
+      const freshRow = rotationLink?.mode === "sticky" && !rotationLink.pinned && rotated
+        ? (this.profiles.get(profileId) ?? null)
+        : null;
+      // Audit: re-check the CURRENT link — if it was changed or removed while
+      // this launch was being admitted, don't resurrect the old one.
+      const freshLink = freshRow ? rotationLinkOf(freshRow.extra) : null;
+      if (
+        freshRow &&
+        freshLink &&
+        rotated &&
+        freshLink.mode === "sticky" &&
+        !freshLink.pinned &&
+        freshLink.providerId === rotationLink!.providerId
+      ) {
+        const fresh = freshRow;
+        this.profiles.update({
+          ...fresh,
+          extra: {
+            ...(fresh.extra ?? {}),
+            rotationLink: {
+              ...freshLink,
+              pinned: {
+                host: rotated.host,
+                port: rotated.port,
+                username: rotated.username,
+                pinnedAt: new Date().toISOString(),
+              },
+            },
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
       const launchProxy: LaunchProxyEndpoint | null = tempProxy
         ? {
             type: tempProxy.type,
@@ -1223,7 +1258,11 @@ export class BrowserLifecycleService {
   }
 
   private markProfile(profile: Profile, status: Profile["status"]): void {
-    this.profiles.update({ ...profile, status, updatedAt: now() });
+    // Re-read the row: `profile` may be the copy loaded at launch start, and
+    // writing it back would wipe anything changed since (a P-LOCK pin, a
+    // persona edit made while the profile ran). Only `status` is ours here.
+    const fresh = this.profiles.get(profile.id) ?? profile;
+    this.profiles.update({ ...fresh, status, updatedAt: now() });
   }
 
   private requireProfile(id: string): Profile {

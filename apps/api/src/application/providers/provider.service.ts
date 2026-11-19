@@ -408,8 +408,15 @@ export class ProxyProviderService {
    * launches need them, so this path returns the hydrated row.
    *   rotate  — pickNext (cursor advances under start-over)
    *   persist — the pool's current cursor entry, stable across launches
+   *   sticky  — P-LOCK: the pinned endpoint (matched by host+port+user, so
+   *             a provider refresh that re-creates rows keeps the pin);
+   *             unpinned → pickNext, and the CALLER pins the result.
    */
-  resolveRotation(link: { providerId: string; mode: "rotate" | "persist" }): StoredProxy {
+  resolveRotation(link: {
+    providerId: string;
+    mode: "rotate" | "persist" | "sticky";
+    pinned?: { host: string; port: number; username: string | null } | null | undefined;
+  }): StoredProxy {
     const provider = this.get(link.providerId);
     const pool = this.proxies.listByProvider(provider.id);
     if (pool.length === 0) {
@@ -417,6 +424,24 @@ export class ProxyProviderService {
         ErrorCodes.PROXY_NOT_FOUND,
         `provider ${provider.name} has no proxies — refresh it first`,
       );
+    }
+    if (link.mode === "sticky" && link.pinned) {
+      const pin = link.pinned;
+      const hit = pool.find(
+        (p) =>
+          p.host.toLowerCase() === pin.host.toLowerCase() &&
+          p.port === pin.port &&
+          (p.username ?? null) === (pin.username ?? null),
+      );
+      if (!hit) {
+        // Never a silent new IP for a locked profile (owner rule).
+        throw new DomainError(
+          ErrorCodes.PROXY_NOT_FOUND,
+          `this profile is locked to ${pin.host}:${pin.port}, which is no longer in provider ${provider.name} — ` +
+            "re-add it, or re-roll the profile's IP (POST /profiles/:id/rotation-link/reroll)",
+        );
+      }
+      return hit;
     }
     if (link.mode === "persist") {
       return pool[Math.min(provider.cursor, pool.length - 1)]!;

@@ -336,7 +336,11 @@ export async function runAycdCodeTask(opts: {
     if (res.status === "timeout") return "#NO MSG";
     if (res.status !== "success") {
       const why = res.results?.errorStatus ?? res.results?.errorMessage ?? res.status;
-      return `#BAD ACCT ${why}`.slice(0, 240);
+      // Real AYCD answer for an address Inbox has no account for is just
+      // "not found" (verified 2026-11-19) — name the address so it's actionable.
+      return /^not found$/i.test(String(why))
+        ? `#BAD ACCT ${email} is not an account in AYCD Inbox (or use a Mail Task Template id)`
+        : `#BAD ACCT ${why}`.slice(0, 240);
     }
     for (const el of spec.resultElements) {
       const value = (res.results?.[el] ?? "").split("\n")[0]!.trim();

@@ -50,6 +50,7 @@ import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js
 import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
 import type { EmailCodeSettings } from "./application/email/code-pipeline.js";
 import { registerAycdResolver } from "./application/email/aycd-inbox.js";
+import { loadProviderSchemas } from "./application/resolvers/provider-schemas.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
@@ -169,6 +170,16 @@ export async function main(): Promise<void> {
     parsers: parserReg,
     settings: emailCodeSettings,
   });
+  // J2: SMS / password provider connectors from `<dataDir>/providers/*.json`
+  // (registered last so a schema can never shadow a built-in resolver).
+  const providerSchemas = loadProviderSchemas(path.join(config.dataDir, "providers"), resolvers, {
+    parsers: parserReg,
+    smsMaxAgeMin: () => settingsService.get("integrations").smsMaxAgeMin,
+  });
+  if (providerSchemas.loaded.length) {
+    console.log(`[providers] loaded: ${providerSchemas.loaded.join(", ")}`);
+  }
+  for (const e of providerSchemas.errors) console.error(`[providers] ${e.file}: ${e.error}`);
   const sheets = new SheetsClient(google);
 
   // v0.15.0 (audit A-rec #2): provider CSVs and extension packages must live

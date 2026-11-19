@@ -78,6 +78,8 @@ export const IntegrationsSettingsSchema = z.object({
    */
   emailAycdLookbackMin: z.number().int().min(0).max(120).default(10),
   emailAycdTimeoutSec: z.number().int().min(5).max(600).default(60),
+  /** SMS provider connectors (schema files): ignore texts older than this (0 = off). */
+  smsMaxAgeMin: z.number().int().min(0).max(240).default(10),
 });
 export type IntegrationsSettings = z.infer<typeof IntegrationsSettingsSchema>;
 

@@ -206,3 +206,89 @@ describe("proxy rotation links", () => {
     expect(cleared.json().link).toBeNull();
   });
 });
+
+/**
+ * P-LOCK (owner, 2026-11-19): "once we create a profile, that profile sticks
+ * with that IP going forward". sticky = first launch pins, later launches
+ * reuse it, a vanished endpoint refuses loudly, only re-roll changes it.
+ */
+describe("P-LOCK sticky rotation links", () => {
+  it(
+    "pins the first launch's endpoint and keeps it while the pool moves on",
+    async () => {
+      const ctx = makeTestContext();
+      const { lifecycle, profiles, snapshots } = ctx;
+      const provider = await makePool(ctx);
+      const a = profiles.create({ name: "locked-a", generateFingerprint: true });
+      const b = profiles.create({ name: "locked-b", generateFingerprint: true });
+      for (const p of [a, b]) {
+        await ctx.app.inject({ method: "PUT", url: `/profiles/${p.id}/rotation-link`, payload: { providerId: provider.id, mode: "sticky" } });
+      }
+      const urls: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        for (const p of [a, b]) {
+          const run = await lifecycle.start(p.id);
+          urls.push(`${p.name}=${snapshots.forRun(run.id)!.proxyUrl}`);
+          await lifecycle.stop(p.id);
+        }
+      }
+      expect(urls).toEqual([
+        "locked-a=http://10.0.0.1:8080", "locked-b=http://10.0.0.2:8080",
+        "locked-a=http://10.0.0.1:8080", "locked-b=http://10.0.0.2:8080",
+        "locked-a=http://10.0.0.1:8080", "locked-b=http://10.0.0.2:8080",
+      ]);
+      const link = (await ctx.app.inject({ method: "GET", url: `/profiles/${a.id}/rotation-link` })).json().link;
+      expect(link).toMatchObject({ mode: "sticky", pinned: { host: "10.0.0.1", port: 8080, username: null } });
+    },
+    { timeout: 30000 },
+  );
+
+  it(
+    "survives a provider refresh (rows re-created), refuses loudly when its endpoint is gone",
+    async () => {
+      const ctx = makeTestContext();
+      const { lifecycle, profiles, snapshots, proxyProviders } = ctx;
+      const provider = await makePool(ctx);
+      const p = profiles.create({ name: "locked", generateFingerprint: true });
+      await ctx.app.inject({ method: "PUT", url: `/profiles/${p.id}/rotation-link`, payload: { providerId: provider.id, mode: "sticky" } });
+      await lifecycle.start(p.id);
+      await lifecycle.stop(p.id);
+
+      await proxyProviders.refresh(provider.id); // same file → new row ids
+      const run = await lifecycle.start(p.id);
+      expect(snapshots.forRun(run.id)!.proxyUrl).toBe("http://10.0.0.1:8080");
+      await lifecycle.stop(p.id);
+
+      fs.writeFileSync(proxyProviders.get(provider.id).sourcePath!, "us-2,10.0.0.2,8080,,,\nus-3,10.0.0.3,8080,,,");
+      await proxyProviders.refresh(provider.id);
+      await expect(lifecycle.start(p.id)).rejects.toThrow(/locked to 10\.0\.0\.1:8080.*re-roll/);
+    },
+    { timeout: 30000 },
+  );
+
+  it(
+    "re-roll is the only way to a new IP, and is refused while running",
+    async () => {
+      const ctx = makeTestContext();
+      const { lifecycle, profiles, snapshots } = ctx;
+      const provider = await makePool(ctx);
+      const p = profiles.create({ name: "reroll", generateFingerprint: true });
+      await ctx.app.inject({ method: "PUT", url: `/profiles/${p.id}/rotation-link`, payload: { providerId: provider.id, mode: "sticky" } });
+      await lifecycle.start(p.id);
+      const busy = await ctx.app.inject({ method: "POST", url: `/profiles/${p.id}/rotation-link/reroll` });
+      expect(busy.statusCode).toBe(400);
+      await lifecycle.stop(p.id);
+
+      const ok = await ctx.app.inject({ method: "POST", url: `/profiles/${p.id}/rotation-link/reroll` });
+      expect(ok.statusCode).toBe(200);
+      const run = await lifecycle.start(p.id);
+      expect(snapshots.forRun(run.id)!.proxyUrl).toBe("http://10.0.0.2:8080");
+      await lifecycle.stop(p.id);
+
+      const rotate = profiles.create({ name: "not-sticky", generateFingerprint: true });
+      await ctx.app.inject({ method: "PUT", url: `/profiles/${rotate.id}/rotation-link`, payload: { providerId: provider.id, mode: "rotate" } });
+      expect((await ctx.app.inject({ method: "POST", url: `/profiles/${rotate.id}/rotation-link/reroll` })).statusCode).toBe(400);
+    },
+    { timeout: 30000 },
+  );
+});

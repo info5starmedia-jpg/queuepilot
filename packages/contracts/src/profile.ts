@@ -335,12 +335,25 @@ export type UpdateProfileInput = z.input<typeof UpdateProfileInputSchema>;
  *   rotate  — pool pick per launch (advances the provider's cursor when its
  *             distribution is start-over; random when random)
  *   persist — the pool's current cursor entry, stable across launches
+ *   sticky  — P-LOCK (owner, 2026-11-19: "once we create a profile, that
+ *             profile sticks with that IP going forward"): the FIRST launch
+ *             picks from the pool and pins that endpoint onto the link;
+ *             every later launch uses exactly that endpoint. If it leaves
+ *             the pool the launch is refused loudly — never a silent new
+ *             IP. Only an explicit re-roll clears the pin.
  * The resolved endpoint is recorded in the launch snapshot with
- * proxySource "rotation" — drift says "the next launch may resolve a
- * different proxy". Nothing is persisted onto the profile.
+ * proxySource "rotation".
  */
+export const PinnedEndpointSchema = z.object({
+  host: z.string().min(1).max(253),
+  port: z.number().int().min(1).max(65535),
+  username: z.string().max(500).nullable(),
+  pinnedAt: z.string().datetime(),
+});
 export const RotationLinkSchema = z.object({
   providerId: z.string().uuid(),
-  mode: z.enum(["rotate", "persist"]),
+  mode: z.enum(["rotate", "persist", "sticky"]),
+  /** sticky only: the endpoint this profile is locked to (set by the first launch). */
+  pinned: PinnedEndpointSchema.nullable().optional(),
 });
 export type RotationLink = z.infer<typeof RotationLinkSchema>;
