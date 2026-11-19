@@ -129,11 +129,56 @@ and nothing runs a parser on it, so `emailcode` never yields a code.
 - One full `npm test` run reported 81/82 files with no failure listed; two
   reruns were green. A possibly flaky test; watch for it.
 
+### 5. Code: J1 slice C part 1, AYCD Inbox (`da3c003`)
+
+**Files:**
+
+- `application/email/aycd-inbox.ts`:
+  - `AycdInboxClient`: `POST /api/v1/tasks/mail/create`, `GET
+    /api/v1/tasks/completed?group=…`, `Authorization: Token <key>`;
+    contract taken from AYCD's public JS client.
+  - `runAycdCodeTask`, `registerAycdResolver`, `safeAycdBase`,
+    `redactAycdKeys`.
+- Parsers get an optional `aycdTask(args)` → `{ mailFilters,
+  mailElements, resultElements }`. AYCD never returns the body. Builtin
+  `ticketmaster` has one, with RE2-safe regexes.
+- Settings `integrations`: `emailAycdLookbackMin` (10),
+  `emailAycdTimeoutSec` (60).
+- Env `SPECTRA_AYCD_API_BASE`: https or loopback only. Used for the live
+  fake.
+
+**Usage for the owner:**
+
+- **Store the Inbox API key as an alias:** `PUT /aliases/aycd`. This needs
+  scripting endpoints on, plus `SPECTRA_API_TOKEN`.
+- **In the CSV:** `emailcode=aycd:@aycd`. Add `:<parser>:<templateId>`
+  for catch-all or forwarding accounts.
+- **Or use AYCD's IMAP Server:**
+  `emailcode=imap:127.0.0.1:<port>:<account email>:<password>:ticketmaster`.
+
+**Audit:**
+
+- **No Codex any more.** The owner asked for in-house audits: the
+  `security-auditor` agent plus a Claude review. The agent's verdict was
+  CLEAR. Four fixes are in this commit; two pre-existing follow-ups are
+  roadmap item **SEC-1**.
+- AYCD knowledge bank `D:\aycd-knowledge\01-inbox-tasks-api.md` was
+  updated with the HTTP contract and the Inbox services overview.
+
+**Gates and checks:**
+
+- Typecheck, build, **713/713 API + 20/20 server** green.
+- Live: scratch API → local fake Inbox API (details in the roadmap). Not
+  yet tried against the owner's real Inbox.
+
 ## Next, in order
 
-1. J1 slice C: `aycd` resolver, `.jyl` email/sms parser loader (only those
-   two tags), in-tree TM/AXS/SeatGeek/MLB + SMS parsers, generic `otp()`.
-2. P-LOCK, then W (warmer port), then J2, then J6 (+ Discord), then
+1. J1 slice C, rest: the `.jyl` email/sms parser loader (only those two
+   tags), AXS / SeatGeek / MLB / SMS parsers, and generic `otp()` (with
+   `aycdTask`).
+2. SEC-1 (small): gate or authenticate `POST /profiles/:id/resolve`; make
+   alias expansion safe for third-party CSVs.
+3. P-LOCK, then W (warmer port), then J2, then J6 (+ Discord), then
    DECK spike, then J3 …
 
 ## Rules that still apply
