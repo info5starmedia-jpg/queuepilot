@@ -1604,6 +1604,7 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
     - W1's site settings move to the server: include/exclude is managed centrally for every user.
     - Browsing stays on each user's machine, through the profile's own proxy, so the warmed IP is the profile's IP.
     - Remote CDP control from the server is **rejected**: browser control port exposed, latency, fragility.
+- [ ] **ENG-INPUT — debugger clicks must pass bot checks (found 2026-11-19).** Walmart (HUMAN/PerimeterX) challenges CDP-synthesised mouse CLICKS (Input.dispatchMouseEvent). Measured on fresh fury qp.4 profiles from the same IP: plain browsing, an attached idle CDP client, Playwright navigation, synthetic mouse MOVES, synthetic wheel and element.click() all PASS; any synthetic mouse click (consent button or link) is challenged. The page sees synthetic mousemove with movementX=0 (a known tell). The warmer now uses element clicks (fixed; live re-test passed). Engine follow-up: identify the exact tell (movementX/movementY, pointer/pressure fields, event ordering) and patch fury so later click features (autofill buttons J4, TM page actions J6) pass too.
 - [ ] **LIC — licence keys + account separation (owner, 2026-11-19; before W2):**
   - Testers each get their own **account** on the QueuePilot server and a **licence key with an expiry** (issue / extend / revoke by the owner).
   - Everything server-side is scoped by account: sealed bundles, profile leases, warmup plans, persona/site settings.

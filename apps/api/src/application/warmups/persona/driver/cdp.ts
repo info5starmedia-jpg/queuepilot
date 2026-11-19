@@ -195,7 +195,11 @@ export class CdpDriver implements Driver {
       await sleep(hesitationMs(rng));
 
       const popup = this.page.waitForEvent("popup", { timeout: 2_500 }).catch(() => null);
-      await this.page.mouse.click(target.x, target.y);
+      // QueuePilot 2026-11-19: CDP-synthesised mouse CLICKS (Input.dispatchMouseEvent)
+      // trip HUMAN/PerimeterX on walmart.com — measured: synthetic moves pass,
+      // synthetic wheel passes, element.click() passes, mouse.click is challenged.
+      // Keep the human mouse path above, then activate the element itself.
+      await loc.evaluate((el) => (el as unknown as { click(): void }).click());
       const p = await popup;
       if (p) {
         // target=_blank: close the new tab and take the link in our tab with a real referer instead.
@@ -244,7 +248,8 @@ export class CdpDriver implements Driver {
       if ((await loc.count()) === 0) return false;
       if (!(await loc.isVisible({ timeout: 300 }).catch(() => false))) return false;
       await sleep(400 + Math.random() * 600);
-      await loc.click({ timeout: 3_000 });
+      // Element click, not a CDP mouse click (see click() — synthetic clicks trip HUMAN).
+      await loc.evaluate((el) => (el as unknown as { click(): void }).click(), undefined, { timeout: 3_000 });
       this.o.logger.debug("consent accepted", { via: label, url: this.page.url() });
       await sleep(600);
       return true;
