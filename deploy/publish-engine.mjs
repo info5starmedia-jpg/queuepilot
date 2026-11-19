@@ -24,7 +24,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const args = process.argv.slice(2);
@@ -105,5 +105,8 @@ if (remote.engines.length !== hosted.engines.length) {
   console.error("remote manifest verification failed");
   process.exit(1);
 }
+// Persist the hosted URLs locally so a later --version run does not rewrite
+// previously published entries back to file:// in the remote manifest.
+writeFileSync(MANIFEST_PATH, JSON.stringify(hosted, null, 2) + "\n");
 console.log(`\ndone: ${entries.length} engine(s) published; hosted manifest live at https://${DOMAIN}/engines.manifest.json`);
 console.log(`clients see it after Settings → Engine → Update server URL = https://${DOMAIN}/`);

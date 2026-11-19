@@ -1763,6 +1763,48 @@ foundation the agent and family rollout sit on.
   7. Compiled/minified client packaging (honest limit already recorded).
   8. ~~Rename family/friends copy → "team member" sweep~~ — done in Track B.
 
+### Engine 0.5.6-qp.2 — SHIPPED 2026-11-19 (Chromium 159, official config)
+
+Overnight run 2026-11-18/19 (Claude, report
+`claude-report-engine159.md`; evidence-verified and gated by Kimi):
+- **Pinned `159.0.8154.13`** — in Google's live win64 Stable serving
+  list (0.5% rollout) and current Beta, i.e. a build real users run
+  (hard rule 1 applied; verified against versionhistory + chromiumdash
+  + chrome-for-testing before fetching). ⚠ Small population today —
+  re-pin check at the next cycle once rollout widens.
+- 44/44 patches rebased 158→159; first-attempt **official build
+  (LTO+PGO) in 9 h 33 min, 0 retries**; preflight sweep caught 3
+  upstream API-removal compile breaks before they could burn the build.
+- Battery (Norton verified off, German residential proxy, qp.4 + stock
+  CfT-159 side by side): aliasmode **0/0/23**, BrowserScan **100%**,
+  CreepJS clean, Cloudflare challenge + anti-bot bypassed, BotD/Castle/
+  Pixelscan/sannysoft/whoer clean, "Google Chrome" brand confirmed live
+  (0011), WebRTC shows only the exit IP, timezone + DNS follow the exit
+  country. TLS JA4 matches default Stable Chrome (the CfT delta is
+  CfT's field-trial config, documented in the report).
+- **Published to the hosted update server**: manifest +
+  tarball live at `https://queuepilot.taskpilot.tech/` (both qp.2 and
+  qp.4 hosted). Clients pick it up via Settings → Engine → Update
+  server URL; downloads stay consent-gated. SSH key auth now set up
+  for the publish script.
+- Two 0131 call-site hunks deliberately NOT re-applied (159 sends
+  effective screen infos to remote frames natively; aliasmode's
+  frames/workers checks guard it).
+
+### Locale follows the proxy's exit country (API fix, SHIPPED cbfb53d)
+
+Root cause of iphey's "Unreliable / whale" on proxied profiles was the
+**Intl locale** disagreeing with the exit country (en-US formats behind
+a German IP), not the engine. `resolveLaunchGeo` now returns the exit
+`countryCode` too; locale resolves pin > exit-ip > identity via CLDR
+maximize (DE→de-DE, GB→en-GB…). Live-verified: Unreliable 90 →
+**Trustworthy MX 100**, aliasmode 0/0/23. `navigator.languages` /
+Accept-Language intentionally unchanged (owner wants English for
+reading; the battery proved the locale is what iphey scores). Known
+side effect: pinned-timezone proxied launches now make the exit lookup
+too (**up to +8 s**) unless locale is also pinned — both pinned skips
+it entirely.
+
 ### Engine 158 rebase — outcome and the shipping decision (2026-11-18)
 
 Overnight run (Claude, report `claude-report-engine158.md`): all **44/44
