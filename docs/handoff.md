@@ -4,6 +4,11 @@ You are continuing QueuePilot, a local-first anti-detect browser orchestrator.
 This file is the contract. If anything here contradicts other docs, this file
 wins; update it when reality moves.
 
+> **Active workstream (2026-11-19): Jancy parity, J1+.** Read
+> [kimi-update-2026-11-19.md](kimi-update-2026-11-19.md) first: branches
+> `jancy-wiki-audit` (docs) and `jancy-j1` (code), owner decisions, what is
+> done, and what's next.
+
 ## The 100% mission — stick to this and nothing else
 
 > Profiles that are indistinguishable from real stock-Chrome users, with
