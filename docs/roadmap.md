@@ -1509,15 +1509,16 @@ app once this branch is deployed.
 
 Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 
-## Jancy wiki parity — Phases J1–J7 (audit 2026-11-19, branch `jancy-wiki-audit`)
+## Jancy parity — Phases J1–J8 (audit 2026-11-19, wiki + docs.jancy.io + developer API, branch )
 
 Full audit + architecture: [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
-The 2026-11-16 PASS is reopened.
+The 2026-11-16 PASS is reopened. Owner answers to its §7 questions gate the order.
 
-- [ ] **J1 — Fix the 2FA chain** (defects D-1…D-4): transports return messages, resolver→parser pipeline, Jancy resolver grammar, `Site:` CSV columns + domain matching, named errors, wait/poll + SSE, in-tree `otp()` / ticketmaster / hotmail-forward parsers. *Needs sample emails.*
-- [ ] **J2 — Parser & SMS coverage**: TextChest / SeatHero / Ejoin adapters, SMS-via-email, P1 site parsers, parser test CLI.
-- [ ] **J3 — Tab-state + extractors** (*gate: tab-model decision*): passcodes/notes, cross-run Tab View, queue position / event extractors, priority groups, export tabs, log note, focus delay, ephemeral profiles, Persist columns.
-- [ ] **J4 — Autofill map files**: Jancy-style map DSL, shadow DOM/XPath, isolated-world transforms, code fields, multi-tab broadcast, core site maps.
-- [ ] **J5 — Cookie-thinger file**: del/delall/copy/copyall action groups, tab-to-tab copy, cookies-for-profiles CSV.
-- [ ] **J6 — Power-user console**: command registry + palette + key binds, format strings + custom sort, settings expansion, tab strings.
-- [ ] **J7 — Integrations**: Sheets write + queue-position recorder, remote proxy providers, engine-side tab title (ADR first).
+- [ ] **J1 — Fix the 2FA chain +  parser import** (D-1…D-5): Jancy grammar (, positional args, 4 fields), ordered regex  matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary,  email/sms parser loader, in-tree TM + SMS parsers + generic .
+- [ ] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
+- [ ] **J3 — Tab state + workflow commands** (*gate Q1*): Jancy Tab-object fields, cross-run Tab View, passcodes/notes, change URL + focus delay, reload/reopen, export tabs, log note, ephemeral profiles, Persist columns, focus emulation, per-tab timezone.
+- [ ] **J4 — Autofill map file**: full autofill.map spec (include/any/human/machine/buttons/XPath/shadow), ~60 fields, field swapping, broadcast.
+- [ ] **J5 — Cookie thinger file**: 10 groups, del/delall/copy/copyall/dcopy, lists 1–5 + –, thinger tabs, cookies-for-profiles CSV.
+- [ ] **J6 — Site plug-ins**: extractor registry, Queue-it, TM (queue pass, cart timer, event info, priority groups, page actions), queue-position sinks (CSV/Sheet/buffer), AXS/Etix/SeatGeek.
+- [ ] **J7 — Power-user console**: commands + palette + key binds, format strings + custom sort, settings expansion, preference sets, tab strings, named windows.
+- [ ] **J8 — Extras**: network logger, userscripts/preloaders, remote proxy providers + Proxy Resolver, temp-proxy recall, soft reset, engine-side titles (ADR).
