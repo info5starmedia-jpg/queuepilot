@@ -45,7 +45,7 @@ const PLAIN_EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
 function canRunTm(args: ParserArgs): boolean {
   return (
-    (args.resolverName === "gmail" || args.resolverName === "imap") &&
+    (args.resolverName === "gmail" || args.resolverName === "imap" || args.resolverName === "aycd") &&
     PLAIN_EMAIL.test(args.profile.email ?? "") &&
     args.site === "ticketmaster"
   );
@@ -71,6 +71,24 @@ const ticketmaster: ParserDefinition = {
     if (!tmSubjectMatches(msg.subject)) return null;
     return sixDigitCode(`${msg.subject}\n${msg.text}`);
   },
+  // AYCD Inbox: Inbox matches the To address itself (task.email = profile
+  // email), so the filter is the subject; the code regex mirrors sixDigitCode.
+  aycdTask: () => ({
+    mailFilters: [
+      {
+        target: "subject",
+        comparator: "includes",
+        value: TM_SUBJECTS[0]!,
+        orValues: TM_SUBJECTS.slice(1),
+      },
+    ],
+    // Plain RE2-safe patterns (no lookaround): AYCD runs them in its own app.
+    mailElements: [
+      { name: "code", target: "body", regex: "[Cc]ode[^0-9]{0,40}?([0-9]{6})\\b" },
+      { name: "anyCode", target: "body", regex: "\\b([0-9]{6})\\b" },
+    ],
+    resultElements: ["code", "anyCode"],
+  }),
 };
 
 const ticketmasterV2: ParserDefinition = {

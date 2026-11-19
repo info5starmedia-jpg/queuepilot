@@ -8,6 +8,7 @@ import {
   resolveSiteFieldForUrl,
 } from "../application/resolvers/resolver-registry.js";
 import type { ParserRegistry } from "../application/parsers/parser-registry.js";
+import { redactAycdKeys } from "../application/email/aycd-inbox.js";
 import type { AliasStore } from "../application/resolvers/token-aliases.js";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import {
@@ -168,7 +169,16 @@ function resolverContext(
   };
 }
 
-/** Jancy's ResolvedValue: a `#…` value is an error, never autofilled. */
-function withIsError<T extends { value?: string }>(out: T): T & { isError: boolean } {
-  return { ...out, isError: typeof out.value === "string" && out.value.startsWith("#") };
+/**
+ * Jancy's ResolvedValue: a `#…` value is an error, never autofilled. The
+ * echoed spec has inline AYCD keys masked (security audit 2026-11-19).
+ */
+function withIsError<T extends { value?: string; spec?: string | undefined }>(
+  out: T,
+): T & { isError: boolean } {
+  return {
+    ...out,
+    ...(typeof out.spec === "string" ? { spec: redactAycdKeys(out.spec) } : {}),
+    isError: typeof out.value === "string" && out.value.startsWith("#"),
+  };
 }

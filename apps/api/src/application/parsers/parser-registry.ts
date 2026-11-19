@@ -74,6 +74,13 @@ export interface ParserDefinition {
   example?: string;
   canRun?: (args: ParserArgs) => boolean;
   getQuery?: (args: ParserArgs) => ParserQuery;
+  /**
+   * AYCD Inbox API form of this parser (QueuePilot extension; Jancy has no
+   * AYCD resolver). AYCD never returns the body, so the parser describes the
+   * filters + the regex element that IS the code. Absent ⇒ the parser can't
+   * be used with `aycd:` (#BAD PARSER).
+   */
+  aycdTask?: (args: ParserArgs) => import("../email/aycd-inbox.js").AycdTaskSpec;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   parseMessage: (message: any, args: ParserArgs) => string | null;
 }

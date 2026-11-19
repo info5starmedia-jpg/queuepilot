@@ -49,6 +49,7 @@ import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
 import type { EmailCodeSettings } from "./application/email/code-pipeline.js";
+import { registerAycdResolver } from "./application/email/aycd-inbox.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
@@ -134,6 +135,16 @@ export async function main(): Promise<void> {
     accounts: emailAccounts,
     parsers: parserReg,
     settings: emailCodeSettings,
+  });
+  // AYCD Inbox API (owner's code source). SPECTRA_AYCD_API_BASE overrides
+  // the cloud relay for tests / a local fake — https or loopback only.
+  registerAycdResolver(resolvers, {
+    parsers: parserReg,
+    settings: () => {
+      const s = settingsService.get("integrations");
+      return { lookbackMin: s.emailAycdLookbackMin, timeoutSec: s.emailAycdTimeoutSec };
+    },
+    client: { base: process.env.SPECTRA_AYCD_API_BASE },
   });
   const pluginReg = new PluginRegistry(
     path.join(config.dataDir, "plugins"),

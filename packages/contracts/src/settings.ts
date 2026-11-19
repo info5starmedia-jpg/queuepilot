@@ -72,6 +72,12 @@ export const IntegrationsSettingsSchema = z.object({
   emailGmailMaxPerRequest: z.number().int().min(1).max(25).default(1),
   emailGmailNewerThan: z.enum(["disabled", "1h", "2h"]).default("disabled"),
   emailImapNewerThan: z.enum(["disabled", "1h", "2h"]).default("disabled"),
+  /**
+   * AYCD Inbox code resolver (`aycd:`): how far back an already-arrived
+   * email still counts, and how long to wait for one to arrive.
+   */
+  emailAycdLookbackMin: z.number().int().min(0).max(120).default(10),
+  emailAycdTimeoutSec: z.number().int().min(5).max(600).default(60),
 });
 export type IntegrationsSettings = z.infer<typeof IntegrationsSettingsSchema>;
 
