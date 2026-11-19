@@ -1509,3 +1509,15 @@ app once this branch is deployed.
 
 Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 
+## Jancy wiki parity — Phases J1–J7 (audit 2026-11-19, branch `jancy-wiki-audit`)
+
+Full audit + architecture: [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
+The 2026-11-16 PASS is reopened.
+
+- [ ] **J1 — Fix the 2FA chain** (defects D-1…D-4): transports return messages, resolver→parser pipeline, Jancy resolver grammar, `Site:` CSV columns + domain matching, named errors, wait/poll + SSE, in-tree `otp()` / ticketmaster / hotmail-forward parsers. *Needs sample emails.*
+- [ ] **J2 — Parser & SMS coverage**: TextChest / SeatHero / Ejoin adapters, SMS-via-email, P1 site parsers, parser test CLI.
+- [ ] **J3 — Tab-state + extractors** (*gate: tab-model decision*): passcodes/notes, cross-run Tab View, queue position / event extractors, priority groups, export tabs, log note, focus delay, ephemeral profiles, Persist columns.
+- [ ] **J4 — Autofill map files**: Jancy-style map DSL, shadow DOM/XPath, isolated-world transforms, code fields, multi-tab broadcast, core site maps.
+- [ ] **J5 — Cookie-thinger file**: del/delall/copy/copyall action groups, tab-to-tab copy, cookies-for-profiles CSV.
+- [ ] **J6 — Power-user console**: command registry + palette + key binds, format strings + custom sort, settings expansion, tab strings.
+- [ ] **J7 — Integrations**: Sheets write + queue-position recorder, remote proxy providers, engine-side tab title (ADR first).

@@ -1,5 +1,10 @@
 # Jancy Feature Parity — QueuePilot audit
 
+> **2026-11-19: verdict REOPENED.** A full audit against the Jancy product wiki
+> found the resolver→parser chain unwired, Jancy CSV/resolver grammar unsupported,
+> and whole workflow areas out of this document's scope. See
+> [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
+
 Audit date: 2026-11-14. Sources: `Jancy-Clone-Deep-Dive-and-Build-Plan.md`
 (every docs.jancy.io section read: profiles, resolvers, proxies, cookies, tabs,
 autofill, JYL, settings, all 31 plugin pages, developers) + public Jancy docs.
