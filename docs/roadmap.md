@@ -2254,3 +2254,15 @@ precedence. `POST /proxies/:id/test` stores and returns the probe. The
 dashboard shows one line per proxy (🟢 country · city · timezone · ms /
 🔴 Test failed / ⚪ Not tested yet, each with Re-test) under the profile
 form's proxy picker and in the proxy table's "Last test" column.
+
+### Settings → Email (IMAP) section — SHIPPED
+Email accounts moved out of Settings → Integrations into their own
+Settings nav section, "Email (IMAP)". Nav order is now General, Engine,
+Launch, Email (IMAP), Integrations, Automation, Agent, Team. Integrations
+keeps the Google account and providers note plus one line pointing to the
+new section. The card is tidied: the Gmail app-password explanation sits
+as a hint above a two-column labeled add form (Email / App password /
+Server / Port; one column on narrow screens), and the accounts table reads
+Email | Server (host:port + TLS badge) | Password | Actions (Test, 📋 Copy,
+Remove), with the test result on a reserved line under the buttons so a
+running test never shifts the row. No API change.

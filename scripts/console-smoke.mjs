@@ -282,14 +282,30 @@ export async function runConsoleSmoke({ base, ok }) {
     const emptied = await waitFor(async () => ((await api("GET", "/proxies")).json?.proxies ?? []).length === 0);
     ok("select-all + Delete selected removes every proxy", Boolean(emptied));
 
-    // Settings → Integrations: add an email account (dummy test values), see it, remove it
+    // Settings → Integrations only points at Email (IMAP) now
     await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" })); true`);
-    await waitFor(() => page.evaluate(`(() => {
-      const b = [...document.querySelectorAll('#settings-nav button')].find((x) => x.textContent === 'integrations');
+    const pointer = await waitFor(() => page.evaluate(`(() => {
+      const b = document.querySelector('#settings-nav button[data-section="integrations"]');
       if (!b) return false;
       b.click();
-      return !!document.querySelector('#email-account-form');
+      const info = document.querySelector('#integrations-info').textContent;
+      return info.includes('Email accounts live under') && !document.querySelector('#email-account-form');
     })()`));
+    ok("Settings → Integrations points to Email (IMAP) and no longer holds the account form", Boolean(pointer));
+
+    // Settings → Email (IMAP): add an email account (dummy test values), see it, remove it
+    const navOrder = await waitFor(() => page.evaluate(`(() => {
+      const labels = [...document.querySelectorAll('#settings-nav button')].map((x) => x.textContent);
+      const b = document.querySelector('#settings-nav button[data-section="email"]');
+      if (!b) return false;
+      b.click();
+      return document.querySelector('#email-account-form') ? labels.join(",") : false;
+    })()`));
+    ok(
+      "Settings nav lists Email (IMAP) between Launch and Integrations",
+      navOrder === "general,engine,launch,Email (IMAP),integrations,automation,agent,team",
+      String(navOrder),
+    );
     await page.evaluate(`(() => {
       document.querySelector('#email-account-email').value = 'smoke-test@example.org';
       document.querySelector('#email-account-password').value = 'dummy-app-password';
@@ -301,7 +317,7 @@ export async function runConsoleSmoke({ base, ok }) {
       return accounts.find((a) => a.email === "smoke-test@example.org");
     });
     const shown = await waitFor(() => page.evaluate(`document.querySelector('#email-accounts-table').textContent.includes('smoke-test@example.org')`));
-    ok("Settings → Integrations adds an email account and lists it", Boolean(account && account.hasPassword && shown));
+    ok("Settings → Email (IMAP) adds an email account and lists it", Boolean(account && account.hasPassword && shown));
     await page.evaluate(`(() => {
       const row = [...document.querySelectorAll('#email-accounts-table tr')].find((tr) => tr.textContent.includes('smoke-test@example.org'));
       row.querySelector('[data-act="remove"]').click();

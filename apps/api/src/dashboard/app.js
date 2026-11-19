@@ -1735,7 +1735,11 @@ const SETTINGS_FIELDS = {
     { key: "model", label: "Model name", type: "text", placeholder: "qwen2.5:7b-instruct" },
   ],
 };
-const SETTINGS_SECTIONS = Object.keys(SETTINGS_FIELDS);
+/* Nav order groups related sections. "email" has no key/value fields — its
+   body is the custom email-accounts card (like the engine/team cards). */
+SETTINGS_FIELDS.email = [];
+const SETTINGS_SECTIONS = ["general", "engine", "launch", "email", "integrations", "automation", "agent", "team"];
+const SETTINGS_LABELS = { email: "Email (IMAP)" };
 let settingsData = null;
 let settingsSection = "general";
 
@@ -1781,7 +1785,8 @@ function renderSettingsNav() {
   for (const s of SETTINGS_SECTIONS) {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = s;
+    b.textContent = SETTINGS_LABELS[s] ?? s;
+    b.dataset.section = s;
     b.className = s === settingsSection ? "active" : "";
     b.addEventListener("click", () => {
       settingsSection = s;
@@ -1919,9 +1924,9 @@ async function refreshPluginsTable() {
   }
 }
 
-/* Integrations gets a read-only reference card for the email resolvers —
-   there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
-   the scripting layer. This card documents the URL shapes. */
+/* The custom card above a settings section's key/value fields: engine
+   updates, team, plugins, agent, the email accounts (Email (IMAP)), and a
+   pointer from Integrations to that section. */
 function renderIntegrationsInfo() {
   const box = $("#integrations-info");
   if (settingsSection === "engine") {
@@ -1951,25 +1956,48 @@ function renderIntegrationsInfo() {
     $("#signout-settings").addEventListener("click", signOut);
     return;
   }
+  if (settingsSection === "email") {
+    renderEmailAccountsCard(box);
+    return;
+  }
   if (settingsSection !== "integrations") {
     box.innerHTML = "";
     return;
   }
   box.innerHTML = `
+    <div class="info-card">
+      <p>Email accounts live under <a href="#" id="goto-email-settings">Settings → Email (IMAP)</a>.</p>
+    </div>`;
+  $("#goto-email-settings").addEventListener("click", (e) => {
+    e.preventDefault();
+    settingsSection = "email";
+    renderSettings();
+  });
+}
+
+/* Settings → Email (IMAP): mail accounts the imap: resolver reads one-time
+   codes from. App passwords are stored encrypted and never sent back. */
+function renderEmailAccountsCard(box) {
+  box.innerHTML = `
     <div class="info-card" id="email-accounts-card">
       <h4>Email accounts (Gmail / IMAP)</h4>
-      <p>Used to read one-time codes from mail. For Gmail, turn on 2-Step Verification and create an <b>app password</b> (Google Account → Security → App passwords). The app password is stored encrypted on this machine and never shown again.</p>
-      <table class="import-table" id="email-accounts-table"><tbody></tbody></table>
+      <p>Used to read one-time codes from mail. Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
+      <table class="import-table email-accounts" id="email-accounts-table">
+        <thead><tr><th>Email</th><th>Server</th><th>Password</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
       <p id="email-accounts-empty" class="hint" hidden>No email accounts yet.</p>
-      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;margin-top:10px">
+    </div>
+    <div class="info-card">
+      <h4>Add an account</h4>
+      <p class="hint">Gmail: turn on 2-Step Verification, then create an <b>app password</b> (Google Account → Security → App passwords) and paste it below. It is stored encrypted on this machine and never shown again.</p>
+      <form id="email-account-form" class="email-form" autocomplete="off">
         <label>Email <input id="email-account-email" type="email" required maxlength="254" placeholder="you@gmail.com" /></label>
         <label>App password <input id="email-account-password" type="password" required maxlength="200" autocomplete="new-password" placeholder="16-letter app password" /></label>
         <label>Server <input id="email-account-host" required maxlength="253" value="imap.gmail.com" /></label>
         <label>Port <input id="email-account-port" type="number" required min="1" max="65535" value="993" /></label>
-        <button type="submit" class="primary" id="email-account-add">+ Add</button>
+        <div class="email-form-actions"><button type="submit" class="primary" id="email-account-add">+ Add account</button> <span class="hint" id="email-account-status"></span></div>
       </form>
-      <p class="hint" id="email-account-status"></p>
-      <p>Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
     </div>`;
   $("#email-account-form").addEventListener("submit", addEmailAccount);
   loadEmailAccounts();
@@ -1991,11 +2019,12 @@ async function loadEmailAccounts() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="font-weight:600">${esc(a.email)}</td>
-      <td class="mono">${esc(a.host)}:${esc(a.port)}${a.tls ? "" : " (no TLS)"}</td>
+      <td class="mono">${esc(a.host)}:${esc(a.port)} ${a.tls ? `<span class="tag">TLS</span>` : `<span class="tag" style="color:var(--red);border-color:var(--red)">no TLS</span>`}</td>
       <td>${a.hasPassword ? "app password stored" : `<span style="color:var(--red)">no password</span>`}</td>
-      <td><button type="button" class="ghost" data-act="test">Test</button> <span class="mono" data-out></span></td>
-      <td><button type="button" class="danger" data-act="remove">Remove</button></td>
-      ${hoverActionsCell(false)}`;
+      <td>
+        <span class="email-actions"><button type="button" class="ghost" data-act="test">Test</button><button type="button" class="ghost" data-hover="copy" title="copy address">📋 Copy</button><button type="button" class="danger" data-act="remove">Remove</button></span>
+        <span class="mono email-test-out" data-out></span>
+      </td>`;
     wireHoverActions(tr, { copy: () => a.email });
     tr.querySelector('[data-act="test"]').addEventListener("click", async (ev) => {
       const out = tr.querySelector("[data-out]");
