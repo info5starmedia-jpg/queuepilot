@@ -65,6 +65,7 @@
                   <th>Group</th>
                   <th style="width:56px">Tabs</th>
                   <th style="width:190px">Actions</th>
+                  <th class="hover-col"></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -95,7 +96,7 @@
           <div class="table-wrap">
             <table class="grid" id="proxies">
               <thead>
-                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Group</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th></tr>
+                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Group</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th><th class="hover-col"></th></tr>
               </thead>
               <tbody></tbody>
             </table>
@@ -293,6 +294,28 @@
           <span class="hint" id="proxy-add-status"></span>
         </div>
         <div id="proxy-add-result"></div>
+      </div>
+    </div>
+
+    <!-- proxy edit drawer (hover ✏️ on a proxy row) -->
+    <div id="proxy-edit-modal" class="overlay" hidden>
+      <div class="drawer" style="width:440px">
+        <div class="drawer-head"><h3>Edit Proxy</h3><button id="proxy-edit-close" class="ghost">✕</button></div>
+        <form id="proxy-edit-form" autocomplete="off">
+          <label>Name <input id="px-name" required maxlength="120" /></label>
+          <label>Type
+            <select id="px-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
+          </label>
+          <label>Host <input id="px-host" required maxlength="253" /></label>
+          <label>Port <input id="px-port" type="number" required min="1" max="65535" /></label>
+          <label>Username <input id="px-username" maxlength="200" placeholder="(none)" /></label>
+          <label>Password <input id="px-password" type="password" maxlength="200" autocomplete="new-password" placeholder="leave blank to keep the stored one" /></label>
+          <label>Group <input id="px-group" maxlength="120" list="proxy-group-names" /></label>
+          <div class="actions">
+            <button type="submit" class="primary">Save</button>
+            <span class="hint" id="proxy-edit-status"></span>
+          </div>
+        </form>
       </div>
     </div>
 

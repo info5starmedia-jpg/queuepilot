@@ -91,6 +91,56 @@ function toast(detail, type = "info") {
   pushEvent({ type, detail, at: new Date().toISOString() });
 }
 
+/* Row hover actions: copy to clipboard with a short "Copied" flash. The
+   execCommand path covers plain-http origins where navigator.clipboard is
+   unavailable. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (!ok) {
+      toast("copy failed — your browser blocked clipboard access", "error");
+      return;
+    }
+  }
+  let flash = document.getElementById("copy-flash");
+  if (!flash) {
+    flash = document.createElement("div");
+    flash.id = "copy-flash";
+    flash.setAttribute("role", "status");
+    flash.textContent = "Copied";
+    document.body.appendChild(flash);
+  }
+  flash.classList.add("show");
+  clearTimeout(copyText.timer);
+  copyText.timer = setTimeout(() => flash.classList.remove("show"), 1500);
+}
+
+/** Hover-revealed 📋 / ✏️ cell; `edit` false = copy only. */
+function hoverActionsCell(edit = true) {
+  return `<td class="hover-col"><span class="hover-actions">
+    <button type="button" data-hover="copy" title="copy">📋</button>${edit ? `<button type="button" data-hover="edit" title="edit">✏️</button>` : ""}
+  </span></td>`;
+}
+
+/** Wire a row's hover buttons. */
+function wireHoverActions(tr, { copy, edit }) {
+  tr.querySelector('[data-hover="copy"]')?.addEventListener("click", (e) => { e.stopPropagation(); copyText(copy()); });
+  tr.querySelector('[data-hover="edit"]')?.addEventListener("click", (e) => { e.stopPropagation(); edit(); });
+}
+
+/** Passwords are write-only over the API, so the copied string never has one. */
+function proxyConnString(p) {
+  return `${p.type}://${p.username ? `${p.username}@` : ""}${p.host}:${p.port}`;
+}
+
 /* ============================ view switching ============================ */
 
 const VIEWS = ["profiles", "proxies", "tabs", "cookies", "warmups", "providers", "events", "settings"];
@@ -475,11 +525,15 @@ function renderStats() {
 }
 
 async function loadProfiles() {
-  const [{ profiles }, groupData] = await Promise.all([
+  const [{ profiles }, groupData, proxyData] = await Promise.all([
     api("/profiles"),
     api("/profile-groups").catch(() => ({ groups: [] })),
+    api("/proxies").catch(() => null),
   ]);
   allProfiles = profiles;
+  /* The Proxy column and the row copy need proxy details before the
+     Proxies view has ever been opened. */
+  if (proxyData) proxyById = new Map(proxyData.proxies.map((p) => [p.id, p]));
   renderProfileTabs(groupData.groups ?? []);
   renderProfileTable();
   renderStats();
@@ -551,10 +605,15 @@ async function renderProfileTable() {
         <button class="act-clone" data-act="clone" title="duplicate with a fresh fingerprint">⎘</button>
         <button data-act="regen" title="regenerate fingerprint">↻</button>
         <button class="act-delete" data-act="delete" title="delete profile">🗑</button>
-      </span></td>`;
+      </span></td>
+      ${hoverActionsCell()}`;
     tr.querySelectorAll("[data-act]").forEach((b) =>
       b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act, p)),
     );
+    wireHoverActions(tr, {
+      copy: () => [p.name, p.group ?? "default", p.email ?? "", proxy ? `${proxy.host}:${proxy.port}` : "", (p.tags ?? []).join(", ")].join(" | "),
+      edit: () => onProfileAction(p.id, "edit", p),
+    });
     tbody.appendChild(tr);
   });
 
@@ -950,7 +1009,9 @@ async function loadProxies() {
       <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
       <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
-      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>`;
+      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>
+      ${hoverActionsCell()}`;
+    wireHoverActions(tr, { copy: () => proxyConnString(p), edit: () => openProxyEdit(p) });
     tr.querySelector("[data-proxy]").addEventListener("change", (ev) => {
       if (ev.target.checked) proxySelection.add(p.id);
       else proxySelection.delete(p.id);
@@ -973,6 +1034,57 @@ async function loadProxies() {
   }
   updateProxySelection();
 }
+
+/* Proxy edit drawer (row hover ✏️). A blank password keeps the stored one —
+   the API never sends it back, so the field cannot be prefilled. */
+let proxyEditId = null;
+
+function openProxyEdit(p) {
+  proxyEditId = p.id;
+  $("#px-name").value = p.name;
+  $("#px-type").value = p.type;
+  $("#px-host").value = p.host;
+  $("#px-port").value = p.port;
+  $("#px-username").value = p.username ?? "";
+  $("#px-password").value = "";
+  $("#px-group").value = p.group ?? "default";
+  $("#proxy-edit-status").textContent = "";
+  $("#proxy-edit-modal").hidden = false;
+  $("#px-name").focus();
+}
+
+function closeProxyEdit() {
+  proxyEditId = null;
+  $("#px-password").value = "";
+  $("#proxy-edit-modal").hidden = true;
+}
+
+$("#proxy-edit-close").addEventListener("click", closeProxyEdit);
+$("#proxy-edit-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-edit-modal") closeProxyEdit(); });
+$("#proxy-edit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!proxyEditId) return;
+  const username = $("#px-username").value.trim();
+  const password = $("#px-password").value;
+  const body = {
+    name: $("#px-name").value.trim(),
+    type: $("#px-type").value,
+    host: $("#px-host").value.trim(),
+    port: Number($("#px-port").value),
+    username: username === "" ? null : username,
+    group: $("#px-group").value.trim() || "default",
+    ...(password !== "" ? { password } : {}),
+  };
+  try {
+    await api(`/proxies/${proxyEditId}`, { method: "PATCH", body: JSON.stringify(body) });
+    toast(`proxy "${body.name}" saved`);
+    closeProxyEdit();
+  } catch (err) {
+    $("#proxy-edit-status").textContent = err.message;
+    return;
+  }
+  await loadProxies();
+});
 
 /* Proxies view: selection, bulk test/delete, add drawer */
 const proxySelection = new Set();
@@ -1848,7 +1960,9 @@ async function loadEmailAccounts() {
       <td class="mono">${esc(a.host)}:${esc(a.port)}${a.tls ? "" : " (no TLS)"}</td>
       <td>${a.hasPassword ? "app password stored" : `<span style="color:var(--red)">no password</span>`}</td>
       <td><button type="button" class="ghost" data-act="test">Test</button> <span class="mono" data-out></span></td>
-      <td><button type="button" class="danger" data-act="remove">Remove</button></td>`;
+      <td><button type="button" class="danger" data-act="remove">Remove</button></td>
+      ${hoverActionsCell(false)}`;
+    wireHoverActions(tr, { copy: () => a.email });
     tr.querySelector('[data-act="test"]').addEventListener("click", async (ev) => {
       const out = tr.querySelector("[data-out]");
       ev.target.disabled = true;

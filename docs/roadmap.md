@@ -2225,3 +2225,15 @@ list, health) with warm responses of ~4.5–18 s. Complex multi-step chains
 will be hit-or-miss on a 7b CPU model — the pluggable provider slot is the
 escape hatch (owner-provided cloud key, off by default). Live app on 50325
 runs the assistant; `/agent/status` reports model + limits.
+
+## UI polish batch — hover actions, proxy geo cache, Email (IMAP) settings (2026-11-19, branch `ui-hover-proxy-geo`)
+
+### Hover copy/edit actions — SHIPPED
+Profile, proxy and email-account rows now show 📋 Copy (and ✏️ Edit where
+an edit exists) when the pointer is over the row; the column keeps its
+width so rows never jump, and touch screens always show the icons. Profile
+copy is `Name | group | email | proxy host:port | tags`; email copy is the
+address. Proxy copy is `type://user@host:port` — **without the password**,
+because proxy passwords are write-only over the API (P6) and the dashboard
+never has them. Proxies had no edit form, so ✏️ opens a new small Edit
+Proxy drawer (PATCH `/proxies/:id`; a blank password keeps the stored one).

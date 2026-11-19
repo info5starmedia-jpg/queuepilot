@@ -585,3 +585,37 @@ body[data-tier="L2"] #proxies-delete-selected,
 body[data-tier="L2"] #proxies [data-act="delete"],
 body[data-tier="L2"] #warmup-record,
 body[data-tier="L2"] #warmups-table [data-act="delete"] { display: none !important; }
+
+/* Row hover actions (📋 copy / ✏️ edit): the column keeps its width so rows
+   never jump; the buttons only fade in on hover/focus. Touch screens have no
+   hover, so there they are always shown. */
+th.hover-col, td.hover-col { width: 64px; padding-left: 0; padding-right: 4px; }
+.hover-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+tr:hover .hover-actions, tr:focus-within .hover-actions { opacity: 1; }
+@media (hover: none) { .hover-actions { opacity: 1; } }
+.hover-actions button {
+  background: transparent;
+  border: none;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+.hover-actions button:hover { background: var(--panel-3); }
+#copy-flash {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 1000;
+}
+#copy-flash.show { opacity: 1; }
