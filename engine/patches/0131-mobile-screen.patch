@@ -1,5 +1,5 @@
 diff --git a/content/browser/renderer_host/cross_process_frame_connector.cc b/content/browser/renderer_host/cross_process_frame_connector.cc
-index 4911f7177f..8a005cf53a 100644
+index 74dcb3d082..4fb55a6d9e 100644
 --- a/content/browser/renderer_host/cross_process_frame_connector.cc
 +++ b/content/browser/renderer_host/cross_process_frame_connector.cc
 @@ -7,6 +7,7 @@
@@ -56,10 +56,10 @@ index 4911f7177f..8a005cf53a 100644
  
  CrossProcessFrameConnector::~CrossProcessFrameConnector() {
 diff --git a/content/browser/renderer_host/cross_process_frame_connector.h b/content/browser/renderer_host/cross_process_frame_connector.h
-index 6a56f54cff..0bdc97b65c 100644
+index 0dc16caed8..4f824a4f1d 100644
 --- a/content/browser/renderer_host/cross_process_frame_connector.h
 +++ b/content/browser/renderer_host/cross_process_frame_connector.h
-@@ -97,6 +97,12 @@ class CONTENT_EXPORT CrossProcessFrameConnector : public FrameConnector {
+@@ -93,6 +93,12 @@ class CONTENT_EXPORT CrossProcessFrameConnector : public FrameConnector {
  
    ~CrossProcessFrameConnector() override;
  
@@ -73,10 +73,10 @@ index 6a56f54cff..0bdc97b65c 100644
    // above.
    RenderWidgetHostViewChildFrame* get_view_for_testing() { return view_; }
 diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
-index 2a4625eebc..9e428d3f6d 100644
+index bb78a6df3d..3b7d9f7f1a 100644
 --- a/content/browser/renderer_host/render_frame_host_impl.cc
 +++ b/content/browser/renderer_host/render_frame_host_impl.cc
-@@ -4774,9 +4774,12 @@ bool RenderFrameHostImpl::CreateRenderFrame(
+@@ -5033,9 +5033,12 @@ bool RenderFrameHostImpl::CreateRenderFrame(
    if (owned_render_widget_host_) {
      CHECK(parent_);
      CHECK(parent_frame_token);
@@ -90,17 +90,73 @@ index 2a4625eebc..9e428d3f6d 100644
      // The child frame should be created hidden.
      CHECK(!rwhv->IsShowing());
    }
+diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
+index 813b63f339..d566f158d5 100644
+--- a/third_party/blink/renderer/core/frame/local_dom_window.cc
++++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
+@@ -1721,6 +1721,17 @@ int LocalDOMWindow::outerHeight() const {
+   // window that is the page's viewport plus the persona's chrome
+   // (RenderWidgetHostImpl::FuryWindowScreenRect), and RootWindowRect below is
+   // that window.
++  //
++  // Patch 0131: a phone's window is its screen. innerHeight here is in layout
++  // pixels, which a page without <meta viewport> zooms out to 980 wide, so
++  // inner + chrome would give a phone 1825 pixels of window on an 832-pixel
++  // screen (measured on verify-0131's bare page).
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
++      config && config->GetBool("mobile.enabled").value_or(false)) {
++    if (std::optional<int> height = config->GetInt("screen.height")) {
++      return *height;
++    }
++  }
+ 
+   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
+     return static_cast<int>(
+@@ -1756,6 +1767,14 @@ int LocalDOMWindow::outerWidth() const {
+   ChromeClient& chrome_client = page->GetChromeClient();
+ 
+   // Patch 0020: the chrome is the browser's to describe, as in outerHeight.
++  // Patch 0131: see outerHeight.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
++      config && config->GetBool("mobile.enabled").value_or(false)) {
++    if (std::optional<int> width = config->GetInt("screen.width")) {
++      return *width;
++    }
++  }
++
+   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
+     return static_cast<int>(
+         lroundf(chrome_client.RootWindowRect(*frame).width() *
+diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
+index b439c025e8..0c6c6f472a 100644
+--- a/third_party/blink/renderer/core/frame/screen.cc
++++ b/third_party/blink/renderer/core/frame/screen.cc
+@@ -172,6 +172,12 @@ bool Screen::isExtended() const {
+   if (!DomWindow()) {
+     return false;
+   }
++  // Fury patch 0131: a phone has one screen. The host's would say whether a
++  // second monitor is plugged into the Mac.
++  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
++      config && config->GetBool("mobile.enabled").value_or(false)) {
++    return false;
++  }
+   auto* context = GetExecutionContext();
+   if (!context->IsFeatureEnabled(
+           network::mojom::PermissionsPolicyFeature::kWindowManagement)) {
 diff --git a/third_party/blink/renderer/core/frame/screen_metrics_emulator.cc b/third_party/blink/renderer/core/frame/screen_metrics_emulator.cc
-index 034fb7e51d..6ca250c0ad 100644
+index 9f0a1a816b..98d8a3534b 100644
 --- a/third_party/blink/renderer/core/frame/screen_metrics_emulator.cc
 +++ b/third_party/blink/renderer/core/frame/screen_metrics_emulator.cc
-@@ -5,11 +5,29 @@
+@@ -5,12 +5,31 @@
  #include "third_party/blink/renderer/core/frame/screen_metrics_emulator.h"
  
  #include "base/numerics/safe_conversions.h"
 +#include "components/fury/fury_config.h"
  #include "third_party/blink/public/common/widget/visual_properties.h"
  #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
+ #include "ui/display/screen_info.h"
++#include "ui/gfx/geometry/size_conversions.h"
  
  namespace blink {
  
@@ -124,7 +180,7 @@ index 034fb7e51d..6ca250c0ad 100644
  ScreenMetricsEmulator::ScreenMetricsEmulator(
      WebFrameWidgetImpl* frame_widget,
      const display::ScreenInfos& screen_infos,
-@@ -68,19 +86,35 @@ void ScreenMetricsEmulator::Apply(
+@@ -64,19 +83,35 @@ void ScreenMetricsEmulator::Apply(
    // though.
    gfx::Size window_size = original_window_rect().size();
  
@@ -164,7 +220,7 @@ index 034fb7e51d..6ca250c0ad 100644
    }
  
    // For mobile emulation, the window size is changed to match the widget size,
-@@ -136,6 +170,32 @@ void ScreenMetricsEmulator::Apply(
+@@ -132,6 +167,32 @@ void ScreenMetricsEmulator::Apply(
    DeviceEmulationParams modified_emulation_params = emulation_params_;
    modified_emulation_params.device_scale_factor =
        original_screen_info.device_scale_factor;
@@ -197,7 +253,7 @@ index 034fb7e51d..6ca250c0ad 100644
    frame_widget_->SetScreenMetricsEmulationParameters(
        true, std::move(modified_emulation_params), cache_behavior);
  
-@@ -159,12 +219,38 @@ void ScreenMetricsEmulator::Apply(
+@@ -155,12 +216,38 @@ void ScreenMetricsEmulator::Apply(
        emulated_screen_infos.mutable_current();
    emulated_screen_info.device_scale_factor = device_scale_factor;
    emulated_screen_info.rect = screen_rect;
@@ -239,7 +295,7 @@ index 034fb7e51d..6ca250c0ad 100644
  
  void ScreenMetricsEmulator::UpdateVisualProperties(
 diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
-index f3cea4974f..1f53f6d6d5 100644
+index 12a25717a5..5f01267040 100644
 --- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
 +++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
 @@ -30,6 +30,8 @@
@@ -251,7 +307,7 @@ index f3cea4974f..1f53f6d6d5 100644
  #include <algorithm>
  #include <memory>
  #include <optional>
-@@ -204,6 +206,88 @@ namespace blink {
+@@ -206,6 +208,88 @@ namespace blink {
  
  namespace {
  
@@ -340,7 +396,7 @@ index f3cea4974f..1f53f6d6d5 100644
  Element* GetElementFromDOMNodeId(DOMNodeIdType target_dom_node_id) {
    if (target_dom_node_id.is_null()) {
      return nullptr;
-@@ -1984,6 +2068,21 @@ void WebFrameWidgetImpl::UpdateVisualProperties(
+@@ -2047,6 +2131,21 @@ void WebFrameWidgetImpl::UpdateVisualProperties(
    SetApplicationContext(visual_properties.application_context);
  
    if (ForMainFrame()) {
@@ -362,7 +418,7 @@ index f3cea4974f..1f53f6d6d5 100644
      SetAutoResizeMode(
          visual_properties.auto_resize_enabled,
          visual_properties.min_size_for_auto_resize,
-@@ -2104,6 +2203,12 @@ void WebFrameWidgetImpl::UpdateVisualProperties(
+@@ -2182,6 +2281,12 @@ void WebFrameWidgetImpl::UpdateVisualProperties(
        unbounded_surface_state_->host_->UpdateBounds(bounds);
      }
    }
@@ -375,7 +431,7 @@ index f3cea4974f..1f53f6d6d5 100644
  }
  
  void WebFrameWidgetImpl::ApplyVisualPropertiesSizing(
-@@ -2493,6 +2598,38 @@ void WebFrameWidgetImpl::DisableDeviceEmulation() {
+@@ -2581,6 +2686,39 @@ void WebFrameWidgetImpl::DisableDeviceEmulation() {
      device_emulator_->DisableAndApply();
    }
    device_emulator_ = nullptr;
@@ -391,7 +447,8 @@ index f3cea4974f..1f53f6d6d5 100644
 +  }
 +  std::optional<DeviceEmulationParams> params = FuryMobileEmulation();
 +  if (!params) {
-+    params = FuryDesktopEmulation(GetOriginalScreenInfo().device_scale_factor);
++    params = FuryDesktopEmulation(
++        GetOriginalScreenInfos().current().device_scale_factor);
 +  }
 +  if (!params) {
 +    return;
@@ -414,7 +471,7 @@ index f3cea4974f..1f53f6d6d5 100644
  }
  
  void WebFrameWidgetImpl::SetIsInertForSubFrame(bool inert) {
-@@ -3754,6 +3891,44 @@ const display::ScreenInfos& WebFrameWidgetImpl::GetOriginalScreenInfos() {
+@@ -3897,6 +4035,44 @@ const display::ScreenInfos& WebFrameWidgetImpl::GetOriginalScreenInfos() {
    return widget_base_->screen_infos();
  }
  
@@ -459,7 +516,7 @@ index f3cea4974f..1f53f6d6d5 100644
  gfx::Rect WebFrameWidgetImpl::WindowRect() {
    return widget_base_->WindowRect();
  }
-@@ -4556,6 +4731,8 @@ void WebFrameWidgetImpl::DidNavigate() {
+@@ -4830,6 +5006,8 @@ void WebFrameWidgetImpl::DidNavigate() {
    if (RuntimeEnabledFeatures::UnboundedElementEnabled()) {
      OnDismissed();
    }
@@ -468,7 +525,7 @@ index f3cea4974f..1f53f6d6d5 100644
  }
  
  void WebFrameWidgetImpl::FlushInputForTesting(base::OnceClosure done_callback) {
-@@ -5320,13 +5497,15 @@ void WebFrameWidgetImpl::SetScreenMetricsEmulationParameters(
+@@ -5630,13 +5808,15 @@ void WebFrameWidgetImpl::SetScreenMetricsEmulationParameters(
  void WebFrameWidgetImpl::SetScreenInfoAndSize(
      const display::ScreenInfos& screen_infos,
      const gfx::Size& widget_size_in_dips,
@@ -486,46 +543,26 @@ index f3cea4974f..1f53f6d6d5 100644
  }
  
  float WebFrameWidgetImpl::GetCompositingScaleFactor() {
-@@ -5569,12 +5748,18 @@ void WebFrameWidgetImpl::DidUpdateSurfaceAndScreen(
-         }
-       });
- 
--  if (previous_original_screen_infos != original_screen_infos) {
-+  // Patch 0131: under Fury's own emulation the child frames get the
-+  // persona's scale factor (FuryScreenInfosForRemoteFrames), so they are
-+  // told whenever it differs; RemoteFrame sends nothing that has not changed.
-+  const display::ScreenInfos remote_screen_infos =
-+      FuryScreenInfosForRemoteFrames();
-+  if (previous_original_screen_infos != original_screen_infos ||
-+      remote_screen_infos != original_screen_infos) {
-     // Propagate changes down to child local root RenderWidgets and
-     // BrowserPlugins in other frame trees/processes.
-     ForEachRemoteFrameControlledByWidget(
--        [&original_screen_infos](RemoteFrame* remote_frame) {
--          remote_frame->DidChangeScreenInfos(original_screen_infos);
-+        [&remote_screen_infos](RemoteFrame* remote_frame) {
-+          remote_frame->DidChangeScreenInfos(remote_screen_infos);
-         });
-   }
- }
 diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.h b/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
-index e74d8a7fd4..33529d9700 100644
+index 2a21931070..9b1285b643 100644
 --- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
 +++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
-@@ -499,6 +499,12 @@ class CORE_EXPORT WebFrameWidgetImpl
+@@ -440,6 +440,14 @@ class CORE_EXPORT WebFrameWidgetImpl
+   void ApplyLocalSurfaceIdUpdate(const viz::LocalSurfaceId& id) override;
+   const display::ScreenInfo& GetScreenInfo() override;
    const display::ScreenInfos& GetScreenInfos() override;
-   const display::ScreenInfo& GetOriginalScreenInfo() override;
-   const display::ScreenInfos& GetOriginalScreenInfos() override;
 +  // Patch 0131: the screen infos handed to child frames in other processes.
++  // Unused since 159: upstream now hands child frames the effective (emulated)
++  // screen infos itself; kept so the 158 behaviour is one call away.
 +  display::ScreenInfos FuryScreenInfosForRemoteFrames();
 +  // Patch 0131: the persona's scale factor while Fury's emulation lays the
 +  // page out at it (ChromeClientImpl::WindowToViewportScalar); nullopt
 +  // otherwise, including under DevTools device mode.
 +  std::optional<float> FuryLayoutScaleFactor();
-   gfx::Rect WindowRect() override;
-   gfx::Rect ViewRect() override;
-   void SetScreenRects(const gfx::Rect& widget_screen_rect,
-@@ -769,9 +775,14 @@ class CORE_EXPORT WebFrameWidgetImpl
+   float GetOriginalDeviceScaleFactor() override;
+ 
+   // Called when a drag-n-drop operation should begin.
+@@ -775,9 +783,14 @@ class CORE_EXPORT WebFrameWidgetImpl
        const blink::DeviceEmulationParams& params,
        const mojom::blink::DeviceEmulationCacheBehavior& cache_behavior =
            mojom::blink::DeviceEmulationCacheBehavior::kClearCache);
@@ -543,7 +580,7 @@ index e74d8a7fd4..33529d9700 100644
  
    // Update the surface allocation information, compositor viewport rect and
    // screen info on the widget.
-@@ -988,6 +999,9 @@ class CORE_EXPORT WebFrameWidgetImpl
+@@ -994,6 +1007,9 @@ class CORE_EXPORT WebFrameWidgetImpl
        const DeviceEmulationParams& parameters,
        const mojom::blink::DeviceEmulationCacheBehavior cache_behavior) override;
    void DisableDeviceEmulation() override;
@@ -553,26 +590,11 @@ index e74d8a7fd4..33529d9700 100644
    // Sets the inert bit on an out-of-process iframe, causing it to ignore
    // input.
    void SetIsInertForSubFrame(bool inert) override;
-diff --git a/third_party/blink/renderer/core/frame/web_remote_frame_impl.cc b/third_party/blink/renderer/core/frame/web_remote_frame_impl.cc
-index a645bc18a9..a089e74af7 100644
---- a/third_party/blink/renderer/core/frame/web_remote_frame_impl.cc
-+++ b/third_party/blink/renderer/core/frame/web_remote_frame_impl.cc
-@@ -362,7 +362,9 @@ void WebRemoteFrameImpl::InitializeFrameVisualProperties(
-   visual_properties.page_scale_factor = ancestor_widget->PageScaleInMainFrame();
-   visual_properties.is_pinch_gesture_active =
-       ancestor_widget->PinchGestureActiveInMainFrame();
--  visual_properties.screen_infos = ancestor_widget->GetOriginalScreenInfos();
-+  // Fury patch 0131: the persona's scale factor under Fury's emulation.
-+  visual_properties.screen_infos =
-+      ancestor_widget->FuryScreenInfosForRemoteFrames();
-   visual_properties.visible_viewport_size =
-       ancestor_widget->VisibleViewportSize();
-   const std::vector<gfx::Rect>& viewport_segments =
 diff --git a/third_party/blink/renderer/core/page/chrome_client_impl.cc b/third_party/blink/renderer/core/page/chrome_client_impl.cc
-index 8a9acc6dc7..70105b052a 100644
+index 8d56e87044..77dafd3e20 100644
 --- a/third_party/blink/renderer/core/page/chrome_client_impl.cc
 +++ b/third_party/blink/renderer/core/page/chrome_client_impl.cc
-@@ -646,6 +646,19 @@ float ChromeClientImpl::WindowToViewportScalar(LocalFrame* frame,
+@@ -648,6 +648,19 @@ float ChromeClientImpl::WindowToViewportScalar(LocalFrame* frame,
    }
  
    if (auto* widget = frame->GetWidgetForLocalRoot()) {
@@ -592,57 +614,3 @@ index 8a9acc6dc7..70105b052a 100644
      return widget->DIPsToBlinkSpace(scalar_value);
    }
    return scalar_value;
-diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
-index faf300e09b..e6bdc4e630 100644
---- a/third_party/blink/renderer/core/frame/local_dom_window.cc
-+++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
-@@ -1697,6 +1697,17 @@ int LocalDOMWindow::outerHeight() const {
-   // window that is the page's viewport plus the persona's chrome
-   // (RenderWidgetHostImpl::FuryWindowScreenRect), and RootWindowRect below is
-   // that window.
-+  //
-+  // Patch 0131: a phone's window is its screen. innerHeight here is in layout
-+  // pixels, which a page without <meta viewport> zooms out to 980 wide, so
-+  // inner + chrome would give a phone 1825 pixels of window on an 832-pixel
-+  // screen (measured on verify-0131's bare page).
-+  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
-+      config && config->GetBool("mobile.enabled").value_or(false)) {
-+    if (std::optional<int> height = config->GetInt("screen.height")) {
-+      return *height;
-+    }
-+  }
- 
-   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
-     return static_cast<int>(
-@@ -1732,6 +1743,14 @@ int LocalDOMWindow::outerWidth() const {
-   ChromeClient& chrome_client = page->GetChromeClient();
- 
-   // Patch 0020: the chrome is the browser's to describe, as in outerHeight.
-+  // Patch 0131: see outerHeight.
-+  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
-+      config && config->GetBool("mobile.enabled").value_or(false)) {
-+    if (std::optional<int> width = config->GetInt("screen.width")) {
-+      return *width;
-+    }
-+  }
-+
-   if (page->GetSettings().GetReportScreenSizeInPhysicalPixelsQuirk()) {
-     return static_cast<int>(
-         lroundf(chrome_client.RootWindowRect(*frame).width() *
-diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
-index b439c025e8..0c6c6f472a 100644
---- a/third_party/blink/renderer/core/frame/screen.cc
-+++ b/third_party/blink/renderer/core/frame/screen.cc
-@@ -172,6 +172,12 @@ bool Screen::isExtended() const {
-   if (!DomWindow()) {
-     return false;
-   }
-+  // Fury patch 0131: a phone has one screen. The host's would say whether a
-+  // second monitor is plugged into the Mac.
-+  if (const fury::FuryConfig* config = fury::FuryConfig::Get();
-+      config && config->GetBool("mobile.enabled").value_or(false)) {
-+    return false;
-+  }
-   auto* context = GetExecutionContext();
-   if (!context->IsFeatureEnabled(
-           network::mojom::PermissionsPolicyFeature::kWindowManagement)) {

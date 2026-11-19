@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/devtools/BUILD.gn b/chrome/browser/devtools/BUILD.gn
-index 9011cb9983..64641c9a6c 100644
+index 6cab394b73..394c2b7cc0 100644
 --- a/chrome/browser/devtools/BUILD.gn
 +++ b/chrome/browser/devtools/BUILD.gn
-@@ -148,6 +148,7 @@ static_library("devtools") {
+@@ -150,6 +150,7 @@ static_library("devtools") {
      "//chrome/browser/ui/browser_window:create_browser_window",
      "//chrome/browser/ui/dialogs",
      "//chrome/browser/ui/select_file_policy",
@@ -11,10 +11,10 @@ index 9011cb9983..64641c9a6c 100644
      "//components/page_load_metrics/browser/observers/ad_metrics",
  
 diff --git a/chrome/browser/devtools/devtools_availability_checker.cc b/chrome/browser/devtools/devtools_availability_checker.cc
-index ca4087bec2..c3a6c1a4f4 100644
+index a90b51d46e..0a2e1e5e96 100644
 --- a/chrome/browser/devtools/devtools_availability_checker.cc
 +++ b/chrome/browser/devtools/devtools_availability_checker.cc
-@@ -8,6 +8,8 @@
+@@ -9,6 +9,8 @@
  #include <string>
  
  #include "base/check.h"
@@ -23,7 +23,7 @@ index ca4087bec2..c3a6c1a4f4 100644
  #include "base/feature_list.h"
  #include "base/notreached.h"
  #include "base/types/expected.h"
-@@ -124,9 +126,39 @@ DevToolsBlockReason GetRestrictedExtensionBlockReason(
+@@ -131,9 +133,39 @@ DevToolsBlockReason GetRestrictedExtensionBlockReason(
  
  }  // namespace
  
@@ -63,7 +63,7 @@ index ca4087bec2..c3a6c1a4f4 100644
    if (base::FeatureList::IsEnabled(features::kDevToolsTargetLevelEvaluation)) {
      GURL target_url = agent_host->GetURL();
      DevToolsBlockReason reason = GetDevToolsBlockReason(profile, target_url);
-@@ -165,6 +197,9 @@ DevToolsBlockReason GetDevToolsBlockReason(
+@@ -198,6 +230,9 @@ DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
  
  DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
                                             content::WebContents* web_contents) {
@@ -73,7 +73,7 @@ index ca4087bec2..c3a6c1a4f4 100644
    if (!web_contents) {
      // For contexts without web_contents, we can only check the general policy.
      return GetDevToolsBlockReason(
-@@ -263,6 +298,9 @@ DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
+@@ -296,6 +331,9 @@ DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
  DevToolsBlockReason GetDevToolsBlockReason(
      Profile* profile,
      const extensions::Extension* extension) {
@@ -83,7 +83,7 @@ index ca4087bec2..c3a6c1a4f4 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
    if (extension) {
      if (std::optional<DevToolsBlockReason> reason =
-@@ -308,6 +346,9 @@ DevToolsBlockReason GetDevToolsBlockReason(
+@@ -341,6 +379,9 @@ DevToolsBlockReason GetDevToolsBlockReason(
  #if !BUILDFLAG(IS_ANDROID)
  DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
                                             const web_app::WebApp* web_app) {
@@ -93,7 +93,7 @@ index ca4087bec2..c3a6c1a4f4 100644
    if (web_app) {
      if (std::optional<DevToolsBlockReason> reason =
              GetUrlPoliciesBlockReason(profile, web_app->start_url())) {
-@@ -337,6 +378,9 @@ DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
+@@ -370,6 +411,9 @@ DevToolsBlockReason GetDevToolsBlockReason(Profile* profile,
  #endif
  
  DevToolsBlockReason GetDevToolsBlockReason(Profile* profile, const GURL& url) {
@@ -104,10 +104,10 @@ index ca4087bec2..c3a6c1a4f4 100644
      return DevToolsBlockReason::kNotBlocked;
    }
 diff --git a/chrome/browser/policy/BUILD.gn b/chrome/browser/policy/BUILD.gn
-index cb75fa9666..179a9ae66f 100644
+index 2034c09078..992abe75f8 100644
 --- a/chrome/browser/policy/BUILD.gn
 +++ b/chrome/browser/policy/BUILD.gn
-@@ -1277,6 +1277,7 @@ source_set("impl") {
+@@ -1271,6 +1271,7 @@ source_set("impl") {
      ":path_parser",
      ":policy_util",
      "//chrome/browser:browser_features",
@@ -116,7 +116,7 @@ index cb75fa9666..179a9ae66f 100644
      "//chrome/browser/bookmarks",
      "//chrome/browser/browsing_data",
 diff --git a/chrome/browser/policy/developer_tools_policy_checker.cc b/chrome/browser/policy/developer_tools_policy_checker.cc
-index 84200574f3..c9a89ec075 100644
+index b66001011d..5c446b956b 100644
 --- a/chrome/browser/policy/developer_tools_policy_checker.cc
 +++ b/chrome/browser/policy/developer_tools_policy_checker.cc
 @@ -4,6 +4,9 @@
@@ -148,7 +148,7 @@ index 84200574f3..c9a89ec075 100644
        url_blocklist_manager_.GetURLBlocklistState(url);
    if (url_state == URLBlocklist::URLBlocklistState::URL_IN_ALLOWLIST) {
 diff --git a/chrome/browser/policy/developer_tools_policy_handler.cc b/chrome/browser/policy/developer_tools_policy_handler.cc
-index 18b0bd47fa..e105f518d3 100644
+index 359b2083c5..c8b7d97ac8 100644
 --- a/chrome/browser/policy/developer_tools_policy_handler.cc
 +++ b/chrome/browser/policy/developer_tools_policy_handler.cc
 @@ -4,6 +4,8 @@
@@ -159,8 +159,8 @@ index 18b0bd47fa..e105f518d3 100644
 +
  #include <optional>
  
- #include "base/command_line.h"
-@@ -293,6 +295,25 @@ void DeveloperToolsPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
+ #include "base/check.h"
+@@ -295,6 +297,25 @@ void DeveloperToolsPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
  
  policy::DeveloperToolsAvailability
  DeveloperToolsPolicyHandler::GetEffectiveAvailability(Profile* profile) {
