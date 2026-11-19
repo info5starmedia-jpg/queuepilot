@@ -171,19 +171,65 @@ and nothing runs a parser on it, so `emailcode` never yields a code.
 - Live: scratch API → local fake Inbox API (details in the roadmap). Not
   yet tried against the owner's real Inbox.
 
+### 6. Agreed build order + SEC-1, AYCD complete, `.jyl` loader, parsers
+
+**Owner agreed the order** in `docs/roadmap.md` (Jancy section): five
+milestones, SEC-1 first, J3a tab-state core before J6, and DECK is GO after
+its test build.
+
+**What landed:**
+
+- **SEC-1:**
+  - `/profiles/:id/resolve` needs `SPECTRA_API_TOKEN` (403 otherwise).
+  - `ctx.usedAliases`: `webhook` refuses stored secrets; `imap` sends
+    `@alias` passwords only to trusted hosts (`TRUSTED_IMAP_HOSTS` +
+    stored-account hosts).
+- **AYCD complete:**
+  - `/integrations/aycd` key slot (save / verify / remove).
+  - Console card in Settings → Integrations.
+  - The owner submits the real key next, with Inbox open.
+- **`.jyl` loader:** `application/parsers/jyl-parser-loader.ts`. Only
+  `<email-parser>` and `<sms-parser>`; files go in `<dataDir>/parsers`;
+  names become `user-<name>`.
+- **Parsers:**
+  - TM US verified against the owner's real mail format (redacted
+    fixtures in `tests/parser-fixtures.test.ts`).
+  - Generic `otp(...)` + `lookupParser()` in `builtin-parsers.ts`.
+  - No AXS / SeatGeek / MLB / Etix / TM UK / TM MX samples exist in the
+    owner's Gmail, so those sites use `otp()`.
+
+**Commit and audit:**
+
+- Commit `4c7b997`. Gates: **738/738 API + 20/20 server**.
+- In-house audit, two passes: CLEAR. Also fixed in this commit:
+  - `static` refuses `@aliases`;
+  - `env:` reads only `QP_VALUE_*`;
+  - an aliased IMAP password needs TLS to remote hosts;
+  - the `.jyl` header parser no longer has a ReDoS risk.
+- Accepted as-is (consistent with `/email-accounts`): `PUT /integrations/aycd`
+  has no scripting gate.
+
+**⚠ Secret-store isolation:** scratch APIs MUST set `QUEUEPILOT_DATA_DIR`
+as well as `SPECTRA_DATA_DIR`. Without it they share the LIVE DPAPI store.
+A fake `aycd` alias leaked there on 2026-11-19 and was removed. The code
+change is an owner decision, tracked as roadmap **SEC-2**.
+
 ## Next, in order
 
-1. J1 slice C, rest: the `.jyl` email/sms parser loader (only those two
-   tags), AXS / SeatGeek / MLB / SMS parsers, and generic `otp()` (with
-   `aycdTask`).
-2. SEC-1 (small): gate or authenticate `POST /profiles/:id/resolve`; make
-   alias expansion safe for third-party CSVs.
-3. P-LOCK, then W (warmer port), then J2, then J6 (+ Discord), then
-   DECK spike, then J3 …
+1. J2 service connectors: 7 SMS + 5 password. Built from the providers'
+   public API docs; live verification needs the owner's test keys.
+2. P-LOCK, then W (warmer port).
+3. J3a tab-state core, then J6 (+ Discord), then DECK (test build, then
+   build; owner GO).
+4. J3b, J4, J5, J7, J8.
 
 ## Rules that still apply
 
 - Never commit to `main`; push only when the owner says so.
-- Live checks only on a scratch API (own port + data dir), never :50325.
+- Live checks only on a scratch API, never :50325. Give it its own port
+  AND its own data dir, set through **both** `SPECTRA_DATA_DIR` and
+  `QUEUEPILOT_DATA_DIR`.
+- Audits use the in-house tools (security-auditor agent + Claude review),
+  not Codex.
 - `git add` specific files in the worktree. `npm install` dirties
   `package-lock.json`; don't commit that.
