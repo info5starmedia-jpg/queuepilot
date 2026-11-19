@@ -1594,6 +1594,18 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
   - 3 tests.
   - **Live 2026-11-19** (scratch API, fake runtime, isolated data and secret dirs): two sticky profiles kept 10.0.0.1 / 10.0.0.2 across launches; pin stored; re-roll → next pool entry.
 - [~] **W — Owner warmer as QP's warmup engine** (`91a2936`: engine vendored + persona warmup routes + 3 tests; audit, live run and console UI next window): port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
+  - [ ] **W1 — warmer finish (next window, before J3a):**
+    - In-house security audit, plus a live persona warmup on a real fury profile (isolated scratch dirs).
+    - Console **Warmup** panel: persona picker, start/stop, progress.
+    - **Site list settings** per persona: list sites, include/exclude each, add (URL, category, weight), remove. Saved as operator overrides in `<dataDir>/personas`; bundled originals untouched.
+  - [ ] **W2 — server split + scrambled runner (owner decision 2026-11-19: options 1 + 3; right after W1, before J3a):**
+    - Personas, site lists, planning and timing logic live **only on the QueuePilot server** (`apps/server`). The local QueuePilot authenticates with its team token and requests a plan.
+    - The local side is a small, generic **step runner** (search / open / dwell / scroll / click same-site / consent), shipped compiled + minified + obfuscated, with no personas or planning code.
+    - W1's site settings move to the server: include/exclude is managed centrally for every user.
+    - Browsing stays on each user's machine, through the profile's own proxy, so the warmed IP is the profile's IP.
+    - Remote CDP control from the server is **rejected**: browser control port exposed, latency, fragility.
+- [ ] **R — release packaging (before QueuePilot is first given to anyone else):** bundle the whole API into one minified + obfuscated program file. No loose source tree and no separate downloads; the warmer runner is part of it.
+- **Order after this decision:** W1 → W2 → J3a → J6 → DECK → M4 → M5. R comes before the first distribution.
 - [ ] **DECK — Profile Deck (ADR-0008)**: (1) taskbar grouping quick win; (2) spike: adopt one fury window into a container + claim suite; (3) build the Deck with tab label `email · queue position`.
 - [ ] *(J1 detail as originally scoped)* Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, `aycd` resolver (AYCD Inbox Mail Tasks), in-tree TM/AXS/SeatGeek/MLB + SMS parsers (no FIFA) + generic `otp()`.
 - [~] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
