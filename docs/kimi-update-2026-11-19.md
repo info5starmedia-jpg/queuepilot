@@ -81,8 +81,8 @@ and nothing runs a parser on it, so `emailcode` never yields a code.
 - Tests: `apps/api/tests/jancy-grammar.test.ts` (17 tests).
 - Gates: typecheck, build, **684/684 API + 20/20 server** green. Codex
   second-opinion: no blocking issues; its `host.includes` note was fixed.
-- **Not done:** live verification on a scratch API. That roadmap box stays
-  `[~]` until then.
+- **Live-verified 2026-11-19** on a scratch API (:50477, own data dir;
+  stopped afterwards by its PID). Results are in the roadmap box.
 
 ## Next, in order
 
