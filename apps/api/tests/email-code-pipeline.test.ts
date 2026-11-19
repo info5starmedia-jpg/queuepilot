@@ -300,6 +300,13 @@ describe("imap resolver — Jancy form imap:<host>:<port>:<user>:<pass>:<parser>
     expect(imap.creds[0]).toMatchObject({ host: "imap.gmail.com", port: 993, tls: true, user: "me@gmail.com", pass: "apppass" });
   });
 
+  it("implicit TLS only on 993; other ports start plain (STARTTLS upgrade)", async () => {
+    const imap = fakeImap([TM_MAIL]);
+    await setup(imap).resolve("imap:127.0.0.1:1143:u:p:ticketmaster", ctx);
+    await setup(imap).resolve("imap:mail.example.com:143:u:p:ticketmaster", ctx);
+    expect(imap.creds.map((c) => (c as { tls: boolean }).tls)).toEqual([false, false]);
+  });
+
   it("#BAD ARG COUNT, #CONN ERROR (password redacted)", async () => {
     expect(await setup(fakeImap([])).resolve("imap:host:993:user:pass", ctx)).toMatch(/^#BAD ARG COUNT/);
     const v = await setup(fakeImap([], { failConnect: true })).resolve("imap:h:993:u:pw-secret:ticketmaster", ctx);

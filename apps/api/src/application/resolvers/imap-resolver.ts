@@ -82,7 +82,9 @@ function jancyImapForm(
     }
     const [host, port, user, pass, parser] = a as [string, string, string, string, string];
     const p = Number(port);
-    return { creds: { host, port: p, tls: p !== 143, user, pass }, parser };
+    // 993 = implicit TLS (imaps). Any other port connects plain and
+    // imapflow upgrades with STARTTLS when the server offers it.
+    return { creds: { host, port: p, tls: p === 993, user, pass }, parser };
   }
   if (a.length === 2 && /^[^\s/?@]+@[^\s/?]+$/.test(a[0]!) && a[1]) {
     const account = accounts?.forEmail(a[0]!);
