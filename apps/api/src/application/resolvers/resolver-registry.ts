@@ -34,6 +34,12 @@ export interface ResolverContext {
   siteKind?: "ticketmaster" | "axs" | "other" | undefined;
   /** The tab URL the value is being resolved for (Jancy sets it for `other`). */
   url?: string | undefined;
+  /** Profile fields parsers and SMS resolvers read (Jancy's args.profile). */
+  profile?: {
+    name?: string | undefined;
+    smsNumber?: string | undefined;
+    smsNumberCountryCode?: string | undefined;
+  } | undefined;
 }
 
 export type ResolverFn = (
@@ -84,9 +90,18 @@ export class ResolverRegistry {
     const fn = this.resolvers.get(name);
     if (!fn) return `#NO RESOLVER ${name}`;
     const args = idx === -1 ? "" : expanded.slice(idx + 1);
+    // Positional args are split BEFORE alias expansion and expanded one by
+    // one, so an `@alias` secret containing ':' (an IMAP password, an API
+    // key) stays a single argument. Inline values with ':' still split —
+    // same as Jancy; aliases are the way to store them.
+    const rawIdx = spec.indexOf(":");
+    const rawArgs = rawIdx === -1 ? "" : spec.slice(rawIdx + 1);
     const full: ResolverContext = {
       ...ctx,
-      resolverArgs: args === "" ? [] : args.split(":"),
+      resolverArgs:
+        rawArgs === ""
+          ? []
+          : rawArgs.split(":").map((a) => (aliases ? substituteAliases(a, aliases) : a)),
       ...(aliases ? { aliases } : {}),
     };
     try {

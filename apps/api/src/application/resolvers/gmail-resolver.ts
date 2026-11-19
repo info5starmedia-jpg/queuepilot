@@ -1,29 +1,59 @@
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { GoogleAuthService } from "../google/google-auth.service.js";
 import type { ResolverRegistry } from "./resolver-registry.js";
+import type { MailMessage, ParserQuery, ParserRegistry } from "../parsers/parser-registry.js";
+import {
+  DEFAULT_EMAIL_CODE_SETTINGS,
+  parseRawMail,
+  parserArgsFrom,
+  runEmailCodePipeline,
+  type EmailCodeSettings,
+  type EmailTransport,
+} from "../email/code-pipeline.js";
 
 /**
- * gmail resolver — OAuth-backed (see google-oauth.ts), the modern path now
- * that Google is killing app passwords:
+ * gmail resolver — OAuth-backed (see google-oauth.ts). Two forms:
  *
- *   gmail:<account>[?query=<gmail-search>]
+ *   gmail:<account>[:<parser>[:<label>]]      Jancy form → a CODE
+ *   gmail:<account>?query=<gmail-search>      raw form   → the newest body
  *
- * - <account> is whatever name was used in `GET /oauth/google/start?account=`.
- * - query is any Gmail search expression, default `is:unseen in:inbox`.
- * - Returns the newest matching message's text/plain body (HTML stripped if
- *   the message has no plain part). The CALLER hands the text to a parser.
+ * Jancy form (docs.jancy.io/docs/resolver-columns): the parser (default
+ * `ticketmaster`) supplies the Gmail search via getQuery, the label defaults
+ * to INBOX, and the parser turns the message into the code. Errors use
+ * Jancy's names: #BAD ACCT, #OAUTH ERROR, #BAD LABEL, #NO MSG,
+ * #FILTERED MSG, #PARSE FAILED, #NO PARSER, #BAD PARSER, #API ERROR.
  *
- * Named errors only, per registry contract: `#NO ACCOUNT` (no tokens / no
- * match), `#API ERROR ...` for upstream failures.
+ * The raw `?query=` form is the pre-v0.17 behaviour, kept for scripts that
+ * want the body itself. Without a parser registry wired (old embedders),
+ * the bare form also stays raw.
  */
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
+export interface GmailResolverOptions {
+  parsers?: ParserRegistry;
+  settings?: () => EmailCodeSettings;
+}
+
 export function registerGmailResolver(
   reg: ResolverRegistry,
   google: GoogleAuthService,
+  options: GmailResolverOptions = {},
 ): void {
   reg.register("gmail", async (args, ctx) => {
+    if (options.parsers && !args.includes("?")) {
+      const [account = "", parserName, label] = (ctx.resolverArgs ?? args.split(":")).map((s) => s.trim());
+      if (!account) return "#BAD ARG COUNT gmail expects gmail:<account>[:<parser>[:<label>]]";
+      const settings = options.settings?.() ?? DEFAULT_EMAIL_CODE_SETTINGS;
+      return runEmailCodePipeline({
+        parsers: options.parsers,
+        parserName,
+        args: parserArgsFrom("gmail", ctx),
+        transport: gmailTransport(google, account, label || "INBOX", ctx.fetch ?? fetch),
+        max: settings.gmailMaxPerRequest,
+        newerThan: settings.gmailNewerThan,
+      });
+    }
     const qIdx = args.indexOf("?");
     const account = (qIdx === -1 ? args : args.slice(0, qIdx)).trim();
     if (!account) return "#BAD ALIAS gmail expects gmail:<account>[?query=...]";
@@ -78,6 +108,69 @@ export function registerGmailResolver(
       return msg.startsWith("#") ? msg : `#API ERROR ${msg.slice(0, 200)}`;
     }
   });
+}
+
+/**
+ * Gmail transport for the code pipeline: labels resolved by name (#BAD
+ * LABEL), list with the parser's query, fetch each hit as RAW RFC 822 and
+ * parse it with mailparser — so parsers see the same mail object as over
+ * IMAP. Gmail returns newest first.
+ */
+export function gmailTransport(
+  google: GoogleAuthService,
+  account: string,
+  label: string,
+  f: typeof fetch,
+): EmailTransport {
+  return {
+    resolverName: "gmail",
+    async fetch(query: ParserQuery, { max }): Promise<MailMessage[]> {
+      let token: string;
+      try {
+        token = await google.accessToken(account);
+      } catch (err) {
+        if (err instanceof DomainError && err.code === ErrorCodes.GOOGLE_NOT_CONNECTED) {
+          throw new Error(`#BAD ACCT ${account}`);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(/invalid_grant/i.test(msg) ? `#OAUTH ERROR ${account}` : msg);
+      }
+      const auth = { headers: { authorization: `Bearer ${token}` } };
+      const check = (res: Response, what: string): void => {
+        if (res.status === 401 || res.status === 403) throw new Error(`#OAUTH ERROR ${account}`);
+        if (!res.ok) throw new Error(`#API ERROR gmail ${what} HTTP ${res.status}`);
+      };
+
+      let labelId = "INBOX";
+      if (label.toUpperCase() !== "INBOX") {
+        const res = await f(`${GMAIL_API}/labels`, auth);
+        check(res, "labels");
+        const labels = ((await res.json()) as { labels?: { id: string; name: string }[] }).labels ?? [];
+        const hit = labels.find((l) => l.name.toLowerCase() === label.toLowerCase() || l.id === label);
+        if (!hit) throw new Error(`#BAD LABEL ${label}`);
+        labelId = hit.id;
+      }
+
+      const q = typeof query === "string" ? query : "";
+      const listRes = await f(
+        `${GMAIL_API}/messages?maxResults=${max}&labelIds=${encodeURIComponent(labelId)}` +
+          (q ? `&q=${encodeURIComponent(q)}` : ""),
+        auth,
+      );
+      check(listRes, "list");
+      const ids = ((await listRes.json()) as { messages?: { id: string }[] }).messages ?? [];
+      const out: MailMessage[] = [];
+      for (const { id } of ids.slice(0, max)) {
+        const res = await f(`${GMAIL_API}/messages/${id}?format=raw`, auth);
+        check(res, "get");
+        const m = (await res.json()) as { raw?: string; internalDate?: string };
+        if (!m.raw) continue;
+        const internal = m.internalDate ? new Date(Number(m.internalDate)) : null;
+        out.push(await parseRawMail(Buffer.from(m.raw, "base64url"), `gmail:${id}`, internal));
+      }
+      return out;
+    },
+  };
 }
 
 function decodeBody(data: string | undefined): string {

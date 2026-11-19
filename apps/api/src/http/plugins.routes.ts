@@ -11,8 +11,10 @@ import type { ParserRegistry } from "../application/parsers/parser-registry.js";
 import type { AliasStore } from "../application/resolvers/token-aliases.js";
 import type { ProfileService } from "../application/profiles/profile.service.js";
 import {
+  currentSms,
   looksLikeSpec,
   personaFieldValue,
+  personaFieldsOf,
 } from "../application/profiles/persona-fields.js";
 
 export interface PluginDeps {
@@ -114,7 +116,7 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
     if (body.url) {
       // Jancy's way: the tab URL picks the Site column (brands, then file order).
       const out = await resolveSiteFieldForUrl(sites, body.url, body.field, ctx, resolvers, aliases);
-      if (out.found) return { ...out, profileId: id };
+      if (out.found) return withIsError({ ...out, profileId: id });
     } else if (body.site) {
       const out = await resolveSiteField(
         sites,
@@ -124,7 +126,7 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
         resolvers,
         aliases,
       );
-      if (out.found) return { ...out, profileId: id };
+      if (out.found) return withIsError({ ...out, profileId: id });
       // Fall through to the well-known field — a Site column that doesn't
       // name the field may still want the profile's global smscode, etc.
     }
@@ -137,7 +139,7 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
         const value = looksLikeSpec(raw, registered)
           ? await resolvers.resolve(raw, { ...ctx, site: body.site, field: wellKnown }, aliases)
           : raw;
-        return { found: true, field: wellKnown, value, spec: looksLikeSpec(raw, registered) ? raw : undefined, profileId: id };
+        return withIsError({ found: true, field: wellKnown, value, spec: looksLikeSpec(raw, registered) ? raw : undefined, profileId: id });
       }
     }
     return { found: false, profileId: id };
@@ -148,8 +150,25 @@ function resolverContext(
   profileId: string | undefined,
   profiles: ProfileService,
 ): ResolverContext {
-  const email = profileId
-    ? (profiles.get(profileId).email ?? undefined)
-    : undefined;
-  return { profileId, email };
+  if (!profileId) return {};
+  const p = profiles.get(profileId);
+  const rawIndex = (p.extra ?? {}).smsIndex;
+  const sms = currentSms(
+    personaFieldsOf(p.extra),
+    typeof rawIndex === "number" && Number.isFinite(rawIndex) ? rawIndex : 0,
+  );
+  return {
+    profileId,
+    email: p.email ?? undefined,
+    profile: {
+      name: p.name,
+      smsNumber: sms?.number.number,
+      smsNumberCountryCode: sms?.number.countryCode ?? undefined,
+    },
+  };
+}
+
+/** Jancy's ResolvedValue: a `#…` value is an error, never autofilled. */
+function withIsError<T extends { value?: string }>(out: T): T & { isError: boolean } {
+  return { ...out, isError: typeof out.value === "string" && out.value.startsWith("#") };
 }

@@ -32,6 +32,7 @@ import type { AppConfig } from "../src/config/config.js";
 import { PluginRegistry } from "../src/application/plugins/plugin-registry.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "../src/application/resolvers/resolver-registry.js";
 import { ParserRegistry } from "../src/application/parsers/parser-registry.js";
+import { registerBuiltinParsers } from "../src/application/parsers/builtin-parsers.js";
 import { secretAliasStore } from "../src/application/resolvers/token-aliases.js";
 import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
 import { SettingsService } from "../src/application/settings/settings.service.js";
@@ -137,6 +138,7 @@ export function makeTestContext(
   const resolvers = new ResolverRegistry();
   registerBuiltinResolvers(resolvers); // same set main.ts wires in production
   const parsers = new ParserRegistry(path.join(dataDir, "parsers"));
+  registerBuiltinParsers(parsers); // same builtins main.ts wires
   const plugins = new PluginRegistry(path.join(dataDir, "plugins"), resolvers, parsers);
   const jyl = new JylRegistry(path.join(dataDir, "jyl"));
   const settings = new SettingsService(db);

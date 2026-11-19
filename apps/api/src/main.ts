@@ -47,6 +47,8 @@ import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe
 import { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
+import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
+import type { EmailCodeSettings } from "./application/email/code-pipeline.js";
 import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
@@ -111,13 +113,28 @@ export async function main(): Promise<void> {
   }
 
   // Plugin + resolver + parser registries (Jancy workflow layer, P7).
+  const settingsService = new SettingsService(db);
+  // Read per resolve, so a settings change applies without a restart.
+  const emailCodeSettings = (): EmailCodeSettings => {
+    const s = settingsService.get("integrations");
+    return {
+      gmailMaxPerRequest: s.emailGmailMaxPerRequest,
+      gmailNewerThan: s.emailGmailNewerThan,
+      imapNewerThan: s.emailImapNewerThan,
+    };
+  };
   const resolvers = new ResolverRegistry();
   registerBuiltinResolvers(resolvers);
+  const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
+  registerBuiltinParsers(parserReg);
+  await parserReg.rescan();
   // Email accounts (Settings → Integrations): `imap:you@gmail.com` uses them.
   const emailAccounts = new EmailAccountService(db, secretStore);
-  registerImapResolver(resolvers, { accounts: emailAccounts });
-  const parserReg = new ParserRegistry(path.join(config.dataDir, "parsers"));
-  await parserReg.rescan();
+  registerImapResolver(resolvers, {
+    accounts: emailAccounts,
+    parsers: parserReg,
+    settings: emailCodeSettings,
+  });
   const pluginReg = new PluginRegistry(
     path.join(config.dataDir, "plugins"),
     resolvers,
@@ -135,7 +152,10 @@ export async function main(): Promise<void> {
     clientSecret: config.googleClientSecret ?? null,
     redirectUri: `http://${config.host}:${config.port}/google/auth/callback`,
   });
-  registerGmailResolver(resolvers, google);
+  registerGmailResolver(resolvers, google, {
+    parsers: parserReg,
+    settings: emailCodeSettings,
+  });
   const sheets = new SheetsClient(google);
 
   // v0.15.0 (audit A-rec #2): provider CSVs and extension packages must live
@@ -170,8 +190,6 @@ export async function main(): Promise<void> {
         : new CamoufoxRuntime(defaultCamoufoxPath(config.dataDir));
 
   const engineHealth = new EngineHealthService(runtime, config.dataDir);
-
-  const settingsService = new SettingsService(db);
 
   // Audit GPT-5.4 finding 1: scripting endpoints demand a credential
   // boundary. If the setting is already on but the deployment has no

@@ -2,6 +2,18 @@ import { connect as tlsConnect, type ConnectionOptions, type TLSSocket } from "n
 import { connect as netConnect, type Socket } from "node:net";
 import type { ResolverRegistry } from "./resolver-registry.js";
 import { substituteAliases, type AliasStore } from "./token-aliases.js";
+import type { ParserRegistry } from "../parsers/parser-registry.js";
+import {
+  DEFAULT_EMAIL_CODE_SETTINGS,
+  parserArgsFrom,
+  runEmailCodePipeline,
+  type EmailCodeSettings,
+} from "../email/code-pipeline.js";
+import {
+  imapFlowTransport,
+  type ImapClientFactory,
+  type ImapCreds,
+} from "../email/imap-flow-transport.js";
 
 /**
  * IMAP resolver — the gmail/app-password path. Jancy's `imap` resolver shape:
@@ -42,6 +54,42 @@ export interface ImapResolverOptions {
   connect?: ImapConnect;
   /** Stored accounts; absent = only the inline imap://host?user=&pass= form. */
   accounts?: ImapAccountLookup;
+  /**
+   * Parser registry → enables the Jancy code forms (docs.jancy.io/docs/
+   * resolver-columns), which return a CODE via the email-code pipeline:
+   *   imap:<host>:<port>:<user>:<pass>:<parser>   (Jancy; 5 args or #BAD ARG COUNT)
+   *   imap:<stored-account-email>:<parser>         (ours: Settings → Integrations)
+   * The raw forms above keep returning the body.
+   */
+  parsers?: ParserRegistry;
+  settings?: () => EmailCodeSettings;
+  /** imapflow client factory — tests inject a fake. */
+  imapClientFactory?: ImapClientFactory;
+}
+
+/**
+ * The Jancy code form of `imap:…`, or null when `resolverArgs` is a raw form.
+ * Throws `#…` errors for a recognisable-but-wrong code form.
+ */
+function jancyImapForm(
+  resolverArgs: string[],
+  accounts: ImapAccountLookup | undefined,
+): { creds: ImapCreds; parser: string } | null {
+  const a = resolverArgs.map((s) => s.trim());
+  if (a.length >= 2 && /^\d+$/.test(a[1]!)) {
+    if (a.length !== 5) {
+      throw new Error("#BAD ARG COUNT imap expects imap:<host>:<port>:<user>:<pass>:<parser>");
+    }
+    const [host, port, user, pass, parser] = a as [string, string, string, string, string];
+    const p = Number(port);
+    return { creds: { host, port: p, tls: p !== 143, user, pass }, parser };
+  }
+  if (a.length === 2 && /^[^\s/?@]+@[^\s/?]+$/.test(a[0]!) && a[1]) {
+    const account = accounts?.forEmail(a[0]!);
+    if (!account) throw new Error(`#BAD ACCT ${a[0]} is not added in Settings → Integrations`);
+    return { creds: account, parser: a[1]! };
+  }
+  return null;
 }
 
 /** Minimal socket surface the resolver needs — real sockets and test fakes. */
@@ -279,6 +327,27 @@ export function registerImapResolver(
   options: ImapResolverOptions = {},
 ): void {
   reg.register("imap", async (args, ctx) => {
+    if (options.parsers && !args.startsWith("//") && !args.includes("?")) {
+      let form: ReturnType<typeof jancyImapForm>;
+      try {
+        form = jancyImapForm(ctx.resolverArgs ?? args.split(":"), options.accounts);
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+      if (form) {
+        const settings = options.settings?.() ?? DEFAULT_EMAIL_CODE_SETTINGS;
+        return runEmailCodePipeline({
+          parsers: options.parsers,
+          parserName: form.parser,
+          args: parserArgsFrom("imap", ctx),
+          transport: imapFlowTransport(form.creds, options.imapClientFactory),
+          // Jancy's IMAP side has no per-request cap setting; parsers'
+          // queries are narrow, a few candidates covers retries.
+          max: 3,
+          newerThan: settings.imapNewerThan,
+        });
+      }
+    }
     let parsed;
     try {
       parsed = accountSpec(args, options.accounts) ?? parseImapUrl(args, ctx.aliases);

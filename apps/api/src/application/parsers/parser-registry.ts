@@ -3,35 +3,79 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
- * Parser registry — Jancy's `jancy://parsers` as JS modules. A user drops
- * `<name>.mjs` into `<dataDir>/parsers/` (Jancy's `.jyl` on-ramp, same
- * promise: teach the browser to read a new site's 2FA without waiting for a
- * release) and rescans. A parser module exports:
+ * Parser registry — Jancy's `jancy://parsers` (docs.jancy.io/docs/included-
+ * plugins/parser-registry). Parsers come from three places:
+ *   - "builtin": shipped in-tree (builtin-parsers.ts);
+ *   - "user":    `<name>.mjs` files in `<dataDir>/parsers/` (rescan);
+ *   - a plugin id: registered by a plugin through its context.
  *
- *   export default {
+ * The contract follows Jancy's parser object (apiVersion 2):
+ *
+ *   {
  *     kind: "email-parser" | "sms-parser",
- *     name: "ticketmaster-v3",
- *     canRun: (account) => boolean,          // optional
- *     getQuery: (account) => string,         // optional: Gmail operators or IMAP search
- *     parseMessage: (message) => string,     // code or null
+ *     name, description?, example?,
+ *     canRun?(args)  → boolean          // email: may this parser run here?
+ *     getQuery?(args) → Gmail query string (args.resolverName === "gmail")
+ *                     | ImapFlow SearchObject (args.resolverName === "imap")
+ *     parseMessage(msg, args) → code | null
  *   }
  *
- * `message` is { subject, from, body }. parseMessage returns the code or
- * null — never throws for "this message isn't it", that is what null means.
+ * `args` is Jancy's Resolver object (ParserArgs below). For email parsers
+ * `msg` is a parsed mail (MailMessage: text, html, subject, from, to, date,
+ * plus `body` = text for v1 parsers). For SMS parsers `msg` is the message
+ * text — EXCEPT for v1 `.mjs` parsers (no `apiVersion`), which keep
+ * receiving `{ subject, from, body }` exactly as before.
+ *
+ * parseMessage returns null for "not this message"; it never has to throw.
  */
 
+/** v1 message shape — still what `POST /parsers/:name/run` takes. */
 export interface ParserMessage {
   subject: string;
   from: string;
   body: string;
 }
 
+/** A parsed email as parsers see it (Nodemailer-ish, flattened). */
+export interface MailMessage extends ParserMessage {
+  id: string;
+  to: string;
+  text: string;
+  html: string;
+  date: Date | null;
+}
+
+/** Jancy's Resolver object, handed to canRun / getQuery / parseMessage. */
+export interface ParserArgs {
+  resolverName: string;
+  resolverArgs: string[];
+  field: string;
+  /** ticketmaster | axs | other */
+  site: string;
+  url?: string | undefined;
+  profile: {
+    email?: string | undefined;
+    name?: string | undefined;
+    smsNumber?: string | undefined;
+    smsNumberCountryCode?: string | undefined;
+  };
+  /** v1 convenience: canRun/getQuery used to receive `{ email }`. */
+  email?: string | undefined;
+}
+
+export type ParserQuery = string | Record<string, unknown>;
+
 export interface ParserDefinition {
   kind: "email-parser" | "sms-parser";
   name: string;
-  canRun?: (account: { email?: string | undefined }) => boolean;
-  getQuery?: (account: { email?: string | undefined }) => string;
-  parseMessage: (message: ParserMessage) => string | null;
+  /** 2 = Jancy contract (SMS msg is a string). Absent = v1. */
+  apiVersion?: 1 | 2;
+  description?: string;
+  example?: string;
+  canRun?: (args: ParserArgs) => boolean;
+  getQuery?: (args: ParserArgs) => ParserQuery;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  parseMessage: (message: any, args: ParserArgs) => string | null;
 }
 
 export interface LoadedParser {
@@ -60,22 +104,25 @@ export class ParserRegistry {
     });
   }
 
-  /** Rescan the parsers dir. A file that fails to load is reported, never
-   *  fatal — one bad user script must not take down the rest. */
+  /** Rescan the parsers dir. Only user parsers are replaced — builtins and
+   *  plugin parsers stay. A file that fails to load is reported, never
+   *  fatal: one bad user script must not take down the rest. */
   async rescan(): Promise<{ loaded: number; errors: { file: string; error: string }[] }> {
-    this.parsers.clear();
+    this.unregisterBySource("user");
     const errors: { file: string; error: string }[] = [];
-    if (!fs.existsSync(this.parsersDir)) return { loaded: 0, errors };
+    let loaded = 0;
+    if (!fs.existsSync(this.parsersDir)) return { loaded, errors };
     for (const entry of fs.readdirSync(this.parsersDir).sort()) {
       if (!entry.endsWith(".mjs")) continue;
       const file = path.join(this.parsersDir, entry);
       try {
-        const mod = (await import(pathToFileURL(file).href)) as {
-          default?: ParserDefinition;
-        };
+        // Cache-bust so an edited file is re-read on rescan.
+        const href = `${pathToFileURL(file).href}?v=${fs.statSync(file).mtimeMs}`;
+        const mod = (await import(href)) as { default?: ParserDefinition };
         const def = mod.default;
         if (!def) throw new Error("no default export");
         this.register(def, "user", file);
+        loaded++;
       } catch (err) {
         errors.push({
           file: entry,
@@ -83,7 +130,7 @@ export class ParserRegistry {
         });
       }
     }
-    return { loaded: this.parsers.size, errors };
+    return { loaded, errors };
   }
 
   /** Removes every parser from one source (plugin disable/teardown). */
@@ -98,11 +145,21 @@ export class ParserRegistry {
     return n;
   }
 
-  list(): { name: string; kind: string; file: string }[] {
+  list(): {
+    name: string;
+    kind: string;
+    file: string;
+    source: string;
+    description: string | null;
+    example: string | null;
+  }[] {
     return [...this.parsers.values()].map((p) => ({
       name: p.name,
       kind: p.kind,
       file: path.basename(p.file),
+      source: p.source,
+      description: p.def.description ?? null,
+      example: p.def.example ?? null,
     }));
   }
 
@@ -112,12 +169,20 @@ export class ParserRegistry {
 
   /** Run one parser over a message; null = "not this message". Unknown
    *  parser is a named error, not an exception. */
-  run(name: string, message: ParserMessage): { ok: boolean; code?: string; error?: string } {
+  run(
+    name: string,
+    message: ParserMessage,
+    args?: ParserArgs,
+  ): { ok: boolean; code?: string; error?: string } {
     const p = this.parsers.get(name);
     if (!p) return { ok: false, error: `#NO PARSER ${name}` };
     try {
-      const code = p.def.parseMessage(message);
-      return code === null ? { ok: false } : { ok: true, code };
+      const input =
+        p.kind === "sms-parser" && p.def.apiVersion === 2 ? message.body : message;
+      const code = p.def.parseMessage(input, args ?? emptyArgs());
+      return code === null || code === undefined || code === ""
+        ? { ok: false }
+        : { ok: true, code: String(code) };
     } catch (err) {
       return {
         ok: false,
@@ -125,4 +190,8 @@ export class ParserRegistry {
       };
     }
   }
+}
+
+function emptyArgs(): ParserArgs {
+  return { resolverName: "", resolverArgs: [], field: "", site: "other", profile: {} };
 }

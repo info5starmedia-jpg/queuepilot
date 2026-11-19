@@ -63,6 +63,15 @@ export const IntegrationsSettingsSchema = z.object({
   googleAccount: z.string().max(200).nullable().default(null),
   /** Note slot for where provider credentials live (never stores secrets). */
   providersNote: z.string().max(2000).default(""),
+  /**
+   * Jancy Settings → Email (docs.jancy.io/docs/settings/email). Gmail "Max
+   * emails per request" (≥1, Jancy default 1) and "Only return emails newer
+   * than" for the gmail and imap code resolvers; a message outside the
+   * window answers `#FILTERED MSG`.
+   */
+  emailGmailMaxPerRequest: z.number().int().min(1).max(25).default(1),
+  emailGmailNewerThan: z.enum(["disabled", "1h", "2h"]).default("disabled"),
+  emailImapNewerThan: z.enum(["disabled", "1h", "2h"]).default("disabled"),
 });
 export type IntegrationsSettings = z.infer<typeof IntegrationsSettingsSchema>;
 
