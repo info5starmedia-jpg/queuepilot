@@ -8,8 +8,22 @@ import { makeTestContext, type TestContext } from "./helpers.js";
  */
 
 let ctx: TestContext;
+// SEC-1: /resolve is only served with SPECTRA_API_TOKEN set, so this suite
+// runs an authenticated install; every inject carries the bearer token.
+const TOKEN = "persona-test-token";
 beforeEach(() => {
-  ctx = makeTestContext();
+  ctx = makeTestContext(undefined, { apiToken: TOKEN });
+  const inject = ctx.app.inject.bind(ctx.app) as (o: Record<string, unknown>) => ReturnType<typeof ctx.app.inject>;
+  (ctx.app as unknown as { inject: unknown }).inject = (o: Record<string, unknown>) =>
+    inject({ ...o, headers: { ...(o.headers as object), authorization: `Bearer ${TOKEN}` } });
+});
+
+it("SEC-1: /resolve is refused (403) on an install without SPECTRA_API_TOKEN", async () => {
+  const open = makeTestContext();
+  const p = open.profiles.create({ name: "x", generateFingerprint: false });
+  const res = await open.app.inject({ method: "POST", url: `/profiles/${p.id}/resolve`, payload: { field: "password" } });
+  expect(res.statusCode).toBe(403);
+  expect(res.json().error.message).toMatch(/SPECTRA_API_TOKEN/);
 });
 
 function createProfile(name = "acct-1") {

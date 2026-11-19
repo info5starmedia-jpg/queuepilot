@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
+import { DomainError, ErrorCodes, PERSONA_WELL_KNOWN_FIELDS } from "@queuepilot/contracts";
 import type { PluginRegistry } from "../application/plugins/plugin-registry.js";
 import type { ResolverRegistry, ResolverContext } from "../application/resolvers/resolver-registry.js";
 import {
@@ -26,6 +26,12 @@ export interface PluginDeps {
   profiles: ProfileService;
   /** Audit A-rec #3: throws unless scripting endpoints are opted in. */
   assertScriptingEnabled: () => void;
+  /**
+   * SEC-1: `POST /profiles/:id/resolve` returns LIVE secrets (site passwords,
+   * 2FA codes). Like raw cookie export (audit A5), it is only served on an
+   * install with SPECTRA_API_TOKEN set — so every caller is authenticated.
+   */
+  hasApiToken: boolean;
 }
 
 const RunResolverSchema = z.object({
@@ -106,6 +112,12 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
   // othercode from extra.fields) resolves instead: a literal passes through,
   // a `name:args` value whose name is a REGISTERED resolver gets resolved.
   app.post("/profiles/:id/resolve", async (req) => {
+    if (!deps.hasApiToken) {
+      throw new DomainError(
+        ErrorCodes.FORBIDDEN,
+        "resolving live passwords/codes requires SPECTRA_API_TOKEN — set it and restart the API",
+      );
+    }
     const { id } = req.params as { id: string };
     const body = ResolveFieldSchema.parse(req.body);
     const profile = profiles.get(id);

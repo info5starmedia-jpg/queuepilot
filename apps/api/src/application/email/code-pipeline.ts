@@ -1,4 +1,5 @@
 import { simpleParser, type AddressObject } from "mailparser";
+import { lookupParser } from "../parsers/builtin-parsers.js";
 import type {
   MailMessage,
   ParserArgs,
@@ -89,8 +90,8 @@ export async function runEmailCodePipeline(opts: {
   now?: () => number;
 }): Promise<string> {
   const name = opts.parserName?.trim() || DEFAULT_EMAIL_PARSER;
-  const parser = opts.parsers.get(name);
-  if (!parser) return `#NO PARSER ${name}`;
+  const parser = lookupParser(opts.parsers, name);
+  if (typeof parser === "string") return parser;
   if (parser.kind !== "email-parser") return `#BAD PARSER ${name} is an SMS parser`;
   const def = parser.def;
   try {

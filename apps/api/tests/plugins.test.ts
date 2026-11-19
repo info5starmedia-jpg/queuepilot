@@ -57,13 +57,30 @@ describe("ResolverRegistry", () => {
     expect(await reg.resolve("webhook:https://x/y", { fetch: empty })).toBe("#NO PASSWORD");
   });
 
-  it("substitutes token aliases from the store", async () => {
+  it("substitutes token aliases into resolver args, but static never returns one (SEC-1 F1)", async () => {
     const reg = make();
     const aliases: AliasStore = {
       set: () => {}, remove: () => {}, list: () => [],
       get: (a) => (a === "tm-token" ? "SECRET123" : null),
     };
-    expect(await reg.resolve("static:@tm-token", {}, aliases)).toBe("SECRET123");
+    let seen = "";
+    reg.register("probe", async (args) => {
+      seen = args;
+      return "ok";
+    });
+    await reg.resolve("probe:@tm-token", {}, aliases);
+    expect(seen).toBe("SECRET123");
+    expect(await reg.resolve("static:@tm-token", {}, aliases)).toMatch(/^#BAD ALIAS stored secrets are not returned/);
+    expect(await reg.resolve("static:@unknown", {}, aliases)).toBe("@unknown");
+  });
+
+  it("env: only reads QP_VALUE_* variables (SEC-1 F1)", async () => {
+    const reg = make();
+    process.env.QP_VALUE_TEST_ONLY = "v1";
+    expect(await reg.resolve("env:QP_VALUE_TEST_ONLY", {})).toBe("v1");
+    delete process.env.QP_VALUE_TEST_ONLY;
+    expect(await reg.resolve("env:SPECTRA_API_TOKEN", {})).toMatch(/^#BAD ALIAS env: only reads/);
+    expect(await reg.resolve("env:PATH", {})).toMatch(/^#BAD ALIAS/);
   });
 });
 

@@ -135,10 +135,12 @@ export async function main(): Promise<void> {
     accounts: emailAccounts,
     parsers: parserReg,
     settings: emailCodeSettings,
+    // SEC-1: hosts the operator added are trusted with @alias passwords.
+    trustedHosts: () => emailAccounts.list().map((a) => a.host),
   });
   // AYCD Inbox API (owner's code source). SPECTRA_AYCD_API_BASE overrides
   // the cloud relay for tests / a local fake — https or loopback only.
-  registerAycdResolver(resolvers, {
+  const aycd = registerAycdResolver(resolvers, {
     parsers: parserReg,
     settings: () => {
       const s = settingsService.get("integrations");
@@ -282,6 +284,7 @@ export async function main(): Promise<void> {
     resolvers,
     parsers: parserReg,
     aliases: secretAliasStore(secretStore),
+    aycdVerify: aycd.verify,
     settingsStore: settingsService,
     secrets: secretStore,
     emailAccounts,

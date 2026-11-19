@@ -207,7 +207,8 @@ describe("Jancy profile CSV columns", () => {
 
 describe("provider import keeps Jancy columns on the profile", () => {
   it("stores sites/persist/buyers/proxyResolver in extra, and resolves by URL over HTTP", async () => {
-    const ctx = makeTestContext();
+    const ctx = makeTestContext(undefined, { apiToken: "grammar-test-token" }); // SEC-1
+    const headers = { authorization: "Bearer grammar-test-token" };
     fs.mkdirSync(TEST_IMPORTS_DIR, { recursive: true });
     const file = path.join(fs.mkdtempSync(path.join(TEST_IMPORTS_DIR, "jancy-")), "p.csv");
     fs.writeFileSync(
@@ -227,6 +228,7 @@ describe("provider import keeps Jancy columns on the profile", () => {
     const res = await app.inject({
       method: "POST",
       url: `/profiles/${p.id}/resolve`,
+      headers,
       payload: { url: "https://www.ticketmaster.com/event/1", field: "password" },
     });
     expect(res.statusCode).toBe(200);
@@ -234,6 +236,7 @@ describe("provider import keeps Jancy columns on the profile", () => {
     const other = await app.inject({
       method: "POST",
       url: `/profiles/${p.id}/resolve`,
+      headers,
       payload: { url: "https://example.org/", field: "password" },
     });
     expect(other.json()).toMatchObject({ found: true, value: "any", column: "*" });

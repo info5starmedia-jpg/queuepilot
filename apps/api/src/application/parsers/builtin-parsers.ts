@@ -163,3 +163,95 @@ export function registerBuiltinParsers(reg: ParserRegistry): void {
     reg.register(def, "builtin", `builtin:${def.name}`);
   }
 }
+
+/**
+ * Generic OTP parser, configured inline — for every site without a
+ * dedicated parser (AXS, SeatGeek, MLB, Etix, … until real samples exist):
+ *
+ *   otp(from=<text>;subject=<text>;len=<4-10>;to=profile|any)
+ *
+ * e.g. `emailcode=aycd:@aycd:otp(from=axs.com;subject=code)`. Options are
+ * `;`-separated (a `,` would split the Jancy Site cell). from/subject are
+ * "contains" matches; len is the code length (default 6); to=profile (the
+ * default) only accepts mail addressed to the profile's email. Works with
+ * gmail, imap and aycd. Values are restricted to a safe charset because
+ * they go into Gmail/IMAP searches.
+ */
+const OTP_VALUE = /^[A-Za-z0-9@._+' -]{1,80}$/;
+
+export function otpParser(spec: string): ParserDefinition | string {
+  const m = /^otp\((.*)\)$/s.exec(spec.trim());
+  if (!m) return `#NO PARSER ${spec}`;
+  const opts: Record<string, string> = {};
+  for (const part of m[1]!.split(";")) {
+    if (!part.trim()) continue;
+    const eq = part.indexOf("=");
+    if (eq === -1) return `#BAD PARSER otp option "${part.trim()}" needs key=value`;
+    const k = part.slice(0, eq).trim().toLowerCase();
+    const v = part.slice(eq + 1).trim();
+    if (!["from", "subject", "len", "to"].includes(k)) return `#BAD PARSER otp option "${k}" is unknown (from, subject, len, to)`;
+    if (!OTP_VALUE.test(v)) return `#BAD PARSER otp ${k} has characters outside letters, digits, @ . _ + ' - and space`;
+    opts[k] = v;
+  }
+  const len = opts.len ? Number(opts.len) : 6;
+  if (!Number.isInteger(len) || len < 4 || len > 10) return "#BAD PARSER otp len must be 4–10";
+  const toMode = (opts.to ?? "profile").toLowerCase();
+  if (toMode !== "profile" && toMode !== "any") return "#BAD PARSER otp to must be profile or any";
+  if (!opts.from && !opts.subject) return "#BAD PARSER otp needs from= or subject= (otherwise any code-looking mail matches)";
+  const from = opts.from?.toLowerCase();
+  const subject = opts.subject?.toLowerCase();
+  const near = new RegExp(`code[^0-9]{0,40}?(?<!\\d)(\\d{${len}})(?!\\d)`, "i");
+  const any = new RegExp(`(?<![\\d$.,-])(\\d{${len}})(?![\\d.,])`);
+  return {
+    kind: "email-parser",
+    name: spec.trim(),
+    apiVersion: 2,
+    description: "Inline generic OTP parser.",
+    canRun: (args) =>
+      ["gmail", "imap", "aycd"].includes(args.resolverName) &&
+      (toMode === "any" || PLAIN_EMAIL.test(args.profile.email ?? "")),
+    getQuery(args) {
+      if (args.resolverName === "gmail") {
+        const q: string[] = [];
+        if (opts.from) q.push(`from:(${opts.from})`);
+        if (opts.subject) q.push(`subject:("${opts.subject}")`);
+        if (toMode === "profile") q.push(`to:${args.profile.email}`);
+        return q.join(" ");
+      }
+      const s: Record<string, string> = {};
+      if (opts.from) s.from = opts.from;
+      if (opts.subject) s.subject = opts.subject;
+      if (toMode === "profile") s.to = args.profile.email!;
+      return s;
+    },
+    parseMessage(msg: MailMessage) {
+      if (subject && !msg.subject.toLowerCase().includes(subject)) return null;
+      if (from && !msg.from.toLowerCase().includes(from)) return null;
+      const text = `${msg.subject}\n${msg.text}`;
+      return near.exec(text)?.[1] ?? any.exec(text)?.[1] ?? null;
+    },
+    aycdTask: () => ({
+      mailFilters: [
+        ...(opts.subject ? [{ target: "subject" as const, comparator: "includes" as const, value: opts.subject }] : []),
+        ...(opts.from ? [{ target: "from" as const, comparator: "includes" as const, value: opts.from }] : []),
+      ],
+      mailElements: [
+        { name: "code", target: "body" as const, regex: `[Cc]ode[^0-9]{0,40}?([0-9]{${len}})\\b` },
+        { name: "anyCode", target: "body" as const, regex: `\\b([0-9]{${len}})\\b` },
+      ],
+      resultElements: ["code", "anyCode"],
+    }),
+  };
+}
+
+/** Registry lookup that also understands inline `otp(...)` specs. */
+export function lookupParser(
+  reg: ParserRegistry,
+  name: string,
+): { kind: ParserDefinition["kind"]; def: ParserDefinition } | string {
+  if (name.trim().toLowerCase().startsWith("otp(")) {
+    const def = otpParser(name);
+    return typeof def === "string" ? def : { kind: def.kind, def };
+  }
+  return reg.get(name) ?? `#NO PARSER ${name}`;
+}

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadJylParsers } from "./jyl-parser-loader.js";
 
 /**
  * Parser registry — Jancy's `jancy://parsers` (docs.jancy.io/docs/included-
@@ -120,6 +121,21 @@ export class ParserRegistry {
     let loaded = 0;
     if (!fs.existsSync(this.parsersDir)) return { loaded, errors };
     for (const entry of fs.readdirSync(this.parsersDir).sort()) {
+      if (entry.toLowerCase().endsWith(".jyl")) {
+        // Jancy's published parser format (email-parser / sms-parser tags).
+        const file = path.join(this.parsersDir, entry);
+        try {
+          const { parsers, errors: jylErrors } = loadJylParsers(fs.readFileSync(file, "utf8"), entry);
+          for (const def of parsers) {
+            this.register(def, "user", file);
+            loaded++;
+          }
+          for (const e of jylErrors) errors.push({ file: entry, error: e });
+        } catch (err) {
+          errors.push({ file: entry, error: err instanceof Error ? err.message : String(err) });
+        }
+        continue;
+      }
       if (!entry.endsWith(".mjs")) continue;
       const file = path.join(this.parsersDir, entry);
       try {

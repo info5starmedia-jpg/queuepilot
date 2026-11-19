@@ -16,6 +16,7 @@ import { scriptingGate } from "./http/scripting-gate.js";
 import { registerProfileRoutes } from "./http/profiles.routes.js";
 import { registerProxyRoutes } from "./http/proxies.routes.js";
 import { registerEmailAccountRoutes } from "./http/email-accounts.routes.js";
+import { registerAycdRoutes } from "./http/aycd.routes.js";
 import type { EmailAccountService } from "./application/email/email-account.service.js";
 import { registerRunRoutes } from "./http/runs.routes.js";
 import { registerAdsPowerRoutes } from "./http/adspower.routes.js";
@@ -62,6 +63,8 @@ export interface AppDeps {
   resolvers?: ResolverRegistry;
   parsers?: ParserRegistry;
   aliases?: AliasStore;
+  /** AYCD Inbox key check (registerAycdResolver). Absent = no AYCD routes. */
+  aycdVerify?: (key: string) => Promise<{ ok: boolean; error: string | null }>;
   jyl?: JylRegistry;
   extensions?: ExtensionRegistry;
   totp?: TotpService;
@@ -127,6 +130,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp, deps.proxyProviders);
   registerProxyRoutes(app, deps.proxies);
   if (deps.emailAccounts) registerEmailAccountRoutes(app, deps.emailAccounts);
+  if (deps.aliases && deps.aycdVerify) {
+    registerAycdRoutes(app, { aliases: deps.aliases, verify: deps.aycdVerify });
+  }
   registerRunRoutes(app, deps.lifecycle, deps.profiles, deps.secrets);
   registerWindowRoutes(app, new WindowTilingService(deps.lifecycle, deps.profiles));
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
@@ -153,6 +159,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       assertScriptingEnabled: scriptingGate(deps.settingsStore, {
         hasApiToken: Boolean(deps.config.apiToken),
       }),
+      hasApiToken: Boolean(deps.config.apiToken),
     });
   }
   if (deps.jyl) {

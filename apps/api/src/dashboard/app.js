@@ -1538,10 +1538,79 @@ function renderIntegrationsInfo() {
         <button type="submit" class="primary" id="email-account-add">+ Add</button>
       </form>
       <p class="hint" id="email-account-status"></p>
-      <p>Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
+      <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=imap:you@gmail.com:ticketmaster</code> returns the code (the parser picks the right email). Raw body for scripts: <code>imap:you@gmail.com</code>.</p>
+    </div>
+    <div class="info-card" id="aycd-card">
+      <h4>AYCD Inbox</h4>
+      <p>Reads 2FA codes through AYCD Inbox. Paste the <b>Inbox API key</b> (Inbox → Settings → Tasks (API)). It is stored encrypted on this machine and never shown again. <b>The Inbox app must be open</b> while codes are fetched.</p>
+      <p id="aycd-state" class="hint">checking…</p>
+      <form id="aycd-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(220px,2fr) auto auto auto;gap:8px;align-items:end;margin-top:6px">
+        <label>Inbox API key <input id="aycd-key" type="password" maxlength="500" autocomplete="new-password" placeholder="paste key" /></label>
+        <button type="submit" class="primary">Save key</button>
+        <button type="button" class="ghost" id="aycd-test">Test</button>
+        <button type="button" class="danger" id="aycd-remove">Remove</button>
+      </form>
+      <p class="hint" id="aycd-status"></p>
+      <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=aycd:@aycd</code>. Catch-all/forwarding accounts: <code>aycd:@aycd:ticketmaster:&lt;templateId&gt;</code>. Or use AYCD's <b>IMAP Server</b> (Inbox → Mail → IMAP Server): <code>emailcode=imap:127.0.0.1:&lt;port&gt;:&lt;account email&gt;:&lt;password&gt;:ticketmaster</code>.</p>
     </div>`;
   $("#email-account-form").addEventListener("submit", addEmailAccount);
   loadEmailAccounts();
+  wireAycdCard();
+}
+
+function wireAycdCard() {
+  const state = $("#aycd-state");
+  const status = $("#aycd-status");
+  const say = (msg, color) => {
+    status.textContent = msg;
+    status.style.color = color;
+  };
+  const refresh = async () => {
+    try {
+      const s = await api("/integrations/aycd");
+      state.textContent = s.configured ? "Key stored." : "No key stored yet.";
+      state.style.color = s.configured ? "var(--green)" : "var(--faint)";
+    } catch (err) {
+      state.textContent = err.message;
+      state.style.color = "var(--red)";
+    }
+  };
+  $("#aycd-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#aycd-key");
+    const apiKey = input.value.trim();
+    input.value = "";
+    if (!apiKey) return say("paste the Inbox API key first", "var(--red)");
+    try {
+      await api("/integrations/aycd", { method: "PUT", body: JSON.stringify({ apiKey }) });
+      say("key saved — click Test (with the Inbox app open)", "var(--faint)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    refresh();
+  });
+  $("#aycd-test").addEventListener("click", async (ev) => {
+    ev.target.disabled = true;
+    say("contacting AYCD…", "var(--faint)");
+    try {
+      const r = await api("/integrations/aycd/verify", { method: "POST" });
+      r.ok ? say("ok — key accepted, Inbox reachable", "var(--green)") : say(r.error, "var(--red)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    ev.target.disabled = false;
+  });
+  $("#aycd-remove").addEventListener("click", async () => {
+    if (!window.confirm("Remove the stored AYCD Inbox key?")) return;
+    try {
+      await api("/integrations/aycd", { method: "DELETE" });
+      say("key removed", "var(--faint)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    refresh();
+  });
+  refresh();
 }
 
 async function loadEmailAccounts() {

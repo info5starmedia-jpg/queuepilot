@@ -164,6 +164,11 @@ export function makeTestContext(
     resolvers,
     parsers,
     aliases,
+    // Stand-in for AYCD's /user/verify — tests never call AYCD.
+    aycdVerify: async (key: string) =>
+      key === "good-aycd-key-1234"
+        ? { ok: true, error: null }
+        : { ok: false, error: "AYCD Inbox rejected the API key (is the Inbox app running?)" },
     jyl,
     settingsStore: settings,
     secrets,

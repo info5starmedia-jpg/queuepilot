@@ -162,3 +162,50 @@ describe("safeAycdBase", () => {
     expect(() => safeAycdBase("not a url")).toThrow(/not a URL/);
   });
 });
+
+describe("AYCD key slot — /integrations/aycd", () => {
+  it("stores the key as the `aycd` alias, never returns it, verifies, removes", async () => {
+    const { makeTestContext } = await import("./helpers.js");
+    const ctx = makeTestContext();
+    const get = async () => (await ctx.app.inject({ method: "GET", url: "/integrations/aycd" })).json();
+    expect(await get()).toEqual({ configured: false, alias: "aycd", usage: "emailcode=aycd:@aycd" });
+
+    const noKey = await ctx.app.inject({ method: "POST", url: "/integrations/aycd/verify" });
+    expect(noKey.statusCode).toBe(400);
+
+    const bad = await ctx.app.inject({ method: "PUT", url: "/integrations/aycd", payload: { apiKey: "has space" } });
+    expect(bad.statusCode).toBe(400);
+
+    const put = await ctx.app.inject({ method: "PUT", url: "/integrations/aycd", payload: { apiKey: "good-aycd-key-1234" } });
+    expect(put.statusCode).toBe(200);
+    expect(put.body).not.toContain("good-aycd-key-1234");
+    expect(await get()).toMatchObject({ configured: true });
+    expect(ctx.aliases.get("aycd")).toBe("good-aycd-key-1234");
+
+    const ok = await ctx.app.inject({ method: "POST", url: "/integrations/aycd/verify" });
+    expect(ok.json()).toEqual({ ok: true, error: null });
+
+    await ctx.app.inject({ method: "PUT", url: "/integrations/aycd", payload: { apiKey: "wrong-key-5678" } });
+    expect((await ctx.app.inject({ method: "POST", url: "/integrations/aycd/verify" })).json()).toMatchObject({ ok: false });
+
+    await ctx.app.inject({ method: "DELETE", url: "/integrations/aycd" });
+    expect(await get()).toMatchObject({ configured: false });
+  });
+});
+
+describe("AycdInboxClient.verify", () => {
+  it("calls GET /api/v1/user/verify with the Token header; 401 → not ok", async () => {
+    const { AycdInboxClient } = await import("../src/application/email/aycd-inbox.js");
+    const seen: string[] = [];
+    const f = (async (url: string, init?: RequestInit) => {
+      seen.push(`${url} ${(init?.headers as Record<string, string>).authorization}`);
+      return new Response(url.includes("good") ? "{}" : "x", { status: seen.length === 1 ? 200 : 401 });
+    }) as typeof fetch;
+    const c = new AycdInboxClient("K1", { fetch: f, base: "http://127.0.0.1:1" });
+    expect(await c.verify()).toEqual({ ok: true, error: null });
+    expect(seen[0]).toBe("http://127.0.0.1:1/api/v1/user/verify Token K1");
+    const second = await c.verify();
+    expect(second.ok).toBe(false);
+    expect(second.error).toMatch(/rejected the API key/);
+  });
+});

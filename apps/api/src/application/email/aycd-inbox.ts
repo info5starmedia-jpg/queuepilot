@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { lookupParser } from "../parsers/builtin-parsers.js";
 import type { ParserArgs, ParserRegistry } from "../parsers/parser-registry.js";
 import { DEFAULT_EMAIL_PARSER, parserArgsFrom } from "./code-pipeline.js";
 
@@ -106,6 +107,17 @@ export class AycdInboxClient {
     if (res.status === 429) throw new Error("#API ERROR AYCD Inbox rate limit (429)");
     if (!res.ok) throw new Error(`#API ERROR AYCD Inbox HTTP ${res.status}`);
     return res;
+  }
+
+  /** `GET /api/v1/user/verify` — is the key valid and Inbox running? */
+  async verify(): Promise<{ ok: boolean; error: string | null }> {
+    try {
+      await this.http("/api/v1/user/verify");
+      return { ok: true, error: null };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg.replace(/^#[A-Z ]+?(?= [A-Z])\s*/, "").trim() || msg };
+    }
   }
 
   async create(task: {
@@ -224,10 +236,13 @@ export const DEFAULT_AYCD_SETTINGS: AycdCodeSettings = { lookbackMin: 10, timeou
  * store it as a token alias so it never sits in the CSV. `templateId` is
  * AYCD's Mail Task Template, for catch-all / forwarding accounts.
  */
+/** Stored-key alias the console writes and CSVs reference as `aycd:@aycd`. */
+export const AYCD_KEY_ALIAS = "aycd";
+
 export function registerAycdResolver(
   reg: import("../resolvers/resolver-registry.js").ResolverRegistry,
   options: AycdResolverOptions,
-): void {
+): { verify(key: string): Promise<{ ok: boolean; error: string | null }> } {
   const base = safeAycdBase(options.client?.base);
   const clients = new Map<string, AycdInboxClient>();
   const clientFor = (key: string): AycdInboxClient => {
@@ -260,6 +275,7 @@ export function registerAycdResolver(
     inflight.set(dedupe, p);
     return p;
   });
+  return { verify: (key: string) => clientFor(key).verify() };
 }
 
 export interface AycdCodeSettings {
@@ -286,8 +302,8 @@ export async function runAycdCodeTask(opts: {
   now?: () => number;
 }): Promise<string> {
   const name = opts.parserName?.trim() || DEFAULT_EMAIL_PARSER;
-  const parser = opts.parsers.get(name);
-  if (!parser) return `#NO PARSER ${name}`;
+  const parser = lookupParser(opts.parsers, name);
+  if (typeof parser === "string") return parser;
   const def = parser.def;
   if (parser.kind !== "email-parser" || !def.aycdTask) {
     return `#BAD PARSER ${name} has no AYCD Inbox task`;
