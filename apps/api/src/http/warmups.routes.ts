@@ -66,3 +66,32 @@ export function registerWarmupRoutes(app: FastifyInstance, warmups: WarmupServic
     return warmups.run(id, body.profileId, { stopAfter: body.stopAfter });
   });
 }
+
+/**
+ * W — persona warmups with the owner's engine (PersonaWarmupService).
+ *   GET  /warmups/personas                 → available personas
+ *   POST /profiles/:id/warmup/persona      → { persona?, sessions?, keepRunning? } starts in background
+ *   GET  /profiles/:id/warmup/persona      → latest status for the profile
+ */
+export function registerPersonaWarmupRoutes(
+  app: FastifyInstance,
+  svc: import("../application/warmups/persona-warmup.service.js").PersonaWarmupService,
+): void {
+  app.get("/warmups/personas", async () => ({
+    personas: svc.personas().map((p) => ({ id: p.id, name: p.name, description: p.description ?? null, sites: p.sites.length })),
+  }));
+  app.post("/profiles/:id/warmup/persona", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { persona?: unknown; sessions?: unknown; keepRunning?: unknown };
+    const opts = {
+      ...(typeof body.persona === "string" ? { persona: body.persona } : {}),
+      ...(typeof body.sessions === "number" ? { sessions: body.sessions } : {}),
+      ...(typeof body.keepRunning === "boolean" ? { keepRunning: body.keepRunning } : {}),
+    };
+    return reply.code(202).send(svc.start(id, opts));
+  });
+  app.get("/profiles/:id/warmup/persona", async (req) => {
+    const { id } = req.params as { id: string };
+    return { status: svc.statusOf(id) };
+  });
+}

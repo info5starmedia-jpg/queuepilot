@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import type { AppConfig } from "./config/config.js";
@@ -24,7 +26,8 @@ import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
-import { registerWarmupRoutes } from "./http/warmups.routes.js";
+import { registerWarmupRoutes, registerPersonaWarmupRoutes } from "./http/warmups.routes.js";
+import { PersonaWarmupService, personaDirsFor } from "./application/warmups/persona-warmup.service.js";
 import { WarmupService } from "./application/warmups/warmup.service.js";
 import { registerCookieRoutes } from "./http/cookies.routes.js";
 import { registerGoogleRoutes } from "./http/google.routes.js";
@@ -141,6 +144,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerEngineRoutes(app, deps.engineHealth);
   registerTabRoutes(app, deps.lifecycle);
   registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));
+  registerPersonaWarmupRoutes(
+    app,
+    new PersonaWarmupService({
+      lifecycle: deps.lifecycle,
+      personaDirs: personaDirsFor(deps.config.dataDir, path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")),
+    }),
+  );
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.
