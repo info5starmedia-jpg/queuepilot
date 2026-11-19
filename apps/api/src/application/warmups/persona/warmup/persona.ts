@@ -2,8 +2,35 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
+/**
+ * QueuePilot (security audit 2026-11-19): persona URLs must be public
+ * http(s) websites — never file:, chrome:, javascript:, loopback, private
+ * ranges or *.localhost (the warmer would open them inside the profile).
+ */
+export function isPublicWebUrl(v: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(v.replace(/\{q\}/g, "x"));
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h === "::1" || h === "0.0.0.0") return false;
+  if (/^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+  if (/^(fc|fd|fe80)/i.test(h) && h.includes(":")) return false;
+  return h.includes(".");
+}
+const PublicUrl = z.string().refine(isPublicWebUrl, "must be a public http(s) website");
+
 export const SiteSchema = z.object({
-  url: z.string().url(),
+  url: PublicUrl,
+  /**
+   * QueuePilot: the site's address per exit-IP country (ISO-2), e.g.
+   * { "CA": "https://www.bestbuy.ca" } — the warmer picks the one matching
+   * the profile's proxy so country splash screens never appear.
+   */
+  urlByCountry: z.record(PublicUrl).default({}),
   /** search | shopping | sports | crypto | news | social | video | utility */
   category: z.string().default("general"),
   weight: z.number().positive().default(1),
@@ -18,7 +45,7 @@ export const SiteSchema = z.object({
    * "https://www.amazon.com/s?k={q}". Shopping visits use it to reach a grid of real
    * products (a homepage has almost none), then click into products like a shopper.
    */
-  search: z.string().optional(),
+  search: PublicUrl.optional(),
 });
 export type Site = z.infer<typeof SiteSchema>;
 
@@ -48,7 +75,7 @@ export const PersonaSchema = z.object({
   dwell: DwellSchema.default({}),
   /** How visits begin. Search plants query history and real referrers; direct is a typed URL. */
   entryMix: z.object({ search: z.number().min(0), direct: z.number().min(0) }).default({ search: 0.55, direct: 0.45 }),
-  searchEngine: z.string().url().default("https://www.google.com/search?q="),
+  searchEngine: PublicUrl.default("https://www.google.com/search?q="),
   /** Fraction of the site list each profile adopts as "its" sites, so profiles don't share identical lists. */
   siteAdoption: z.number().min(0.3).max(1).default(0.8),
   sites: z.array(SiteSchema).min(1),
@@ -73,11 +100,11 @@ export const DEFAULT_PERSONA: Persona = PersonaSchema.parse({
   sitesPerSession: { min: 3, max: 6 },
   sites: [
     { url: "https://www.google.com", category: "search", weight: 3, maxHops: 1, dwellMultiplier: 0.4, searchTerms: [] },
-    { url: "https://www.amazon.com", category: "shopping", weight: 3, maxHops: 4, dwellMultiplier: 1.2, searchTerms: ["amazon deals today", "amazon wireless earbuds", "amazon kitchen gadgets", "amazon best sellers", "amazon mechanical keyboard"], search: "https://www.amazon.com/s?k={q}" },
-    { url: "https://www.walmart.com", category: "shopping", weight: 2.5, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["walmart grocery pickup", "walmart tv deals", "walmart patio furniture", "walmart air fryer"], search: "https://www.walmart.com/search?q={q}" },
-    { url: "https://www.bestbuy.com", category: "shopping", weight: 2, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["best buy laptop deals", "best buy headphones", "best buy 4k tv", "best buy graphics card"], search: "https://www.bestbuy.com/site/searchpage.jsp?st={q}" },
+    { url: "https://www.amazon.com", urlByCountry: { CA: "https://www.amazon.ca", GB: "https://www.amazon.co.uk" }, category: "shopping", weight: 3, maxHops: 4, dwellMultiplier: 1.2, searchTerms: ["amazon deals today", "amazon wireless earbuds", "amazon kitchen gadgets", "amazon best sellers", "amazon mechanical keyboard"], search: "https://www.amazon.com/s?k={q}" },
+    { url: "https://www.walmart.com", urlByCountry: { CA: "https://www.walmart.ca" }, category: "shopping", weight: 2.5, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["walmart grocery pickup", "walmart tv deals", "walmart patio furniture", "walmart air fryer"], search: "https://www.walmart.com/search?q={q}" },
+    { url: "https://www.bestbuy.com", urlByCountry: { CA: "https://www.bestbuy.ca" }, category: "shopping", weight: 2, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["best buy laptop deals", "best buy headphones", "best buy 4k tv", "best buy graphics card"], search: "https://www.bestbuy.com/site/searchpage.jsp?st={q}" },
     { url: "https://www.target.com", category: "shopping", weight: 2, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["target home decor", "target toys sale", "target skincare", "target coffee maker"], search: "https://www.target.com/s?searchTerm={q}" },
-    { url: "https://www.ebay.com", category: "shopping", weight: 2, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["ebay vintage watches", "ebay used laptops", "ebay collectible cards", "ebay sneakers"], search: "https://www.ebay.com/sch/i.html?_nkw={q}" },
+    { url: "https://www.ebay.com", urlByCountry: { CA: "https://www.ebay.ca", GB: "https://www.ebay.co.uk" }, category: "shopping", weight: 2, maxHops: 4, dwellMultiplier: 1.1, searchTerms: ["ebay vintage watches", "ebay used laptops", "ebay collectible cards", "ebay sneakers"], search: "https://www.ebay.com/sch/i.html?_nkw={q}" },
     { url: "https://www.nike.com", category: "shopping", weight: 2, maxHops: 3, dwellMultiplier: 1.0, searchTerms: ["nike running shoes", "nike air max", "nike new releases"], search: "https://www.nike.com/w?q={q}" },
     { url: "https://www.espn.com", category: "sports", weight: 2, dwellMultiplier: 1.3, searchTerms: ["espn nba scores", "espn nfl schedule", "espn top plays"] },
     { url: "https://coinmarketcap.com", category: "crypto", weight: 1.5, dwellMultiplier: 1.0, searchTerms: ["bitcoin price", "ethereum price today", "crypto market cap"] },

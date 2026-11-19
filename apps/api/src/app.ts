@@ -27,7 +27,7 @@ import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerWarmupRoutes, registerPersonaWarmupRoutes } from "./http/warmups.routes.js";
-import { PersonaWarmupService, personaDirsFor } from "./application/warmups/persona-warmup.service.js";
+import { PersonaWarmupService, ipApiCountry, personaDirsFor } from "./application/warmups/persona-warmup.service.js";
 import { WarmupService } from "./application/warmups/warmup.service.js";
 import { registerCookieRoutes } from "./http/cookies.routes.js";
 import { registerGoogleRoutes } from "./http/google.routes.js";
@@ -148,6 +148,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     app,
     new PersonaWarmupService({
       lifecycle: deps.lifecycle,
+      exitCountry: (profileId: string) =>
+        ipApiCountry(deps.lifecycle.egressDiagnostics(profileId)?.egress?.exitIp ?? null),
       personaDirs: personaDirsFor(deps.config.dataDir, path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")),
     }),
   );

@@ -27,19 +27,32 @@ export function sameSite(a: string, b: string): boolean {
 }
 
 const SKIP_LINK = /\.(pdf|zip|exe|dmg|jpg|jpeg|png|gif|svg|mp4|mp3|xml|rss)(\?|$)|^(mailto|tel|javascript):|#$/i;
-const SKIP_PATH = /\/(login|signin|sign-in|logout|signup|sign-up|register|account|cart|checkout|basket|wishlist|auth|password|oauth|admin)\b/i;
+// QueuePilot (security audit 2026-11-19): also sign-out, orders, buy-now,
+// add-to-cart, payment and subscription paths, plus action-style queries.
+const SKIP_PATH =
+  /\/(login|log-in|signin|sign-in|logout|log-out|logoff|signout|sign-out|signup|sign-up|register|accounts?|myaccount|my-account|cart|checkout|basket|wishlist|auth|password|oauth|sso|admin|orders?|buy-now|buynow|add-to-cart|addtocart|payment|billing|subscribe|unsubscribe)\b/i;
+const SKIP_QUERY = /(^|[?&])(action|add-to-cart|addtocart|buy|logout|signout|delete|remove)=/i;
+
+/** True for sign-in, account, cart, checkout and other action pages (pathname or action query). */
+export function isAccountOrActionUrl(href: string): boolean {
+  try {
+    const u = new URL(href);
+    return SKIP_PATH.test(u.pathname) || SKIP_QUERY.test(u.search);
+  } catch {
+    return false;
+  }
+}
 
 /** Links we never follow: downloads, logins, carts, account pages — browsing only, no account actions. */
 export function isFollowable(href: string): boolean {
   if (!/^https?:/i.test(href)) return false;
   if (SKIP_LINK.test(href)) return false;
   try {
-    const u = new URL(href);
-    if (SKIP_PATH.test(u.pathname)) return false;
+    new URL(href);
   } catch {
     return false;
   }
-  return true;
+  return !isAccountOrActionUrl(href);
 }
 
 /** Params that only track where a click came from — they don't change which page you land on. */

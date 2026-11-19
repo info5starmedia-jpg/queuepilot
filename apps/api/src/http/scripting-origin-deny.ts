@@ -23,9 +23,25 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases"];
 
+/**
+ * Also browser-denied (security audits 2026-11-19): routes that drive a real
+ * browser or touch stored secrets without being "scripting" — persona
+ * warmups (navigate, click, start profiles), live code resolution, and the
+ * AYCD key slot. A page inside a profile must never reach them.
+ */
+const SENSITIVE_PATTERNS = [
+  /^\/profiles\/[^/]+\/warmup(\/|$)/,
+  /^\/profiles\/[^/]+\/resolve$/,
+  /^\/warmups\/personas$/,
+  /^\/integrations\/aycd(\/|$)/,
+];
+
 function isScriptingUrl(url: string): boolean {
   const path = url.split("?")[0] ?? url;
-  return SCRIPTING_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+  return (
+    SCRIPTING_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`)) ||
+    SENSITIVE_PATTERNS.some((re) => re.test(path))
+  );
 }
 
 function isLoopbackHost(hostname: string): boolean {

@@ -4,7 +4,7 @@ import { DriverError, errorMessage } from "../core/errors.js";
 import type { Logger } from "../core/logger.js";
 import type { Rng } from "../core/random.js";
 import { sleep } from "../core/time.js";
-import { canonicalLink, hostOf, isFollowable, registrableDomain, sameSite } from "../core/url.js";
+import { canonicalLink, hostOf, isAccountOrActionUrl, isFollowable, registrableDomain, sameSite } from "../core/url.js";
 import { CONSENT_CLICKABLES, CONSENT_FRAME_HINTS, CONSENT_SELECTORS, CONSENT_TEXT } from "./consent.js";
 import type { Driver, LinkCandidate, NavResult, ScrollSpec, StorageSnapshot } from "./Driver.js";
 import { clickPoint, hesitationMs, mousePath } from "./humanize.js";
@@ -237,7 +237,9 @@ export class CdpDriver implements Driver {
       for (const sel of CONSENT_SELECTORS) {
         if (await this.tryClick(scope.locator(sel).first(), sel)) return true;
       }
-      // 2) anything clickable whose whole text is an accept phrase — anchored, so "Cookie settings" never matches
+      // 2) anything clickable whose whole text is an accept phrase — anchored, so "Cookie settings" never matches.
+      // Never on a sign-in / account / cart / checkout page: there only the precise CMP ids above may fire.
+      if (isAccountOrActionUrl(this.page.url())) continue;
       if (await this.tryClick(scope.locator(CONSENT_CLICKABLES).filter({ hasText: CONSENT_TEXT }).first(), "text-match")) return true;
     }
     return false;
