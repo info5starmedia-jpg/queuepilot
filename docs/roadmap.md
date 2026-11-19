@@ -1604,8 +1604,16 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
     - W1's site settings move to the server: include/exclude is managed centrally for every user.
     - Browsing stays on each user's machine, through the profile's own proxy, so the warmed IP is the profile's IP.
     - Remote CDP control from the server is **rejected**: browser control port exposed, latency, fragility.
-- [ ] **R — release packaging (before QueuePilot is first given to anyone else):** bundle the whole API into one minified + obfuscated program file. No loose source tree and no separate downloads; the warmer runner is part of it.
-- **Order after this decision:** W1 → W2 → J3a → J6 → DECK → M4 → M5. R comes before the first distribution.
+- [ ] **LIC — licence keys + account separation (owner, 2026-11-19; before W2):**
+  - Testers each get their own **account** on the QueuePilot server and a **licence key with an expiry** (issue / extend / revoke by the owner).
+  - Everything server-side is scoped by account: sealed bundles, profile leases, warmup plans, persona/site settings.
+  - **No account can read another's data, the owner included:** the admin role manages keys, never content, and synced data stays sealed with a passphrase only the account holder knows.
+  - Expired or revoked keys get no server service (plans, sync, codes via server). Local profiles stay on the tester's machine and are never remote-deleted.
+  - Cross-account access tests (A cannot read B, admin cannot read either).
+  - Today's server has team tokens + roles but **no accounts and no expiry**. This adds them.
+- [ ] **R — release packaging (before QueuePilot is first given to anyone else):** includes Kimi's open item #7 ("compiled/minified client packaging"): the console JS ships readable today.
+  - [ ] **R detail:** bundle the whole API into one minified + obfuscated program file. No loose source tree and no separate downloads; the warmer runner is part of it.
+- **Order (owner, 2026-11-19, updated):** W1 → LIC → W2 → J3a → J6 → DECK → M4 → M5. R comes before the first hand-out to testers.
 - [ ] **DECK — Profile Deck (ADR-0008)**: (1) taskbar grouping quick win; (2) spike: adopt one fury window into a container + claim suite; (3) build the Deck with tab label `email · queue position`.
 - [ ] *(J1 detail as originally scoped)* Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, `aycd` resolver (AYCD Inbox Mail Tasks), in-tree TM/AXS/SeatGeek/MLB + SMS parsers (no FIFA) + generic `otp()`.
 - [~] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
