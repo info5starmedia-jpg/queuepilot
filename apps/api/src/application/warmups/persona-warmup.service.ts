@@ -1,11 +1,13 @@
+import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import type { BrowserLifecycleService } from "../lifecycle/browser.lifecycle.service.js";
 import { createLogger } from "./persona/core/logger.js";
 import { CdpDriver } from "./persona/driver/cdp.js";
 import type { Driver } from "./persona/driver/Driver.js";
 import { runSession, type SessionResult } from "./persona/warmup/engine.js";
-import { DEFAULT_PERSONA, loadPersonas, type Persona } from "./persona/warmup/persona.js";
+import { DEFAULT_PERSONA, SiteSchema, loadPersonas, type Persona, type Site } from "./persona/warmup/persona.js";
 import { compilePlan } from "./persona/warmup/plan.js";
 
 /**
@@ -48,6 +50,35 @@ export interface PersonaWarmupDeps {
    * splash screens (bestbuy.com → "Choose a country") never appear.
    */
   exitCountry?: (profileId: string) => Promise<string | null>;
+  /** JSON file holding the operator's per-persona site settings (absent = none, read-only). */
+  siteSettingsFile?: string;
+}
+
+/**
+ * Operator site settings per persona: hostnames to skip (from the persona's
+ * own lists) and extra sites to add. Stored locally for now; W2 moves them
+ * to the server with the plans.
+ */
+export const SiteSettingsSchema = z.object({
+  excluded: z.array(z.string().min(1).max(253).regex(/^[a-z0-9.-]+$/i, "a hostname such as www.example.com")).max(500).default([]),
+  added: z.array(SiteSchema).max(100).default([]),
+});
+export type SiteSettings = z.infer<typeof SiteSettingsSchema>;
+
+function hostKey(u: string): string {
+  try {
+    return new URL(u).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/** Drops excluded hosts from `sites`/`extraSites` and appends the added sites. Exported for tests. */
+export function applySiteSettings(p: Persona, s: SiteSettings | undefined): Persona {
+  if (!s) return p;
+  const skip = new Set(s.excluded.map((h) => h.toLowerCase().replace(/^www\./, "")));
+  const keep = (x: Site) => !skip.has(hostKey(x.url));
+  return { ...p, sites: [...p.sites.filter(keep), ...s.added.filter(keep)], extraSites: p.extraSites.filter(keep) };
 }
 
 export class PersonaWarmupService {
@@ -55,7 +86,8 @@ export class PersonaWarmupService {
 
   constructor(private readonly deps: PersonaWarmupDeps) {}
 
-  personas(): Persona[] {
+  /** Personas as shipped (no operator site settings applied). */
+  basePersonas(): Persona[] {
     const byId = new Map<string, Persona>([[DEFAULT_PERSONA.id, DEFAULT_PERSONA]]);
     for (const dir of this.deps.personaDirs) {
       try {
@@ -65,6 +97,53 @@ export class PersonaWarmupService {
       }
     }
     return [...byId.values()];
+  }
+
+  /** Personas with the operator's site settings applied (what a warmup runs). */
+  personas(): Persona[] {
+    const all = this.readSiteSettings();
+    return this.basePersonas().map((p) => applySiteSettings(p, all[p.id]));
+  }
+
+  siteSettings(personaId: string): SiteSettings {
+    if (!this.basePersonas().some((p) => p.id === personaId)) {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, `unknown persona "${personaId}"`);
+    }
+    return this.readSiteSettings()[personaId] ?? { excluded: [], added: [] };
+  }
+
+  /** Replaces a persona's include/exclude list and added sites. */
+  setSiteSettings(personaId: string, input: unknown): SiteSettings {
+    this.siteSettings(personaId); // existence check
+    const parsed = SiteSettingsSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+    }
+    const file = this.deps.siteSettingsFile;
+    if (!file) throw new DomainError(ErrorCodes.VALIDATION_FAILED, "site settings are not writable here");
+    const all = this.readSiteSettings();
+    all[personaId] = parsed.data;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(all, null, 2), "utf8");
+    fs.renameSync(tmp, file);
+    return parsed.data;
+  }
+
+  private readSiteSettings(): Record<string, SiteSettings> {
+    const file = this.deps.siteSettingsFile;
+    if (!file || !fs.existsSync(file)) return {};
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+      const out: Record<string, SiteSettings> = {};
+      for (const [id, v] of Object.entries(raw)) {
+        const s = SiteSettingsSchema.safeParse(v);
+        if (s.success) out[id] = s.data;
+      }
+      return out;
+    } catch {
+      return {};
+    }
   }
 
   statusOf(profileId: string): PersonaWarmupStatus | null {
@@ -79,6 +158,9 @@ export class PersonaWarmupService {
     }
     const persona = this.personas().find((p) => p.id === (opts.persona ?? DEFAULT_PERSONA.id));
     if (!persona) throw new DomainError(ErrorCodes.VALIDATION_FAILED, `unknown persona "${opts.persona}"`);
+    if (persona.sites.length === 0) {
+      throw new DomainError(ErrorCodes.VALIDATION_FAILED, `every site of persona "${persona.id}" is excluded — include or add at least one`);
+    }
     const plan = compilePlan(persona, [{ targetId: profileId, kind: "browser" }], { immediate: true, days: 1 });
     const sessions = plan.sessions.slice(0, Math.max(1, Math.min(10, opts.sessions ?? 1)));
     const st: PersonaWarmupStatus = {

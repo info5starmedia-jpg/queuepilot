@@ -173,6 +173,35 @@
 
         <!-- =========================== warmups ========================== -->
         <section class="view" id="view-warmups" hidden>
+          <div class="info-card" id="persona-card" style="margin-bottom:14px">
+            <h3 style="margin:0 0 4px">Persona warmup</h3>
+            <p class="hint">Browses a persona's sites like a person: search arrival, cookie banner, dwell, scroll, a few same-site pages. Never signs in, adds to cart or fills forms. An idle profile is started and stopped again.</p>
+            <div class="toolbar">
+              <select id="persona-profile" style="min-width:220px"><option value="">(profiles…)</option></select>
+              <select id="persona-pick" style="min-width:180px"></select>
+              <label style="color:var(--muted);font-size:12px">sessions <input id="persona-sessions" type="number" min="1" max="10" step="1" value="1" style="width:60px" /></label>
+              <label style="color:var(--muted);font-size:12px"><input id="persona-keep" type="checkbox" /> keep running after</label>
+              <button id="persona-start" class="primary">▶ Start warmup</button>
+            </div>
+            <p class="hint" id="persona-status"></p>
+            <details id="persona-sites-box" style="margin-top:6px">
+              <summary style="cursor:pointer">Sites for this persona</summary>
+              <p class="hint">Untick a site to skip it. Added sites are visited like the persona's own.</p>
+              <div class="table-wrap">
+                <table class="grid" id="persona-sites-table">
+                  <thead><tr><th style="width:70px">Use</th><th>Site</th><th style="width:110px">Category</th><th style="width:80px">Pool</th><th style="width:60px"></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <form id="persona-add-form" class="toolbar" autocomplete="off" style="margin-top:6px">
+                <input id="persona-add-url" placeholder="https://www.example.com" maxlength="300" style="min-width:260px" />
+                <select id="persona-add-cat"><option>shopping</option><option>search</option><option>sports</option><option>crypto</option><option>news</option><option>social</option><option>video</option><option>general</option></select>
+                <button type="submit">+ Add site</button>
+                <div class="spacer"></div>
+                <button type="button" class="primary" id="persona-sites-save">Save sites</button>
+              </form>
+            </details>
+          </div>
           <div class="view-hint"><b>Record</b> watches the tabs QueuePilot opens in a <b>running</b> profile (Tabs view or API) and saves them as a recipe of URLs + dwell times; <b>Run</b> replays a recipe on any profile to warm its cookies.</div>
           <div class="toolbar">
             <select id="warmup-record-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>

@@ -32,7 +32,7 @@ const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/alia
 const SENSITIVE_PATTERNS = [
   /^\/profiles\/[^/]+\/warmup(\/|$)/,
   /^\/profiles\/[^/]+\/resolve$/,
-  /^\/warmups\/personas$/,
+  /^\/warmups\/personas(\/|$)/,
   /^\/integrations\/aycd(\/|$)/,
 ];
 

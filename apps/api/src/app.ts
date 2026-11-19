@@ -151,6 +151,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       exitCountry: (profileId: string) =>
         ipApiCountry(deps.lifecycle.egressDiagnostics(profileId)?.egress?.exitIp ?? null),
       personaDirs: personaDirsFor(deps.config.dataDir, path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")),
+      siteSettingsFile: path.join(deps.config.dataDir, "persona-sites.json"),
     }),
   );
   registerCookieRoutes(app, deps.lifecycle, {

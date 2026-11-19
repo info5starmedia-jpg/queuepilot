@@ -69,3 +69,43 @@ describe("persona warmup (owner's engine)", () => {
     expect(s.json()).toEqual({ status: null });
   });
 });
+
+describe("persona site settings", () => {
+  it("excludes, adds and persists sites per persona; refuses bad input", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const ctx = makeTestContext();
+    const file = join(mkdtempSync(join(tmpdir(), "qp-ps-")), "persona-sites.json");
+    const svc = new PersonaWarmupService({ lifecycle: ctx.lifecycle, personaDirs: [], siteSettingsFile: file, sleep: async () => {} });
+    const before = svc.personas().find((p) => p.id === "us-shopper")!;
+    expect(before.sites.some((s) => s.url.includes("walmart"))).toBe(true);
+
+    svc.setSiteSettings("us-shopper", { excluded: ["walmart.com"], added: [{ url: "https://www.newegg.com", category: "shopping" }] });
+    const after = new PersonaWarmupService({ lifecycle: ctx.lifecycle, personaDirs: [], siteSettingsFile: file }).personas().find((p) => p.id === "us-shopper")!;
+    expect(after.sites.some((s) => s.url.includes("walmart"))).toBe(false);
+    expect(after.sites.some((s) => s.url === "https://www.newegg.com")).toBe(true);
+
+    expect(() => svc.setSiteSettings("us-shopper", { added: [{ url: "http://127.0.0.1:50325" }] })).toThrow(/public/);
+    expect(() => svc.setSiteSettings("us-shopper", { excluded: ["bad host/../x"] })).toThrow(/hostname/);
+    expect(() => svc.setSiteSettings("nope", {})).toThrow(/unknown persona/);
+
+    const all = before.sites.map((s) => new URL(s.url).hostname);
+    svc.setSiteSettings("us-shopper", { excluded: all });
+    const p = ctx.profiles.create({ name: "none-left", generateFingerprint: true });
+    expect(() => svc.start(p.id)).toThrow(/every site/);
+  });
+
+  it("routes list sites with their excluded flag and save settings", async () => {
+    const ctx = makeTestContext();
+    const r = await ctx.app.inject({ method: "GET", url: "/warmups/personas/us-shopper/sites" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().sites.length).toBeGreaterThan(5);
+    const put = await ctx.app.inject({ method: "PUT", url: "/warmups/personas/us-shopper/sites", payload: { excluded: ["espn.com"], added: [] } });
+    expect(put.statusCode).toBe(200);
+    const r2 = await ctx.app.inject({ method: "GET", url: "/warmups/personas/us-shopper/sites" });
+    expect(r2.json().sites.find((s: { host: string }) => s.host === "espn.com")?.excluded).toBe(true);
+    const bad = await ctx.app.inject({ method: "PUT", url: "/warmups/personas/us-shopper/sites", payload: { added: [{ url: "file:///C:/x" }] } });
+    expect(bad.statusCode).toBe(400);
+  });
+});

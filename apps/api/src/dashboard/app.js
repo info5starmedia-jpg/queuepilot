@@ -53,7 +53,7 @@ function setView(name) {
   renderTopbarActions();
   renderStats();
   if (name === "cookies") refreshCookiesProfiles();
-  if (name === "warmups") loadWarmups();
+  if (name === "warmups") { loadWarmups(); loadPersonaCard(); }
 }
 
 document.querySelectorAll("#nav button").forEach((b) =>
@@ -1941,6 +1941,147 @@ async function runWarmup() {
   await loadProfiles();
   if (activeView === "warmups") refreshWarmupProfiles().catch(() => {});
 }
+
+/* ---------------------------- persona warmup ---------------------------- */
+
+let personaSites = null; /* { sites, added, excluded } for the picked persona */
+let personaPoll = null;
+
+function personaStatus(msg, isErr = false) {
+  const el = $("#persona-status");
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--faint)";
+}
+
+async function loadPersonaCard() {
+  try {
+    const [{ profiles }, { personas }] = await Promise.all([api("/profiles"), api("/warmups/personas")]);
+    const pSel = $("#persona-profile");
+    const cur = pSel.value;
+    pSel.innerHTML =
+      `<option value="">(pick a profile)</option>` +
+      profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.status === "running" ? " · running" : ""}</option>`).join("");
+    if (profiles.some((p) => p.id === cur)) pSel.value = cur;
+    const kSel = $("#persona-pick");
+    const curK = kSel.value;
+    kSel.innerHTML = personas.map((p) => `<option value="${esc(p.id)}" title="${esc(p.description ?? "")}">${esc(p.name)} (${p.sites} sites)</option>`).join("");
+    if (personas.some((p) => p.id === curK)) kSel.value = curK;
+    await loadPersonaSites();
+    if (pSel.value) await showPersonaStatus(pSel.value);
+  } catch (err) {
+    personaStatus(err.message, true);
+  }
+}
+
+async function loadPersonaSites() {
+  const id = $("#persona-pick").value;
+  if (!id) return;
+  personaSites = await api(`/warmups/personas/${encodeURIComponent(id)}/sites`);
+  renderPersonaSites();
+}
+
+function renderPersonaSites() {
+  const tbody = $("#persona-sites-table tbody");
+  tbody.innerHTML = "";
+  const row = (s, removable) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input type="checkbox" ${s.excluded ? "" : "checked"} /></td>
+      <td class="mono">${esc(s.url)}</td>
+      <td>${esc(s.category)}</td>
+      <td style="color:var(--faint)">${esc(removable ? "added" : s.pool)}</td>
+      <td>${removable ? '<button class="act-delete" title="remove this site">🗑</button>' : ""}</td>`;
+    tr.querySelector("input").addEventListener("change", (e) => {
+      const set = new Set(personaSites.excluded);
+      if (e.target.checked) set.delete(s.host); else set.add(s.host);
+      personaSites.excluded = [...set];
+      s.excluded = !e.target.checked;
+    });
+    if (removable) {
+      tr.querySelector("button").addEventListener("click", () => {
+        personaSites.added = personaSites.added.filter((a) => a.url !== s.url);
+        renderPersonaSites();
+      });
+    }
+    tbody.appendChild(tr);
+  };
+  const host = (u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
+  for (const s of personaSites.sites) row(s, false);
+  for (const a of personaSites.added) {
+    const h = host(a.url);
+    row({ url: a.url, host: h, category: a.category ?? "general", pool: "added", excluded: personaSites.excluded.includes(h) }, true);
+  }
+}
+
+async function savePersonaSites() {
+  const id = $("#persona-pick").value;
+  if (!id || !personaSites) return;
+  try {
+    await api(`/warmups/personas/${encodeURIComponent(id)}/sites`, {
+      method: "PUT",
+      body: JSON.stringify({ excluded: personaSites.excluded, added: personaSites.added }),
+    });
+    toast("persona sites saved");
+    personaStatus("sites saved");
+    await loadPersonaCard();
+  } catch (err) {
+    personaStatus(err.message, true);
+  }
+}
+
+function describePersonaRun(s) {
+  if (!s) return "";
+  const base = `${s.persona}: ${s.sessionsDone}/${s.sessionsPlanned} sessions, ${s.visits} site visits`;
+  if (s.state === "running") return `running — ${base}`;
+  if (s.state === "done") return `done — ${base} (finished ${String(s.finishedAt ?? "").slice(11, 19)})`;
+  return `failed — ${s.error ?? "unknown error"}`;
+}
+
+async function showPersonaStatus(profileId) {
+  clearTimeout(personaPoll);
+  const { status } = await api(`/profiles/${profileId}/warmup/persona`);
+  personaStatus(describePersonaRun(status), status?.state === "failed");
+  $("#persona-start").disabled = status?.state === "running";
+  if (status?.state === "running" && activeView === "warmups") {
+    personaPoll = setTimeout(() => showPersonaStatus(profileId).catch(() => {}), 3000);
+  }
+}
+
+$("#persona-start").addEventListener("click", async () => {
+  const profileId = $("#persona-profile").value;
+  if (!profileId) return personaStatus("pick a profile to warm up", true);
+  const sessions = Number($("#persona-sessions").value);
+  if (!Number.isInteger(sessions) || sessions < 1 || sessions > 10) return personaStatus("sessions must be 1–10", true);
+  try {
+    await api(`/profiles/${profileId}/warmup/persona`, {
+      method: "POST",
+      body: JSON.stringify({ persona: $("#persona-pick").value, sessions, keepRunning: $("#persona-keep").checked }),
+    });
+    toast("persona warmup started");
+    await showPersonaStatus(profileId);
+  } catch (err) {
+    personaStatus(err.message, true);
+  }
+});
+$("#persona-profile").addEventListener("change", (e) => {
+  if (e.target.value) showPersonaStatus(e.target.value).catch((err) => personaStatus(err.message, true));
+  else personaStatus("");
+});
+$("#persona-pick").addEventListener("change", () => loadPersonaSites().catch((err) => personaStatus(err.message, true)));
+$("#persona-add-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const url = $("#persona-add-url").value.trim();
+  let u;
+  try { u = new URL(url); } catch { return personaStatus("enter a full address, e.g. https://www.example.com", true); }
+  if (!/^https?:$/.test(u.protocol)) return personaStatus("only http(s) sites", true);
+  if (!personaSites) return;
+  if (personaSites.added.some((a) => a.url === u.origin)) return personaStatus("already added", true);
+  personaSites.added.push({ url: u.origin, category: $("#persona-add-cat").value });
+  $("#persona-add-url").value = "";
+  personaStatus("added — press Save sites to keep it");
+  renderPersonaSites();
+});
+$("#persona-sites-save").addEventListener("click", savePersonaSites);
 
 $("#warmup-record").addEventListener("click", recordWarmup);
 $("#warmups-refresh").addEventListener("click", loadWarmups);
