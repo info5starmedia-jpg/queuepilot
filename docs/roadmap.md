@@ -1512,13 +1512,13 @@ Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 ## Jancy parity — Phases J1–J8 (audit 2026-11-19, wiki + docs.jancy.io + developer API, branch `jancy-wiki-audit`)
 
 Full audit + architecture: [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
-The 2026-11-16 PASS is reopened. Owner answers to its §7 questions gate the order.
+The 2026-11-16 PASS is reopened. Owner round-1 answers recorded in §8 of the report; order now J1 → J2 → J6 (+ Discord) → J3 → J4 → J5 → J7 → J8. Round-2 follow-ups: docs/jancy-owner-questions-round2.md.
 
-- [ ] **J1 — Fix the 2FA chain + `.jyl` parser import** (D-1…D-5): Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, in-tree TM + SMS parsers + generic `otp()`.
+- [ ] **J1 — Fix the 2FA chain + `.jyl` parser import** (D-1…D-5): Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, `aycd` resolver (AYCD Inbox Mail Tasks), in-tree TM/AXS/SeatGeek/MLB + SMS parsers (no FIFA) + generic `otp()`.
 - [ ] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
 - [ ] **J3 — Tab state + workflow commands** (*gate Q1*): Jancy Tab-object fields, cross-run Tab View, passcodes/notes, change URL + focus delay, reload/reopen, export tabs, log note, ephemeral profiles, Persist columns, focus emulation, per-tab timezone.
 - [ ] **J4 — Autofill map file**: full autofill.map spec (include/any/human/machine/buttons/XPath/shadow), ~60 fields, field swapping, broadcast.
 - [ ] **J5 — Cookie thinger file**: 10 groups, del/delall/copy/copyall/dcopy, lists `1`–`5` + `$1`–`$5`, thinger tabs, cookies-for-profiles CSV.
-- [ ] **J6 — Site plug-ins**: extractor registry, Queue-it, TM (queue pass, cart timer, event info, priority groups, page actions), queue-position sinks (CSV/Sheet/buffer), AXS/Etix/SeatGeek.
+- [ ] **J6 — Site plug-ins**: extractor registry, Queue-it, TM (queue pass, cart timer, event info, priority groups, page actions), queue-position sinks (CSV/Sheet/buffer), AXS/Etix/SeatGeek/MLB. **+ Discord** (webhook notifications, opt-in encrypted cookie + exit-IP export).
 - [ ] **J7 — Power-user console**: commands + palette + key binds, format strings + custom sort, settings expansion, preference sets, tab strings, named windows.
-- [ ] **J8 — Extras**: network logger, userscripts/preloaders, remote proxy providers + Proxy Resolver, temp-proxy recall, soft reset, engine-side titles (ADR).
+- [ ] **J8 — Extras**: network logger, userscripts/preloaders, remote proxy providers + Proxy Resolver, temp-proxy recall, soft reset, engine-side titles (ADR), arc2 profile provider, port owner warmer (C:multiloginmlxwarmup — persona browsing engine + personas) as a QP warmup mode, optional Jancy-plugin shim.

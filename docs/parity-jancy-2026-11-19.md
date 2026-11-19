@@ -896,3 +896,34 @@ Answer by number.
 20. **Profile source.** Do you load profiles from CSV files, Google
     Sheets, or the arc2 profile provider (named in Jancy's token-alias
     docs)?
+
+---
+
+## 8. Owner answers (round 1, 2026-11-19) and the resulting scope
+
+The answers are in [jancy-owner-questions.md](../jancy-owner-questions.md).
+Follow-ups and explanations are in
+[jancy-owner-questions-round2.md](jancy-owner-questions-round2.md).
+
+| Q | Answer (summary) | Effect on the plan |
+| --- | --- | --- |
+| 1 Tab model | "Profiles I create must stay until I delete them"; wants pros/cons | Matches the recommendation: profile = identity, persistent by default (as today). Ephemeral profiles are **opt-in only**, never the default. Pros/cons in round 2; **J3 stays gated** until confirmed |
+| 2 `.jyl` files | None | The `.jyl` loader stays in J1 (cheap; the wiki's parser files can be downloaded later). **In-tree parsers become the main path**, so samples matter (round 2, R2-1) |
+| 3 Email | Gmail + **AYCD** | New **`aycd` resolver** (AYCD Inbox Mail Tasks API: filters + elements → code; Inbox must be running locally) in **J1**, next to gmail and imap. Our `otp(...)` parser maps 1:1 onto AYCD mail filters/elements |
+| 4 SMS | All seven + Ejoin / Diafaan / SMSDeliverer | J2 builds all seven adapters, plus the ejoin / diafaan / smsdeliverer email parsers in J1–J2. Evaluate a **generic schema-driven SMS adapter** (AYCD's documented Custom SMS Schema JSON shape) to cut per-provider code |
+| 5 Passwords | All five + TM / AXS / MLB sites | J2 builds all five. Add **MLB** as a brand table next to Ticketmaster and AXS (Site matching) |
+| 6 Samples | "Tell me what you need" | Exact list in round 2 (R2-1) |
+| 7 Sites | All listed **except FIFA** | FIFA parsers and maps dropped. Order: TM US/UK/MX, Live Nation, AXS, SeatGeek, Etix, MLB |
+| 8 Queue log | Yes, CSV + Sheet + all columns | J6 full queue-position capture; Sheets **write** scope |
+| 9 TM actions | All | J6 full TM plug-in |
+| 10 Autofill | Unsure; is there code to build on? | Yes: the published map format + 56 wiki maps as fixtures + our existing fill/typing code. J4 unchanged; explained in round 2 |
+| 11 Cookie thinger | Unsure; has own **cookie warmer** (repo `Randomz`) | The cookie thinger is **not** a warmer (round 2). J5 stays. **Import the owner's warmer**, found locally at `C:\multilogin\mlxwarmup\mlx-warmup` (Warmup Console for Multilogin X: persona JSON, Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days, CDP-driven). Port its browsing engine + personas as a **persona mode** in QP warmups, swapping the MLX launcher for QP lifecycle. Record/replay stays (R2 B4) |
+| 12 Settings | Wants all the listed ones | Core launch settings move into **J3**, the rest into J7 |
+| 13 Format/sort/keys | Unsure | Explained in round 2. Default: ship the wiki recipes as built-in presets in J7 |
+| 14 Sessions | "Save sessions per profile" | QP keys a profile's data by its internal **id**, so renames already keep the session. No email-keying needed. Explained in round 2 |
+| 15 imapflow + mailparser | Yes | Adopted in J1 |
+| 16 Out of scope | Keep out, **except Discord notifications + cookie/IP export to Discord** | New **J6.5 Discord**: webhook-first (bot only if replies/commands are wanted), events (queue passed, position captured, code resolved / failed, launch / crash), and an **opt-in cookie + exit-IP export** to a private channel. Security notes in round 2 |
+| 17 Order | "sure" (J1 first) | J1 → J2 → J6 (+ Discord) → J3 → J4 → J5 → J7 → J8. J3 moves after J6 only if J6 doesn't need tab state; if it does, J3's tab-state slice moves forward |
+| 18 Jancy plug-in shim | Unsure | Parked (J8). Scenarios in round 2 |
+| 19 Proxy resolver | Unsure; mentions "paste a link, app pulls proxies" | **Already built**: rotation links (ADR-0007, v0.16). Jancy's Proxy Resolver (a per-profile proxy looked up from an API) stays in J8. Explained in round 2 |
+| 20 Profile source | CSV + Sheets + **arc2** | CSV and Sheets ✅. **arc2 provider** ❌: needs API docs / an account (R2-5) |
