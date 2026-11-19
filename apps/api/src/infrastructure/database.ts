@@ -251,6 +251,14 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE proxies ADD COLUMN grp TEXT NOT NULL DEFAULT 'default';
     `,
   },
+  {
+    // Last probe result (JSON) — lets a launch reuse the exit geo instead of
+    // a live lookup. Old rows start untested (NULL).
+    id: "012-proxy-last-probe",
+    up: `
+      ALTER TABLE proxies ADD COLUMN last_probe TEXT;
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

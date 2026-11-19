@@ -35,7 +35,7 @@ import type {
   ProfileRepository,
   FingerprintIdentityRepository,
 } from "../profiles/profile.repository.js";
-import type { ProxyService } from "../proxies/proxy.service.js";
+import { isFreshProbe, type ProxyService } from "../proxies/proxy.service.js";
 import type { BrowserRunRepository } from "./browser-run.repository.js";
 import { ProfileOperationMutex } from "./profile-operation.mutex.js";
 import { proxyUrl } from "@queuepilot/contracts";
@@ -44,7 +44,7 @@ import type {
   BrowserSession,
 } from "../runtime/browser-runtime.js";
 import type { LaunchIdentityService } from "./launch-identity.service.js";
-import type { LaunchIdentitySnapshot } from "@queuepilot/contracts";
+import type { LaunchIdentitySnapshot, ProxyProbe } from "@queuepilot/contracts";
 import { TabRegistry } from "../tabs/tab-registry.js";
 
 /**
@@ -175,6 +175,7 @@ export class BrowserLifecycleService {
         port: number;
         username: string | null;
         password: string | null;
+        lastProbe?: ProxyProbe | null;
       };
     },
     /**
@@ -328,7 +329,7 @@ export class BrowserLifecycleService {
       // flag. Timezone: pin > proxy's own timezone > exit-IP lookup >
       // identity. Locale: pin > exit country > identity.
       const { timezone: launchTimezone, source: timezoneSource, locale: launchLocale, localeSource } =
-        await this.resolveLaunchGeo(identity, launchProxy, attached?.timezone ?? null);
+        await this.resolveLaunchGeo(identity, launchProxy, attached?.timezone ?? null, attached ?? rotated);
       const launchIdentity =
         identity &&
         ((launchTimezone && launchTimezone !== identity.timezone) ||
@@ -569,11 +570,16 @@ export class BrowserLifecycleService {
    * One exit lookup serves both, made only when one of them needs it. A
    * failed lookup is never a launch failure — the values may not match the
    * IP, but nothing leaks.
+   *
+   * A saved proxy whose last probe succeeded within 24 h answers from that
+   * probe instead (no live lookup, no launch delay). A live lookup on a saved
+   * proxy is stored back on it so the next launch is instant.
    */
   private async resolveLaunchGeo(
     identity: FingerprintIdentityWithOverrides | null,
     proxy: LaunchProxyEndpoint | null,
     proxyTimezone: string | null,
+    saved: { id: string; lastProbe?: ProxyProbe | null } | null = null,
   ): Promise<{
     timezone: string | null;
     source: "pinned" | "proxy" | "exit-ip" | "host" | "identity";
@@ -594,8 +600,19 @@ export class BrowserLifecycleService {
     const tzPinned = Boolean(identity.overrides?.timezone);
     const tzFromProxyField = !tzPinned && Boolean(proxyTimezone && isValidTimezone(proxyTimezone));
     const needLookup = (!tzPinned && !tzFromProxyField) || !localePinned;
-    const looked: ProxyExitGeo | null =
-      needLookup && this.proxyGeoLookup ? await this.proxyGeoLookup(proxy).catch(() => null) : null;
+    const cached = needLookup && isFreshProbe(saved?.lastProbe) ? saved!.lastProbe! : null;
+    const looked: ProxyExitGeo | null = cached
+      ? { timezone: cached.timezone, countryCode: cached.countryCode }
+      : needLookup && this.proxyGeoLookup
+        ? await this.proxyGeoLookup(proxy).catch(() => null)
+        : null;
+    if (!cached && saved && looked?.probe) {
+      try {
+        this.proxyService.recordProbe(saved.id, looked.probe);
+      } catch {
+        /* best-effort cache write — never a launch failure */
+      }
+    }
 
     let tz: { timezone: string | null; source: "pinned" | "proxy" | "exit-ip" | "identity" };
     if (tzPinned) tz = { timezone: identity.timezone, source: "pinned" };
@@ -1315,6 +1332,8 @@ export interface ProxyExitGeo {
   timezone: string | null;
   /** ISO 3166-1 alpha-2, e.g. "DE". */
   countryCode: string | null;
+  /** The full probe, when the lookup has one — stored back on a saved proxy. */
+  probe?: ProxyProbe;
 }
 
 /**

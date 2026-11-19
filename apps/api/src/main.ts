@@ -6,7 +6,7 @@ import {
 } from "./application/profiles/profile.repository.js";
 import { ProfileService } from "./application/profiles/profile.service.js";
 import { ProxyHealthRepository, ProxyRepository } from "./application/proxies/proxy.repository.js";
-import { ProxyService } from "./application/proxies/proxy.service.js";
+import { ProxyService, toProxyProbe } from "./application/proxies/proxy.service.js";
 import { createSecretStore } from "./application/secrets/secret-store.js";
 import { BundleService } from "./application/bundles/bundle.service.js";
 import {
@@ -99,7 +99,11 @@ export async function main(): Promise<void> {
   const runRepo = new BrowserRunRepository(db);
 
   const secretStore = createSecretStore();
-  const proxies = new ProxyService(proxyRepo, secretStore, new ProxyHealthRepository(db));
+  // Every proxy create / endpoint edit auto-tests in the background, so a
+  // launch can reuse the stored exit geo instead of an 8 s live lookup.
+  const proxies = new ProxyService(proxyRepo, secretStore, new ProxyHealthRepository(db), {
+    log: (line) => console.log(`[queuepilot] ${line}`),
+  });
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secretStore);
   // v0.15.0 (audit rec #4): lift any pre-v0.15 full PANs out of the profile
   // rows into the SecretStore; CVVs sitting in SQLite are purged.
@@ -210,8 +214,11 @@ export async function main(): Promise<void> {
     // timezone and country through the proxy itself at launch (same geo echo
     // as the proxy Test).
     async (proxy) => {
+      const started = Date.now();
       const r = await probeProxy(proxy, DEFAULT_PROBE_URL, 8_000);
-      return r.ok && r.geo ? { timezone: r.geo.timezone, countryCode: r.geo.countryCode } : null;
+      return r.ok && r.geo
+        ? { timezone: r.geo.timezone, countryCode: r.geo.countryCode, probe: toProxyProbe(r, Date.now() - started) }
+        : null;
     },
   );
 

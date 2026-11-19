@@ -136,6 +136,48 @@ function wireHoverActions(tr, { copy, edit }) {
   tr.querySelector('[data-hover="edit"]')?.addEventListener("click", (e) => { e.stopPropagation(); edit(); });
 }
 
+/* Proxy probe status line (profile form + proxy table): the stored result
+   of the last test through the proxy, with a Re-test / Test now link. */
+function flagEmoji(cc) {
+  if (!/^[A-Za-z]{2}$/.test(cc ?? "")) return "";
+  return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0)));
+}
+
+function probeLineHtml(probe) {
+  if (!probe) return `⚪ Not tested yet <a href="#" data-probe-test>Test now</a>`;
+  if (!probe.ok) return `🔴 Test failed: ${esc(probe.error ?? "unknown error")} <a href="#" data-probe-test>Re-test</a>`;
+  const parts = [probe.country, probe.city, probe.timezone, probe.latencyMs != null ? `${probe.latencyMs} ms` : null].filter(Boolean);
+  const flag = flagEmoji(probe.countryCode);
+  return `🟢 ${flag ? `${flag} ` : ""}${esc(parts.join(" · "))} <a href="#" data-probe-test>Re-test</a>`;
+}
+
+/** Render the line into `el` and wire its link to a synchronous re-test. */
+function renderProbeLine(el, proxyId) {
+  if (!el) return;
+  if (!proxyId) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = probeLineHtml(proxyById.get(proxyId)?.lastProbe ?? null);
+  el.querySelector("[data-probe-test]")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    retestProxy(proxyId, el);
+  });
+}
+
+async function retestProxy(proxyId, el) {
+  el.textContent = "⏳ Testing…";
+  try {
+    const r = await api(`/proxies/${proxyId}/test`, { method: "POST" });
+    const p = proxyById.get(proxyId);
+    if (p) p.lastProbe = r.lastProbe;
+    else proxyById.set(proxyId, { id: proxyId, lastProbe: r.lastProbe });
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  renderProbeLine(el, proxyId);
+}
+
 /** Passwords are write-only over the API, so the copied string never has one. */
 function proxyConnString(p) {
   return `${p.type}://${p.username ? `${p.username}@` : ""}${p.host}:${p.port}`;
@@ -795,6 +837,7 @@ async function openProfilePanel(id) {
     $("#pf-notes").value = p.notes ?? "";
 
     const proxies = proxyData.proxies ?? [];
+    for (const x of proxies) proxyById.set(x.id, x);
     const sel = $("#pf-proxy");
     sel.innerHTML =
       `<option value="">(none)</option>` +
@@ -805,6 +848,7 @@ async function openProfilePanel(id) {
         )
         .join("");
     sel.value = p.proxyId ?? "";
+    renderProbeLine($("#pf-proxy-status"), sel.value);
 
     $("#pf-phone").value = panelExtra.phone ?? "";
     $("#pf-dob").value = panelExtra.dob ?? "";
@@ -834,6 +878,7 @@ function closeProfilePanel() {
 }
 
 $("#panel-close").addEventListener("click", closeProfilePanel);
+$("#pf-proxy").addEventListener("change", (e) => renderProbeLine($("#pf-proxy-status"), e.target.value));
 
 $("#pf-clearcolor").addEventListener("click", () => {
   panelTabColor = null;
@@ -1008,7 +1053,7 @@ async function loadProxies() {
       <td><span class="tag">${esc(p.type)}</span></td>
       <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
-      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
+      <td><span class="probe-line" data-out></span></td>
       <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>
       ${hoverActionsCell()}`;
     wireHoverActions(tr, { copy: () => proxyConnString(p), edit: () => openProxyEdit(p) });
@@ -1018,7 +1063,7 @@ async function loadProxies() {
       tr.classList.toggle("selected", ev.target.checked);
       updateProxySelection();
     });
-    tr.querySelector("[data-act='test']").addEventListener("click", () => testProxyRow(p, tr));
+    renderProbeLine(tr.querySelector("[data-out]"), p.id);
     tr.querySelector("[data-act='delete']").addEventListener("click", async () => {
       if (!window.confirm(`Delete proxy "${p.name}"?`)) return;
       try {
@@ -1102,18 +1147,7 @@ function updateProxySelection() {
 }
 
 async function testProxyRow(p, tr) {
-  const out = tr.querySelector("[data-out]");
-  out.textContent = "…";
-  out.style.color = "var(--faint)";
-  try {
-    const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
-    const geo = r.geo ? ` · ${[r.geo.city, r.geo.region, r.geo.country].filter(Boolean).join(", ")}` : "";
-    out.textContent = r.ok ? `ok · ${r.latencyMs}ms${r.exitIp ? ` · ${r.exitIp}` : ""}${geo}` : `fail: ${r.error}`;
-    out.style.color = r.ok ? "var(--green)" : "var(--red)";
-  } catch (err) {
-    out.textContent = err.message;
-    out.style.color = "var(--red)";
-  }
+  await retestProxy(p.id, tr.querySelector("[data-out]"));
 }
 
 $("#proxies-move").addEventListener("click", async () => {

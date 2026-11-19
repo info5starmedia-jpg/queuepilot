@@ -2237,3 +2237,20 @@ address. Proxy copy is `type://user@host:port` — **without the password**,
 because proxy passwords are write-only over the API (P6) and the dashboard
 never has them. Proxies had no edit form, so ✏️ opens a new small Edit
 Proxy drawer (PATCH `/proxies/:id`; a blank password keeps the stored one).
+
+### Proxy auto-test on save + stored geo — SHIPPED
+Every proxy create, import line and endpoint edit (type/host/port/username/
+password) now probes through the proxy in the background after the save
+returns (4 at a time, 8 s timeout, failures logged by id without
+credentials). The result is stored on the proxy as `lastProbe` (exit IP,
+country, countryCode, region, city, timezone, latencyMs, testedAt, ok/error;
+migration `012-proxy-last-probe`) and in the health history. A profile-form
+save re-probes the attached proxy only if its probe is missing, failed or
+older than 24 h. At launch, a successful probe younger than 24 h answers
+both the timezone and the locale, so the live exit lookup (up to 8 s) is
+skipped; a stale or missing probe falls through to the live lookup, whose
+answer is stored back. Pins and the proxy's own timezone field keep their
+precedence. `POST /proxies/:id/test` stores and returns the probe. The
+dashboard shows one line per proxy (🟢 country · city · timezone · ms /
+🔴 Test failed / ⚪ Not tested yet, each with Re-test) under the profile
+form's proxy picker and in the proxy table's "Last test" column.

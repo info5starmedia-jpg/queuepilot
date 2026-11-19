@@ -15,6 +15,25 @@ const HostSchema = z
   .max(253)
   .regex(/^[a-zA-Z0-9._-]+$/, "invalid host");
 
+/**
+ * Last real probe through the proxy (exit IP + geo + round trip). Stored at
+ * save time and on every test, so a launch can skip the live geo lookup
+ * while the result is fresh. `ok: false` records the failure text.
+ */
+export const ProxyProbeSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().nullable(),
+  exitIp: z.string().nullable(),
+  country: z.string().nullable(),
+  countryCode: z.string().nullable(),
+  region: z.string().nullable(),
+  city: z.string().nullable(),
+  timezone: z.string().nullable(),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  testedAt: z.string().datetime(),
+});
+export type ProxyProbe = z.infer<typeof ProxyProbeSchema>;
+
 export const ProxySchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(120),
@@ -28,6 +47,8 @@ export const ProxySchema = z.object({
   providerId: z.string().uuid().nullable().default(null),
   /** Folder the proxy is filed under (same model as profile groups). */
   group: z.string().max(120).default("default"),
+  /** Last probe result; null until the proxy has been tested. */
+  lastProbe: ProxyProbeSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

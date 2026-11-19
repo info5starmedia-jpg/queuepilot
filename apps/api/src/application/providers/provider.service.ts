@@ -373,6 +373,7 @@ export class ProxyProviderService {
         timezone: row.timezone,
         providerId: provider.id,
         group: priorGroup.get(`${row.host.toLowerCase()}:${row.port}`) ?? "default",
+        lastProbe: null,
         createdAt: now,
         updatedAt: now,
       };

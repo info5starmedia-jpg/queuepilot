@@ -133,7 +133,11 @@ export function registerProfileRoutes(
   app.patch("/profiles/:id", async (req) => {
     const { id } = req.params as { id: string };
     const input = UpdateProfileInputSchema.parse(req.body);
-    return service.update(id, input);
+    const updated = service.update(id, input);
+    // Profile-form save: make sure the attached proxy has a fresh probe
+    // (background; never delays the save).
+    if (input.proxyId) proxies.probeIfStale(input.proxyId);
+    return updated;
   });
 
   app.post("/profiles/:id/fingerprint/regenerate", async (req) => {

@@ -1,5 +1,5 @@
 import type { Db } from "../../infrastructure/database.js";
-import type { Proxy } from "@queuepilot/contracts";
+import type { Proxy, ProxyProbe } from "@queuepilot/contracts";
 import type { ProxyGeo } from "./proxy-probe.js";
 
 /** Stored row includes the password; the public contract never does. */
@@ -18,6 +18,7 @@ interface ProxyRow {
   timezone: string | null;
   provider_id: string | null;
   grp: string;
+  last_probe: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +28,15 @@ export interface ProxyGroupSummary {
   total: number;
   /** Proxies in the group attached to at least one live profile. */
   inUse: number;
+}
+
+function parseProbe(raw: string | null): ProxyProbe | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ProxyProbe;
+  } catch {
+    return null;
+  }
 }
 
 function toStored(r: ProxyRow): StoredProxy {
@@ -41,9 +51,14 @@ function toStored(r: ProxyRow): StoredProxy {
     timezone: r.timezone ?? null,
     providerId: r.provider_id ?? null,
     group: r.grp ?? "default",
+    lastProbe: parseProbe(r.last_probe ?? null),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+function probeJson(p: StoredProxy): string | null {
+  return p.lastProbe ? JSON.stringify(p.lastProbe) : null;
 }
 
 /** Strip the password before anything leaves the process. */
@@ -58,10 +73,10 @@ export class ProxyRepository {
   create(p: StoredProxy): void {
     this.db
       .prepare(
-        `INSERT INTO proxies (id, name, type, host, port, username, password, timezone, provider_id, grp, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO proxies (id, name, type, host, port, username, password, timezone, provider_id, grp, last_probe, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", p.createdAt, p.updatedAt);
+      .run(p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", probeJson(p), p.createdAt, p.updatedAt);
   }
 
   get(id: string): StoredProxy | null {
@@ -81,9 +96,17 @@ export class ProxyRepository {
   update(p: StoredProxy): void {
     this.db
       .prepare(
-        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, timezone=?, provider_id=?, grp=?, updated_at=? WHERE id=?`,
+        `UPDATE proxies SET name=?, type=?, host=?, port=?, username=?, password=?, timezone=?, provider_id=?, grp=?, last_probe=?, updated_at=? WHERE id=?`,
       )
-      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", p.updatedAt, p.id);
+      .run(p.name, p.type, p.host, p.port, p.username, p.password, p.timezone, p.providerId, p.group ?? "default", probeJson(p), p.updatedAt, p.id);
+  }
+
+  /**
+   * Store a probe result without touching anything else on the row — a
+   * background probe finishing must never overwrite a concurrent edit.
+   */
+  setLastProbe(id: string, probe: ProxyProbe | null): void {
+    this.db.prepare("UPDATE proxies SET last_probe = ? WHERE id = ?").run(probe ? JSON.stringify(probe) : null, id);
   }
 
   /** Every group with its size and how many of its proxies a live profile uses. */
