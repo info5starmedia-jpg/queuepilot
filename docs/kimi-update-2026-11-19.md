@@ -253,3 +253,30 @@ change is an owner decision, tracked as roadmap **SEC-2**.
   not Codex.
 - `git add` specific files in the worktree. `npm install` dirties
   `package-lock.json`; don't commit that.
+
+### 8. W: owner's warmer as persona warmups (`91a2936`), end of window 1
+
+**What landed:**
+
+- The owner's mlx-warmup engine is vendored under
+  `apps/api/src/application/warmups/persona/`. Source:
+  `C:/multilogin/mlxwarmup/mlx-warmup`.
+- `PersonaWarmupService` drives it over the QP run's CDP port.
+- Routes:
+  - `GET /warmups/personas`
+  - `POST /profiles/:id/warmup/persona` with
+    `{persona?, sessions?, keepRunning?}`
+  - `GET /profiles/:id/warmup/persona`
+- Personas: bundled `apps/api/personas` + `<dataDir>/personas`; the
+  default is `us-shopper`.
+- Gates: 754/754 API + 20/20 server.
+
+**Pending (start of next window):**
+
+1. In-house security audit of the warmer commit.
+2. Live persona warmup on a real fury profile (isolated scratch dirs).
+3. Console UI for persona warmups.
+4. Then J3a tab-state core → J6 → DECK.
+
+**Owner choices:** the owner picked task 1 (W) for this window. J3a is
+next.
