@@ -74,6 +74,10 @@ The engine, lifecycle and fingerprint layers still exceed Jancy. The
 
 ### D-1 🐞 Resolver → parser chain is not connected
 
+> **Fixed 2026-11-19** on branch `jancy-j1` (`5156fab`, `d2e648d`, J1 slice
+> B). Live-verified against a real IMAP server; see the roadmap. The text
+> below records the defect as found.
+
 **What's wrong:**
 
 - `gmail-resolver.ts` and `imap-resolver.ts` return the **raw text body**.

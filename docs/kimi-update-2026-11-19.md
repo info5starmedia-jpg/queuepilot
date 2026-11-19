@@ -84,16 +84,56 @@ and nothing runs a parser on it, so `emailcode` never yields a code.
 - **Live-verified 2026-11-19** on a scratch API (:50477, own data dir;
   stopped afterwards by its PID). Results are in the roadmap box.
 
+### 4. Code: J1 slice B (`jancy-j1` @ `5156fab` + `d2e648d`). Fixes D-1
+
+**New files:**
+
+- `application/email/code-pipeline.ts`: the pipeline. Parser (default
+  `ticketmaster`) → canRun → transport.fetch(getQuery) → newer-than
+  window → parseMessage, newest first. Jancy error names.
+- `application/email/imap-flow-transport.ts`: imapflow + mailparser.
+  Implicit TLS only on 993; other ports plain + STARTTLS.
+- `application/parsers/builtin-parsers.ts`: `ticketmaster`,
+  `ticketmaster-v2`, `smsdeliverer-ticketmaster`, `sms-ticketmaster`,
+  `sms-google`. All written from Jancy's published docs.
+
+**Changed files:**
+
+- `parser-registry.ts`: contract v2.
+  - `args` = Jancy Resolver object.
+  - Email `msg` = parsed mail; SMS `msg` = text. v1 `.mjs` parsers still
+    get their old shapes.
+  - `list()` shows source / description / example.
+  - `rescan()` only replaces user parsers.
+- `gmail-resolver.ts`: `gmail:acct[:parser[:label]]` returns a code.
+  `?query=` keeps the raw body.
+- `imap-resolver.ts`: `imap:host:port:user:pass:parser` and
+  `imap:<stored-account>:<parser>` return a code. The raw forms are
+  unchanged.
+- `resolver-registry.ts`:
+  - `resolverArgs` are split before alias expansion, so an `@alias`
+    secret containing `:` stays whole.
+  - The context carries `profile.name` and `profile.smsNumber`.
+- Settings `integrations`: `emailGmailMaxPerRequest`,
+  `emailGmailNewerThan`, `emailImapNewerThan`.
+- `POST /profiles/:id/resolve` returns `isError`.
+- Deps: `imapflow`, `mailparser`, `@types/mailparser` (owner approved).
+
+**Gates and checks:**
+
+- Typecheck, build, **704/704 API + 20/20 server** green.
+- Live-verified on a scratch API against a real IMAP server; details are
+  in the roadmap box.
+- **Open:** the TM email code regex must be checked against the owner's
+  sample emails. The Gmail path is only verified with a mocked Gmail API.
+- One full `npm test` run reported 81/82 files with no failure listed; two
+  reruns were green. A possibly flaky test; watch for it.
+
 ## Next, in order
 
-1. J1 slice B: the resolver→parser pipeline. Jancy grammar for
-   `gmail:acct[:parser[:label]]` and `imap:host:port:user:pass:parser`;
-   imapflow + mailparser (owner approved); canRun / getQuery /
-   parseMessage; default parser `ticketmaster`; "newer than" setting;
-   ResolvedValue + timestamp; Jancy error vocabulary.
-2. J1 slice C: `aycd` resolver, `.jyl` email/sms parser loader (only those
+1. J1 slice C: `aycd` resolver, `.jyl` email/sms parser loader (only those
    two tags), in-tree TM/AXS/SeatGeek/MLB + SMS parsers, generic `otp()`.
-3. P-LOCK, then W (warmer port), then J2, then J6 (+ Discord), then
+2. P-LOCK, then W (warmer port), then J2, then J6 (+ Discord), then
    DECK spike, then J3 …
 
 ## Rules that still apply
