@@ -214,11 +214,31 @@ as well as `SPECTRA_DATA_DIR`. Without it they share the LIVE DPAPI store.
 A fake `aycd` alias leaked there on 2026-11-19 and was removed. The code
 change is an owner decision, tracked as roadmap **SEC-2**.
 
+### 7. J2 connectors + P-LOCK + real AYCD (`1be83c8`)
+
+- **AYCD:** verified against AYCD's real API with the owner's key (key
+  check `ok`, a real Mail Task round trip). Isolated scratch dirs; the
+  scratch key copy was deleted.
+- **J2:** `application/resolvers/provider-schemas.ts`. Each provider is
+  an operator JSON schema in `<dataDir>/providers/` and registers a
+  resolver under its own name.
+  - No provider publishes its API contract publicly, so each schema needs
+    the provider's docs from the owner's dashboard.
+  - Safety: https host locked, values URL-encoded, stored secrets only in
+    the key slot and masked out of error text.
+- **P-LOCK:** rotation-link mode `sticky`. It pins the endpoint on first
+  launch, refuses loudly if that endpoint is gone, and
+  `POST /profiles/:id/rotation-link/reroll` is the only way to change it.
+- **Lifecycle fix:** `markProfile` re-reads the row, so mid-run edits are
+  no longer wiped.
+- **Gates:** 751/751 API + 20/20 server. The in-house audit is CLEAR with
+  its follow-ups fixed.
+
 ## Next, in order
 
-1. J2 service connectors: 7 SMS + 5 password. Built from the providers'
-   public API docs; live verification needs the owner's test keys.
-2. P-LOCK, then W (warmer port).
+1. Per-provider J2 schema files, once the owner shares each provider's
+   API docs; live-verify with their keys.
+2. W (warmer port).
 3. J3a tab-state core, then J6 (+ Discord), then DECK (test build, then
    build; owner GO).
 4. J3b, J4, J5, J7, J8.

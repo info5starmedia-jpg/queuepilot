@@ -1586,11 +1586,31 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
   - On 2026-11-19 this put a fake `aycd` test alias into the live store; it was removed the same day (alias list back to empty).
   - Process fix in place: scratch runs set both env vars.
   - Code option: make the store follow the configured data dir. That is safe only if the live app runs on the default data dir, so confirm before changing.
-- [ ] **P-LOCK — one profile, one IP**: rotation-link / provider proxies resolve once and are pinned to the profile; re-roll only on explicit operator action (logged); per-launch rotation kept for warmups/throwaways.
+- [x] **P-LOCK — one profile, one IP:**
+  - Rotation-link mode `sticky`. The first launch pins the endpoint it got (host + port + user, so a provider refresh keeps the pin); every later launch reuses it.
+  - A pinned endpoint that left the pool **refuses the launch loudly**, never a silent new IP.
+  - `POST /profiles/:id/rotation-link/reroll` is the only way to change the IP; refused while running. `rotate` / `persist` stay for warmups and throwaways.
+  - Also fixed an older bug: `markProfile` wrote the status from the launch-start copy of the profile, wiping anything changed meanwhile (the pin, persona edits made while running).
+  - 3 tests.
+  - **Live 2026-11-19** (scratch API, fake runtime, isolated data and secret dirs): two sticky profiles kept 10.0.0.1 / 10.0.0.2 across launches; pin stored; re-roll → next pool entry.
 - [ ] **W — Owner warmer as QP's warmup engine**: port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
 - [ ] **DECK — Profile Deck (ADR-0008)**: (1) taskbar grouping quick win; (2) spike: adopt one fury window into a container + claim suite; (3) build the Deck with tab label `email · queue position`.
 - [ ] *(J1 detail as originally scoped)* Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, `aycd` resolver (AYCD Inbox Mail Tasks), in-tree TM/AXS/SeatGeek/MLB + SMS parsers (no FIFA) + generic `otp()`.
-- [ ] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
+- [~] **J2 — Resolver adapters**: 7 SMS (textchest, textchest-async, seatheroes, smsgateway, texttrove, quick-text, wired) + 5 password (automatiq, 1ticket, lysted, ticketsuite, victorylive1), IMAP pool, remaining bundled parsers, optional Jancy-plugin shim.
+  - [x] **Connector layer = provider schema files** (`<dataDir>/providers/<name>.json`, loaded at startup).
+    - Research 2026-11-19: **none** of the 12 services publishes its API contract publicly. SeatHeroes' Freshdesk API page now 404s; TextChest docs are behind login; the broker APIs are partner-gated. So endpoints are not guessed.
+    - Each schema registers a resolver under the provider's name, so Jancy's grammar works unchanged (`smscode=textchest:@textchest[:parser]`, `password=automatiq:@aq:<company>`).
+    - **sms kind:** messages path, text and date fields; newest first; `smsMaxAgeMin` window (10); SMS parser, default `ticketmaster`.
+    - **password kind:** value path or array match by `{siteId}`; per-site `siteIds`.
+    - **Safety:** CSV values are URL-encoded and can never change the schema's https host; redirects refused; 15 s timeout; a schema can't shadow a built-in resolver.
+    - 8 tests + 2 audit-follow-up tests. Commit 1be83c8 (gates: 751/751 API + 20/20 server; the commit message says 753, but 751 is correct).
+    - **In-house audit (security-auditor):** CLEAR. Fixed: stored secrets only in the key slot and masked out of provider error text;  path guard; header line-break guard; P-LOCK pin write re-checks the current link.
+    - **Live:** the stand-in `smsbox` provider → `411733`, the `gmail` name clash refused.
+  - [ ] **Per-provider schema files:** need each provider's API docs from the owner's dashboards (TextChest: Developers → API Keys; SeatHeroes Pro: API docs; AYCD's docs mention seat.tools for SMSGateway/Wired). Then live-verify with the owner's keys.
+  - **AYCD verified for real 2026-11-19:**
+    - The owner's Inbox API key → `verify ok` against AYCD's live API.
+    - A real Mail Task round trip (create → poll → AYCD's actual `error/not found` for a made-up address) in 8 s, shown as `#BAD ACCT <email> is not an account in AYCD Inbox`.
+    - Isolated scratch dirs; the key copy was deleted afterwards; the live secret store was untouched.
 - [ ] **J3 — Tab state + workflow commands** (Q1 decided → unblocked): Jancy Tab-object fields, cross-run Tab View, passcodes/notes, change URL + focus delay, reload/reopen, export tabs, log note, ephemeral profiles, Persist columns, focus emulation, per-tab timezone.
 - [ ] **J4 — Autofill map file**: full autofill.map spec (include/any/human/machine/buttons/XPath/shadow), ~60 fields, field swapping, broadcast.
 - [ ] **J5 — Cookie thinger file**: 10 groups, del/delall/copy/copyall/dcopy, lists `1`–`5` + `$1`–`$5`, thinger tabs, cookies-for-profiles CSV.
