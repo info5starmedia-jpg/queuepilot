@@ -1604,7 +1604,7 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
     - **password kind:** value path or array match by `{siteId}`; per-site `siteIds`.
     - **Safety:** CSV values are URL-encoded and can never change the schema's https host; redirects refused; 15 s timeout; a schema can't shadow a built-in resolver.
     - 8 tests + 2 audit-follow-up tests. Commit 1be83c8 (gates: 751/751 API + 20/20 server; the commit message says 753, but 751 is correct).
-    - **In-house audit (security-auditor):** CLEAR. Fixed: stored secrets only in the key slot and masked out of provider error text;  path guard; header line-break guard; P-LOCK pin write re-checks the current link.
+    - **In-house audit (security-auditor):** CLEAR. Fixed: stored secrets only in the key slot and masked out of provider error text; `.`/`..` path guard; header line-break guard; P-LOCK pin write re-checks the current link.
     - **Live:** the stand-in `smsbox` provider → `411733`, the `gmail` name clash refused.
   - [ ] **Per-provider schema files:** need each provider's API docs from the owner's dashboards (TextChest: Developers → API Keys; SeatHeroes Pro: API docs; AYCD's docs mention seat.tools for SMSGateway/Wired). Then live-verify with the owner's keys.
   - **AYCD verified for real 2026-11-19:**
