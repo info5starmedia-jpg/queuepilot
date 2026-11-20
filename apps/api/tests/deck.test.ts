@@ -114,6 +114,92 @@ describe("Profile Deck service", () => {
     expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(1); // no resend after remove
   });
 
+  it("disambiguates duplicate tab labels with a short id suffix (issue 11)", async () => {
+    const sent: Record<string, unknown>[] = [];
+    let lineCb: (l: string) => void = () => {};
+    const host: DeckHost = {
+      send: (l) => void sent.push(JSON.parse(l) as Record<string, unknown>),
+      onLine: (cb) => (lineCb = cb),
+      onExit: () => {},
+      kill: () => {},
+    };
+    const a = "11111111-1111-4111-8111-111111111111";
+    const b = "22222222-2222-4222-8222-222222222222";
+    const runs = new Map([
+      [a, { pid: 4242, status: "running" }],
+      [b, { pid: 4343, status: "running" }],
+    ]);
+    // Labels mirror the RUNNING set: when b stops, its label disappears.
+    let running: { profileId: string; label: string }[] = [
+      { profileId: a, label: "detect-test" },
+      { profileId: b, label: "detect-test" },
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deck-"));
+    const deck = new DeckService({
+      lifecycle: { activeRun: (id) => runs.get(id) ?? null, events: { on: () => {} } },
+      labels: () => running,
+      settings: () => ({ deckEnabled: false }),
+      dataDir: dir,
+      platform: "win32",
+      startHost: () => host,
+    });
+    await deck.adopt(a);
+    await deck.adopt(b);
+    const labels = sent.filter((s) => s.cmd === "adopt").map((s) => s.label);
+    expect(labels[0]).not.toBe(labels[1]);
+    expect(labels[0]).toMatch(/^detect-test · /);
+    // Twin leaves the running set → the suffix drops on the next label tick.
+    running = running.filter((l) => l.profileId !== b);
+    deck.remove(b);
+    (deck as unknown as { refreshLabels(): void }).refreshLabels();
+    const lastLabel = sent.filter((s) => s.cmd === "label").at(-1);
+    expect(lastLabel).toMatchObject({ id: a, label: "detect-test" });
+  });
+
+  it("closes the container when the last tab leaves (issue 12)", async () => {
+    const t = setup();
+    await t.deck.adopt(ID);
+    t.reply({ event: "ready" });
+    t.deck.remove(ID);
+    expect(t.sent.at(-1)).toEqual({ cmd: "quit" });
+    expect(t.deck.status().open).toBe(false);
+  });
+
+  it("keeps the container while any tab remains", async () => {
+    const sent: Record<string, unknown>[] = [];
+    let lineCb: (l: string) => void = () => {};
+    const host: DeckHost = {
+      send: (l) => void sent.push(JSON.parse(l) as Record<string, unknown>),
+      onLine: (cb) => (lineCb = cb),
+      onExit: () => {},
+      kill: () => {},
+    };
+    const a = "11111111-1111-4111-8111-111111111111";
+    const b = "22222222-2222-4222-8222-222222222222";
+    const runs = new Map([
+      [a, { pid: 4242, status: "running" }],
+      [b, { pid: 4343, status: "running" }],
+    ]);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deck-"));
+    const deck = new DeckService({
+      lifecycle: { activeRun: (id) => runs.get(id) ?? null, events: { on: () => {} } },
+      labels: () => [
+        { profileId: a, label: "one" },
+        { profileId: b, label: "two" },
+      ],
+      settings: () => ({ deckEnabled: false }),
+      dataDir: dir,
+      platform: "win32",
+      startHost: () => host,
+    });
+    await deck.adopt(a);
+    await deck.adopt(b);
+    lineCb(JSON.stringify({ event: "ready" }));
+    deck.remove(a);
+    expect(sent.at(-1)).not.toEqual({ cmd: "quit" });
+    expect(deck.status().open).toBe(true);
+  });
+
   it("is Windows-only and refuses a profile that is not running", async () => {
     await expect(setup({ platform: "linux" }).deck.adopt(ID)).rejects.toThrow();
     await expect(setup().deck.adopt("22222222-2222-4222-8222-222222222222")).rejects.toThrow(/start the profile/);
@@ -123,6 +209,10 @@ describe("Profile Deck service", () => {
   it("the host script has no characters that would break a template literal", () => {
     expect(DECK_HOST_SCRIPT).not.toContain("`");
     expect(DECK_HOST_SCRIPT).not.toContain("${");
+  });
+
+  it("raises the container on select — Show must surface the window (issue 1)", () => {
+    expect(DECK_HOST_SCRIPT).toMatch(/function Select-Tab[\s\S]*?\[void\]\[W\]::BringWindowToTop\(\$f\.Handle\)/);
   });
 
   it("force-shows the container: windowsHide leaves the first window hidden otherwise (found live 2026-11-20)", () => {

@@ -236,8 +236,15 @@ export class FuryCoreRuntime implements BrowserRuntime {
  *   host resolver it recognizes (1.1.1.1, 8.8.8.8, ...) to DoH. A proxied
  *   page never resolves locally, but the browser's own lookups would then
  *   reach a public DoH provider from the host's real IP.
+ * - hide-crash-restore-bubble: belt and braces for the "Restore pages?"
+ *   bubble seen once at launch (QA issue 10, 2026-11-20). The Preferences
+ *   exit_type hygiene is the real fix; this keeps the bubble suppressed even
+ *   if a Crashed marker ever slips through (e.g. a copied profile dir).
  */
-export const ENGINE_FEATURE_SWITCHES = ["--disable-features=DnsOverHttpsUpgrade"] as const;
+export const ENGINE_FEATURE_SWITCHES = [
+  "--disable-features=DnsOverHttpsUpgrade",
+  "--hide-crash-restore-bubble",
+] as const;
 
 /**
  * Start URLs for a launch, from the profile's extra bag: `startUrls` (array)

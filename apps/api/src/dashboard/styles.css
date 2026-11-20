@@ -624,6 +624,11 @@ tr:hover .hover-actions, tr:focus-within .hover-actions { opacity: 1; }
 .probe-line { font-size: 12px; color: var(--muted); white-space: normal; }
 .probe-line a { color: var(--blue); margin-left: 6px; }
 #pf-proxy-status { margin: -2px 0 8px; min-height: 16px; }
+/* Issue 4 (QA 2026-11-20): the reserved-but-empty status line left a large
+   dead gap between "launch proxy" and the Persona section. Collapse it
+   until there is something to show; a test result growing by one line is
+   a user-invoked moment, not a shift that needs reserving against. */
+#pf-proxy-status:empty { min-height: 0; margin: 0; }
 
 /* Settings → Email (IMAP) */
 .email-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 10px; }

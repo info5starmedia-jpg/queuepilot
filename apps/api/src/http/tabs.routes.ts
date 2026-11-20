@@ -92,8 +92,18 @@ export function registerTabRoutes(
 
   app.get("/profiles/:id/tabs/:tabId/screenshot", async (req, reply) => {
     const { id, tabId } = req.params as { id: string; tabId: string };
-    const png = await lifecycle.screenshotTab(id, tabId);
-    return reply.type("image/png").header("cache-control", "no-store").send(png);
+    const send = async () =>
+      reply.type("image/png").header("cache-control", "no-store").send(await lifecycle.screenshotTab(id, tabId));
+    // Issue 19 (found live 2026-11-20): immediately after a dashboard reload
+    // the engine can miss the first capture by a beat (500, then fine on a
+    // manual retry). Absorb that with one short retry instead of surfacing
+    // the transient as an error.
+    try {
+      return await send();
+    } catch {
+      await new Promise((r) => setTimeout(r, 1500));
+      return await send();
+    }
   });
 
   /**

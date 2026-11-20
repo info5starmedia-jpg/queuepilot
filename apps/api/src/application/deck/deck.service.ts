@@ -142,6 +142,7 @@ export class DeckService {
     if (!this.tabs.delete(profileId)) return;
     this.pendingSelects.delete(profileId);
     this.host?.send(JSON.stringify({ cmd: "remove", id: profileId }));
+    this.closeIfEmpty();
   }
 
   select(profileId: string): void {
@@ -162,9 +163,24 @@ export class DeckService {
   }
 
   private labelOf(id: string): string {
-    const raw = this.deps.labels().find((l) => l.profileId === id)?.label ?? id.slice(0, 8);
+    const all = this.deps.labels();
+    const mine = all.find((l) => l.profileId === id)?.label ?? id.slice(0, 8);
+    // Issue 11 (QA 2026-11-20): two profiles can share a name — their deck
+    // tabs were then indistinguishable in the strip. A short id suffix
+    // disambiguates only while the collision exists (the 5s tick recomputes,
+    // so the suffix drops off when the twin leaves the deck).
+    const dupes = all.filter((l) => l.label === mine).length;
+    const raw = dupes > 1 ? `${mine} · ${id.slice(0, 4)}` : mine;
     // Page-derived text: WinForms treats & as a mnemonic and a long label widens the strip.
     return raw.replace(/&/g, "&&").slice(0, 60);
+  }
+
+  /** Issue 12 (QA 2026-11-20): once the last tab leaves, the container is an
+   *  empty window that lingers — close it as the dashboard's Close button
+   *  would. Guarded on `ready` so a remove racing host startup can't kill a
+   *  deck that is still adopting its first tabs. */
+  private closeIfEmpty(): void {
+    if (this.host && this.ready && this.tabs.size === 0) this.close();
   }
 
   private requireSupported(): void {
@@ -205,8 +221,10 @@ export class DeckService {
       const t = this.tabs.get(ev.id);
       if (t) t.adopted = ev.ok;
     } else if (ev.event === "selected") this.pendingSelects.delete(ev.id);
-    else if (ev.event === "gone") this.tabs.delete(ev.id);
-    else if (ev.event === "closed") this.reset();
+    else if (ev.event === "gone") {
+      this.tabs.delete(ev.id);
+      this.closeIfEmpty();
+    } else if (ev.event === "closed") this.reset();
   }
 
   private refreshLabels(): void {
@@ -234,9 +252,13 @@ export class DeckService {
     }
     for (const l of this.deps.labels()) {
       const t = this.tabs.get(l.profileId);
-      if (t && t.label !== l.label) {
-        t.label = l.label;
-        this.host.send(JSON.stringify({ cmd: "label", id: l.profileId, label: l.label }));
+      if (!t) continue;
+      // labelOf carries the duplicate-name suffix, so the tick also drops a
+      // suffix the moment the colliding profile leaves the deck.
+      const want = this.labelOf(l.profileId);
+      if (t.label !== want) {
+        t.label = want;
+        this.host.send(JSON.stringify({ cmd: "label", id: l.profileId, label: want }));
       }
     }
   }

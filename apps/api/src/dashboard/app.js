@@ -243,6 +243,9 @@ function setView(name) {
   if (name === "thinger") loadThinger();
   if (name === "autofill") loadAutofill();
   if (name === "warmups") { loadWarmups(); loadPersonaCard(); }
+  /* Issue 2 (QA 2026-11-20): Settings always opens on General — remembering
+     the last sub-panel across visits confused the "where am I" check. */
+  if (name === "settings") { settingsSection = "general"; renderSettings(); }
 }
 
 document.querySelectorAll("#nav button").forEach((b) =>
@@ -1888,6 +1891,7 @@ function renderSettingsNav() {
    needs the "Allow engine binary downloads" switch above it. The install
    runs in the API's background; this card polls its status. */
 let engineUpdatePoll = null;
+let engineLastCheckedAt = null;
 
 async function renderEngineUpdateCard(box) {
   box.innerHTML = `
@@ -1900,7 +1904,21 @@ async function renderEngineUpdateCard(box) {
         <button type="button" class="primary" id="engine-update-install" hidden>Install update</button>
       </div>
     </div>`;
-  $("#engine-update-check").addEventListener("click", () => refreshEngineUpdate());
+  $("#engine-update-check").addEventListener("click", async (ev) => {
+    /* Issue 3 (QA 2026-11-20): give the click visible feedback — a busy
+       button and a Checking line — and stamp when the answer arrived. */
+    const btn = ev.currentTarget;
+    const status = $("#engine-update-status");
+    const prev = status?.innerHTML ?? "";
+    btn.disabled = true;
+    if (status) status.textContent = "Checking…";
+    try {
+      await refreshEngineUpdate();
+    } finally {
+      btn.disabled = false;
+      if (status && status.textContent === "Checking…") status.innerHTML = prev;
+    }
+  });
   $("#engine-update-install").addEventListener("click", async () => {
     try {
       const r = await api("/engine/update", { method: "POST" });
@@ -1930,7 +1948,9 @@ async function refreshEngineUpdate() {
     else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
     else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
     if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" below to install.`;
-    status.innerHTML = `${line}<br><span style="color:var(--faint)">Checked: ${esc(u.source)}</span>`;
+    if (u.status !== "current" || engineLastCheckedAt === null) engineLastCheckedAt = new Date();
+    const at = engineLastCheckedAt.toLocaleTimeString();
+    status.innerHTML = `${line}<br><span style="color:var(--faint)">Checked: ${esc(u.source)} · ${esc(at)}</span>`;
     install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
     if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
   } catch (err) {

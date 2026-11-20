@@ -39,6 +39,10 @@ describe("engine feature switches", () => {
     expect(disables).toHaveLength(1); // Chromium keeps only the last one
     expect(disables[0]!.split("=")[1]!.split(",")).toContain("DnsOverHttpsUpgrade");
   });
+
+  it("hides the crash-restore bubble (QA issue 10 backup to the exit_type hygiene)", () => {
+    expect(ENGINE_FEATURE_SWITCHES).toContain("--hide-crash-restore-bubble");
+  });
 });
 
 describe("personaConfig", () => {

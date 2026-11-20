@@ -45,6 +45,8 @@ public static class W {
   [DllImport("user32.dll")] static extern bool EnumWindows(EP cb, IntPtr l);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   delegate bool EP(IntPtr h, IntPtr l);
   public static List<IntPtr> Find(uint pid) {
@@ -114,6 +116,13 @@ function Select-Tab($id) {
   }
   Fit $tabs[$id].h
   $script:current = $id
+  # Issue 1 (QA 2026-11-20): a select from the dashboard must also RAISE the
+  # container — it can sit behind other windows and look like a no-op.
+  # Best-effort: SetForegroundWindow can refuse when Windows denies the
+  # foreground right; ShowWindow+BringWindowToTop already handles that case.
+  [void][W]::ShowWindow($f.Handle, 5)
+  [void][W]::BringWindowToTop($f.Handle)
+  [void][W]::SetForegroundWindow($f.Handle)
   Emit @{ event = "selected"; id = $id }
 }
 function Release($t) {
