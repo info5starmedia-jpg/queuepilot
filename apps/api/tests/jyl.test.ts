@@ -38,6 +38,7 @@ describe("JylRegistry", () => {
     `);
     const reg = new JylRegistry(dir);
     const scan = await reg.rescan();
+    if (scan.loaded === 0) console.error("JYL-DEBUG errors=" + JSON.stringify(scan.errors));
     expect(scan.loaded).toBe(1);
     const list = reg.list();
     expect(list.commands[0]).toMatchObject({ name: "greet", source: "toolkit.mjs" });
@@ -96,6 +97,7 @@ describe("JylRegistry", () => {
     `);
     const reg = new JylRegistry(dir);
     const scan = await reg.rescan();
+    if (scan.loaded === 0) console.error("JYL-DEBUG errors=" + JSON.stringify(scan.errors));
     expect(scan.loaded).toBe(1); // only dup-a (alphabetical) survives
     expect(scan.errors.map((e) => e.file).sort()).toEqual(["broken.mjs", "dup-b.mjs"]);
   });
