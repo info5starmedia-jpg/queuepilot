@@ -34,10 +34,24 @@ const SENSITIVE_PATTERNS = [
   /^\/profiles\/[^/]+\/resolve$/,
   /^\/warmups\/personas(\/|$)/,
   /^\/integrations\/aycd(\/|$)/,
+  // J3a: tab state holds resolved codes and passcodes.
+  /^\/profiles\/[^/]+\/tab-state(\/|$)/,
+  /^\/tab-state(\/|$)/,
+  /^\/tab-view$/,
 ];
 
 function isScriptingUrl(url: string): boolean {
-  const path = url.split("?")[0] ?? url;
+  // Match what the router matches (security audit 2026-11-19): the router
+  // percent-decodes, so "/%74ab-view" must count as "/tab-view". Also fold
+  // repeated slashes and drop ";params". An undecodable path is treated as
+  // sensitive (the origin checks then apply).
+  let path = url.split("?")[0] ?? url;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return true;
+  }
+  path = path.split(";")[0]!.replace(/\/{2,}/g, "/");
   return (
     SCRIPTING_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`)) ||
     SENSITIVE_PATTERNS.some((re) => re.test(path))

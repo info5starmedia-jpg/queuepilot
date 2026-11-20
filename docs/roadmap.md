@@ -1593,7 +1593,7 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
   - Also fixed an older bug: `markProfile` wrote the status from the launch-start copy of the profile, wiping anything changed meanwhile (the pin, persona edits made while running).
   - 3 tests.
   - **Live 2026-11-19** (scratch API, fake runtime, isolated data and secret dirs): two sticky profiles kept 10.0.0.1 / 10.0.0.2 across launches; pin stored; re-roll → next pool entry.
-- [~] **W — Owner warmer as QP's warmup engine** (W1 done; W2 next after LIC): port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
+- [x] **W — Owner warmer as QP's warmup engine** (W1 + W2 done 2026-11-19; obfuscation of the runner is part of R): port the persona browsing engine + personas from `C:\multilogin\mlxwarmup\mlx-warmup` (Google-search arrival, banner accept, log-normal dwell, scroll bursts, same-site clicks, login/cart filter, batches over days) onto QP lifecycle/CDP; record/replay recipes stay as a second mode.
   - [x] **W1 — warmer finish (DONE 2026-11-19: `17f63ca`, `42518421`, `0716cad4`):**
     - [x] In-house security audit; all 3 MEDIUM findings fixed (`42518421`):
       - Warmer, resolve and AYCD routes are browser-origin denied.
@@ -1611,22 +1611,25 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
       - One server run showed 12/20 with no failure listed, 20/20 alone.
       - Earlier: one "87/88 files" run.
       - To investigate: retry-on-EPERM in atomic writes; vitest worker crash.
-  - [ ] **W2 — server split + scrambled runner (owner decision 2026-11-19: options 1 + 3; right after W1, before J3a):**
-    - Personas, site lists, planning and timing logic live **only on the QueuePilot server** (`apps/server`). The local QueuePilot authenticates with its team token and requests a plan.
-    - The local side is a small, generic **step runner** (search / open / dwell / scroll / click same-site / consent), shipped compiled + minified + obfuscated, with no personas or planning code.
-    - W1's site settings move to the server: include/exclude is managed centrally for every user.
-    - Browsing stays on each user's machine, through the profile's own proxy, so the warmed IP is the profile's IP.
-    - Remote CDP control from the server is **rejected**: browser control port exposed, latency, fragility.
+  - [x] **W2 — server split (DONE 2026-11-19: `5da03d91`, `b93f4400`):**
+    - Personas, site lists, each account's site settings and the planner live on the team server (`apps/server/src/warmup`). Routes: `GET /warmup/personas`, `GET/PUT /warmup/personas/:id/sites`, `POST /warmup/plan` (account-scoped like bundles; admin keys refused; wiped on re-invite).
+    - With a team server configured, the Warmups console and every warmup use the server; QueuePilot receives only the visits and refers to the profile by a hash. Browsing stays on the user's machine through the profile's own proxy.
+    - `checkRemotePlan` checks every server plan before a browser runs it (public http(s) addresses only, including the composed search address; sane dwell/hops; size caps).
+    - Security audit: HIGH (duplicate sites hung the planner for every account) and 2 MEDIUMs (local-network URL bypasses; unbounded settings) fixed; re-verified CLEAR.
+    - **Left for R:** the local planner is still the no-server fallback, so tester builds must strip it; the runner is minified/obfuscated as part of R. Old `<dataDir>/persona-sites.json` settings are not copied to the server (re-tick them in the console once).
+    - Remote CDP control from the server stays **rejected**.
 - [ ] **ENG-INPUT — debugger clicks must pass bot checks (found 2026-11-19).** Walmart (HUMAN/PerimeterX) challenges CDP-synthesised mouse CLICKS (Input.dispatchMouseEvent). Measured on fresh fury qp.4 profiles from the same IP: plain browsing, an attached idle CDP client, Playwright navigation, synthetic mouse MOVES, synthetic wheel and element.click() all PASS; any synthetic mouse click (consent button or link) is challenged. The page sees synthetic mousemove with movementX=0 (a known tell). The warmer now uses element clicks (fixed; live re-test passed). Engine follow-up: identify the exact tell (movementX/movementY, pointer/pressure fields, event ordering) and patch fury so later click features (autofill buttons J4, TM page actions J6) pass too.
-- [ ] **LIC — licence keys + account separation (owner, 2026-11-19; before W2):**
-  - Testers each get their own **account** on the QueuePilot server and a **licence key with an expiry** (issue / extend / revoke by the owner).
-  - Everything server-side is scoped by account: sealed bundles, profile leases, warmup plans, persona/site settings.
-  - **No account can read another's data, the owner included:** the admin role manages keys, never content, and synced data stays sealed with a passphrase only the account holder knows.
-  - Expired or revoked keys get no server service (plans, sync, codes via server). Local profiles stay on the tester's machine and are never remote-deleted.
-  - Cross-account access tests (A cannot read B, admin cannot read either).
-  - Today's server has team tokens + roles but **no accounts and no expiry**. This adds them.
+- [x] **LIC — licence keys + account separation (DONE 2026-11-19: `08f85292`):**
+  - Accounts on the team server; every bundle, lease and warmup setting belongs to one. Another account's ids answer 404.
+  - **Admin keys manage accounts only and read no content.** An admin never holds a key into an account: creating an account returns a one-time **invite** (7 days); the tester redeems it (`POST /redeem`) for a key only they see. A re-invite wipes the account's server data first, so it is never a way in. Testers add/remove keys for their own machines (`/licence/keys`; the last operator key can't be removed).
+  - Licence expiry and revocation are checked on every request (`401 LICENCE_EXPIRED / LICENCE_REVOKED`); admin can extend (`PATCH /accounts/:id {days}`), revoke or delete.
+  - Pre-licence data migrates into the `team` account (the owner's own). Unauthenticated requests are refused before any body is read.
+  - QueuePilot: `GET /team/licence` shows account and days left.
+  - 15 cross-account / licence tests. Security audit: HIGH + 2 MEDIUM + LOWs fixed; re-verified CLEAR.
+  - **Owner workflow:** `POST /accounts {name, days}` with the admin key → send the tester the `invite`; they paste it into QueuePilot (console UI for redeem/licence is a follow-up).
 - [ ] **R — release packaging (before QueuePilot is first given to anyone else):** includes Kimi's open item #7 ("compiled/minified client packaging"): the console JS ships readable today.
   - [ ] **R detail:** bundle the whole API into one minified + obfuscated program file. No loose source tree and no separate downloads; the warmer runner is part of it.
+- [x] **J3a — tab-state core (DONE 2026-11-19):** per-profile tab state (a Deck tab is a profile): passcodes, notes, extractor `data` (queuePosition…), priority / group, colour, subtitle, timezone, last email/SMS/other codes (never passwords). Durable, goes with the profile. Routes: `GET /tab-view` (cross-run, sorted by priority, label `email · #position`), `GET/PATCH /profiles/:id/tab-state`, `…/clear-codes`, `…/passcode` (first unused, marked used — for J4), `POST /tab-state/bulk` (one line per tab, comma = many, repeat), `POST /tab-state/export` (CSV with formula guard). Browser-origin denied (the check now decodes encoded paths — audit MEDIUM, also protects the older scripting routes). Audit CLEAR. Console UI comes with J3b / the Deck.
 - **Order (owner, 2026-11-19, updated):** W1 → LIC → W2 → J3a → J6 → DECK → M4 → M5. R comes before the first hand-out to testers.
 - [ ] **DECK — Profile Deck (ADR-0008)**: (1) taskbar grouping quick win; (2) spike: adopt one fury window into a container + claim suite; (3) build the Deck with tab label `email · queue position`.
 - [ ] *(J1 detail as originally scoped)* Jancy grammar (`$literal`, positional args, 4 fields), ordered regex `Site:` matching, all missing CSV columns, resolver→parser pipeline (canRun/getQuery/parse, default parser, label, newer-than), ResolvedValue + timestamps, Jancy error vocabulary, `.jyl` email/sms parser loader, `aycd` resolver (AYCD Inbox Mail Tasks), in-tree TM/AXS/SeatGeek/MLB + SMS parsers (no FIFA) + generic `otp()`.

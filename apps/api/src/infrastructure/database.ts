@@ -243,6 +243,18 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // J3a — tab state per profile (a Deck tab is a profile, ADR-0008).
+    // JSON validated by TabStateSchema; goes with the profile.
+    id: "011-tab-state",
+    up: `
+      CREATE TABLE tab_state (
+        profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+        state TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDatabase(dbPath: string): Db {

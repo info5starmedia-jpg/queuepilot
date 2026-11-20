@@ -45,6 +45,7 @@ import { buildApp } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
 import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe.js";
 import { EmailAccountService } from "./application/email/email-account.service.js";
+import { TabStateService } from "./application/tabs/tab-state.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
@@ -299,6 +300,7 @@ export async function main(): Promise<void> {
     settingsStore: settingsService,
     secrets: secretStore,
     emailAccounts,
+    tabState: new TabStateService({ db, profiles, liveTabs: (id) => lifecycle.listTabs(id).tabs }),
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries

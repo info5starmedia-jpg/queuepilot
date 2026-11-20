@@ -19,6 +19,17 @@ export function toHttpError(err: unknown): {
       },
     };
   }
+  // Fastify's own client errors (bad JSON, a "__proto__" key, body too
+  // large…) carry a 4xx statusCode: keep it instead of reporting a 500.
+  if (!(err instanceof DomainError) && err instanceof Error) {
+    const sc = (err as { statusCode?: unknown }).statusCode;
+    if (typeof sc === "number" && sc >= 400 && sc < 500) {
+      return {
+        status: sc,
+        body: { error: { code: sc === 413 ? "PAYLOAD_TOO_LARGE" : ErrorCodes.VALIDATION_FAILED, message: err.message.slice(0, 300) } },
+      };
+    }
+  }
   if (err instanceof DomainError) {
     const status =
       err.code === ErrorCodes.VALIDATION_FAILED

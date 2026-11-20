@@ -6,6 +6,7 @@ export * from "./engine.js";
 export * from "./adspower.js";
 export * from "./providers.js";
 export * from "./tabs.js";
+export * from "./tab-state.js";
 export * from "./attestation.js";
 export * from "./settings.js";
 

@@ -261,15 +261,44 @@ change is an owner decision, tracked as roadmap **SEC-2**.
     `bookmark-sets` EPERM on rename, and one server run cut short.
   - Logged in the roadmap.
 
+### 9. LIC, W2, J3a (`08f85292`, `5da03d91`, `b93f4400`, J3a commit)
+
+- **LIC (team server):**
+  - Accounts own all content; bundles and leases are keyed
+    `(account_id, profile_id)`, and another account's ids answer 404.
+  - Admin keys manage accounts but never content, and never get a key
+    into an account. New accounts come with a one-time invite that the
+    tester redeems at `POST /redeem`. A re-invite wipes the account's
+    server data first.
+  - Expiry and revocation are checked on every request.
+  - Auth runs in `onRequest`, before the body is read.
+  - Schema v2 migration puts pre-licence data into a `team` account.
+- **W2:** `apps/server/src/warmup` holds personas, per-account site
+  settings and the planner. QueuePilot uses them when a team server is
+  configured, gets only the visits, and checks every plan
+  (`checkRemotePlan`). The local planner remains only as the no-server
+  fallback; R must strip it.
+- **J3a:**
+  - `tab_state` per profile (migration `011-tab-state`), holding
+    passcodes, notes, `data`, priority, colour, timezone and codes,
+    never passwords.
+  - Routes: `GET /tab-view` (label `email · #queuePosition`),
+    `/profiles/:id/tab-state` (+ clear-codes, passcode take),
+    `/tab-state/bulk`, `/tab-state/export`.
+  - Browser-origin denied.
+- **Audits:** every piece passed the in-house security-auditor. All HIGH
+  and MEDIUM findings were fixed and re-verified.
+- **Gates:** 775 API + 39 server, tsc and build clean.
+- **Also fixed (J3a audit MEDIUM):** the browser-origin deny check now decodes the path the way the router does, so `/%74ab-view` or `/%6Ayl` can no longer slip past it (this also covered the older `/jyl`, `/plugins`… prefixes). Fastify 4xx errors (bad JSON, `__proto__`) are no longer reported as 500.
+
 ## Next, in order (owner, 2026-11-19)
 
-1. **LIC:** accounts plus expiring licence keys on `apps/server`, with
-   strict per-account separation (the owner can't read testers' data,
-   and testers can't read the owner's).
-2. **W2:** server holds personas, site lists and planning; the local
-   side is a scrambled step runner.
-3. J3a tab-state core, then J6 (+ Discord), DECK (owner GO after the
-   test build), M4, M5.
+1. J6 site plug-ins (Queue-it / TM extractors write `tab_state.data`)
+   + Discord.
+2. DECK (owner GO after the test build), then M4 (J3b, J4, J5), M5.
+3. Small follow-ups:
+   - Console UI for licence and invite redeem.
+   - Stop button for the persona warmup.
 4. **R** release packaging (includes item #7: minified client) before
    any tester gets QueuePilot.
 5. Per-provider J2 schema files once the owner shares provider API docs.

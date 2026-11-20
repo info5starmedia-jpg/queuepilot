@@ -26,6 +26,8 @@ import { registerEventRoutes } from "./http/events.routes.js";
 import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
+import { registerTabStateRoutes } from "./http/tab-state.routes.js";
+import type { TabStateService } from "./application/tabs/tab-state.service.js";
 import { registerWarmupRoutes, registerPersonaWarmupRoutes } from "./http/warmups.routes.js";
 import { TeamServerClient } from "./application/team/team-client.js";
 import { PersonaWarmupService, ipApiCountry, personaDirsFor } from "./application/warmups/persona-warmup.service.js";
@@ -76,6 +78,8 @@ export interface AppDeps {
   secrets?: SecretStore;
   /** Email accounts for the IMAP resolver (Settings → Integrations). */
   emailAccounts?: EmailAccountService;
+  /** J3a: tab state per profile + cross-run Tab View. */
+  tabState?: TabStateService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -134,6 +138,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProfileRoutes(app, deps.profiles, deps.proxies, deps.lifecycle, deps.totp, deps.proxyProviders);
   registerProxyRoutes(app, deps.proxies);
   if (deps.emailAccounts) registerEmailAccountRoutes(app, deps.emailAccounts);
+  if (deps.tabState) registerTabStateRoutes(app, deps.tabState);
   if (deps.aliases && deps.aycdVerify) {
     registerAycdRoutes(app, { aliases: deps.aliases, verify: deps.aycdVerify });
   }

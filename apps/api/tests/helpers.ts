@@ -1,3 +1,4 @@
+import type { Db } from "../src/infrastructure/database.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -37,6 +38,7 @@ import { secretAliasStore } from "../src/application/resolvers/token-aliases.js"
 import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
 import { SettingsService } from "../src/application/settings/settings.service.js";
 import { EmailAccountService } from "../src/application/email/email-account.service.js";
+import { TabStateService } from "../src/application/tabs/tab-state.service.js";
 
 /** In-memory SheetReader: tests seed rows per sheetId, no network involved. */
 export class FakeSheets implements SheetReader {
@@ -79,6 +81,8 @@ export interface TestContext {
   jyl: JylRegistry;
   settings: SettingsService;
   emailAccounts: EmailAccountService;
+  tabState: TabStateService;
+  db: Db;
   dataDir: string;
 }
 
@@ -143,6 +147,7 @@ export function makeTestContext(
   const jyl = new JylRegistry(path.join(dataDir, "jyl"));
   const settings = new SettingsService(db);
   const emailAccounts = new EmailAccountService(db, secrets);
+  const tabState = new TabStateService({ db, profiles, liveTabs: (id) => lifecycle.listTabs(id).tabs });
   const config: AppConfig = {
     port: 0,
     host: "127.0.0.1",
@@ -173,6 +178,7 @@ export function makeTestContext(
     settingsStore: settings,
     secrets,
     emailAccounts,
+    tabState,
   });
   return {
     app,
@@ -192,6 +198,8 @@ export function makeTestContext(
     jyl,
     settings,
     emailAccounts,
+    tabState,
+    db,
     dataDir,
   };
 }
