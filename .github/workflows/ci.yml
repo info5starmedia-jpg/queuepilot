@@ -23,4 +23,13 @@ jobs:
       # auto node-gyp rebuild so no C++ toolchain is required.
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
+      # Point os.tmpdir() at the runner's own temp (D:\a\_temp). The default
+      # profile temp on GitHub runners is C:\Users\RUNNER~1\... — the ~ makes
+      # pathToFileURL emit %7E, which vite-node (vitest 2.x) fails to decode
+      # when tests dynamically import .mjs fixtures from os.tmpdir(). Not a
+      # product bug: production runs under tsx, not vite-node. Family
+      # machines are unaffected (Node decodes correctly).
       - run: npm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
