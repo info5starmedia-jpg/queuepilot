@@ -1106,7 +1106,7 @@ async function loadProxies() {
       <td style="font-weight:600">${esc(p.name)}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
+      <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.host)}:${esc(p.port)}${p.username ? ` · ${esc(p.username)}` : ""}">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono" data-tz-cell>${esc(p.lastProbe?.timezone ?? p.timezone ?? "—")}</td>
       <td><span class="probe-line" data-out></span></td>
       <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>
