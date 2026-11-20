@@ -1466,7 +1466,13 @@ async function refreshTabsProfiles() {
   sel.innerHTML =
     `<option value="">(${running.length} running — pick one)</option>` +
     running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
-  if (running.some((p) => p.id === current)) sel.value = current;
+  if (running.some((p) => p.id === current)) {
+    sel.value = current;
+  } else if (running.length === 1 && !current) {
+    // Exactly one engine running: picking it is noise — preselect (no
+    // auto-load here; the tabs query is operator-driven).
+    sel.value = running[0].id;
+  }
 }
 
 function selectedTabIds() {
@@ -2388,7 +2394,13 @@ async function refreshWarmupProfiles() {
   sel.innerHTML =
     `<option value="">(${running.length} running — pick one)</option>` +
     running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
-  if (running.some((p) => p.id === current)) sel.value = current;
+  if (running.some((p) => p.id === current)) {
+    sel.value = current;
+  } else if (running.length === 1 && !current) {
+    // Exactly one engine running: preselect (recording is still
+    // operator-driven — no auto-record).
+    sel.value = running[0].id;
+  }
 }
 
 async function loadWarmups() {
@@ -3440,7 +3452,12 @@ async function fillProfileSelect(sel, { runningOnly = true } = {}) {
   sel.innerHTML =
     `<option value="">(${list.length} ${runningOnly ? "running" : "profile" + (list.length === 1 ? "" : "s")} — pick one)</option>` +
     list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${runningOnly ? "" : ` · ${esc(String(p.status ?? "idle"))}`}</option>`).join("");
-  if (list.some((p) => p.id === current)) sel.value = current;
+  if (list.some((p) => p.id === current)) {
+    sel.value = current;
+  } else if (runningOnly && list.length === 1 && !current) {
+    // Exactly one engine running: picking it is noise — preselect.
+    sel.value = list[0].id;
+  }
   return list;
 }
 const runningIds = async () => (await api("/profiles")).profiles.filter((p) => p.status === "running").map((p) => p.id);

@@ -73,6 +73,20 @@ const COLUMNS = [
 const PlatformEnum = z.enum(["windows", "macos", "linux"]);
 const ProxyTypeEnum = z.enum(["http", "https", "socks5"]);
 
+/** IANA Area/City check, same rule as proxy-import: a bare "UTC" could just
+ *  as well be a password in a delimited file, so the area prefix is
+ *  required. Without this, a typo'd timezone imports silently and the
+ *  launch-time source resolution quietly falls back to proxy/host. */
+function isTimezone(s: string): boolean {
+  if (!/^[A-Za-z_]+\/[A-Za-z0-9_+\-\/]+$/.test(s)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: s });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Minimal RFC-4180 parser: quotes, escaped quotes, CRLF. Quoted fields may
  *  embed newlines; CRLF inside a quoted field is normalized to LF (audit
  *  GPT-5.4 finding 5d). */
@@ -300,7 +314,14 @@ function importProfileRows(
       const tags = col(r, "tags")
         ? col(r, "tags").split("|").map((t) => t.trim()).filter(Boolean)
         : undefined;
-      const timezone = col(r, "timezone") || undefined;
+      // Validated before the dry-run check (like color/url) so a bad value
+      // fails the row in dry-run exactly as it would on apply.
+      const timezoneRaw = col(r, "timezone");
+      if (timezoneRaw && !isTimezone(timezoneRaw)) {
+        fail(`timezone "${timezoneRaw}" is not a valid IANA timezone (expected Area/City, e.g. Europe/Madrid)`);
+        continue;
+      }
+      const timezone = timezoneRaw || undefined;
       const locale = col(r, "locale") || undefined;
       const group = col(r, "group") || undefined;
       const notes = col(r, "notes") || undefined;

@@ -95,6 +95,17 @@ describe("importProfilesCsv (over HTTP surface via services)", () => {
     expect(report.errors[0]!.name).toBe("bad");
   });
 
+  it("rejects a non-IANA timezone (fails only that row)", () => {
+    const { profiles, proxies } = services();
+    const csv = `${HEADER}\ngood,,,,,windows,Europe/Madrid,es-ES\nbadtz,,,,,windows,not-a-tz\nutc-bare,,,,,windows,UTC`;
+    const report = importProfilesCsv(profiles, proxies, csv);
+    expect(report.succeeded).toBe(1);
+    expect(report.errors).toHaveLength(2);
+    expect(report.errors[0]!.message).toMatch(/not a valid IANA timezone/);
+    expect(report.errors[1]!.message).toMatch(/not a valid IANA timezone/);
+    expect(profiles.list()).toHaveLength(1);
+  });
+
   it("upsert=false refuses duplicates", () => {
     const { profiles, proxies } = services();
     importProfilesCsv(profiles, proxies, `${HEADER}\nalice`);
