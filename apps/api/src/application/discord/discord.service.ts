@@ -34,9 +34,26 @@ export function isDiscordWebhook(v: string): boolean {
 
 /** "discord.com/api/webhooks/1545…111/****" — enough to recognise, useless to abuse. */
 export function maskWebhook(v: string): string {
-  const m = WEBHOOK.exec(new URL(v).pathname);
-  const id = m?.[1] ?? "";
-  return `${new URL(v).hostname}/api/webhooks/${id.slice(0, 4)}…${id.slice(-3)}/****`;
+  try {
+    const u = new URL(v);
+    const id = WEBHOOK.exec(u.pathname)?.[1] ?? "";
+    return `${u.hostname}/api/webhooks/${id.slice(0, 4)}…${id.slice(-3)}/****`;
+  } catch {
+    return "discord.com/api/webhooks/****"; // a damaged stored value must not 500 the status route
+  }
+}
+
+/**
+ * Untrusted page text (event names, hostnames, error strings) goes into a
+ * chat message: strip control characters, defang links and neutralise
+ * markdown so a hostile page can't forge lines or masked links (audit M3).
+ */
+export function safeText(v: string, max = 200): string {
+  return v
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, " ")
+    .replace(/:\/\//g, ":/ /")
+    .replace(/([\\*_~`|>[\]()@&#])/g, "\\$1")
+    .slice(0, max);
 }
 
 export interface DiscordDeps {
@@ -68,6 +85,7 @@ export class DiscordService {
   private sending = false;
   private lastSentAt = 0;
   private readonly lastPositionAt = new Map<string, number>();
+  private readonly lastEventAt = new Map<string, number>();
 
   constructor(private readonly deps: DiscordDeps) {}
 
@@ -106,7 +124,11 @@ export class DiscordService {
     } catch {
       /* deleted meanwhile */
     }
-    this.enqueue({ content: clip(`**${LABELS[e.type] ?? e.type}** · ${who}${e.detail ? ` · ${e.detail}` : ""}`) });
+    // A page that flaps between stages must not spam the channel.
+    const key = `${e.profileId}:${e.type}`;
+    if (e.type !== "queue.position" && now - (this.lastEventAt.get(key) ?? 0) < 60_000) return;
+    this.lastEventAt.set(key, now);
+    this.enqueue({ content: clip(`**${LABELS[e.type] ?? safeText(e.type, 40)}** · ${safeText(who, 120)}${e.detail ? ` · ${safeText(e.detail)}` : ""}`) });
   }
 
   /** A one-off test post (explicit operator action). */
@@ -140,7 +162,7 @@ export class DiscordService {
     }
     await this.sendNow({
       content: clip(
-        `**🍪 Cookie export** · ${args.profileName} · exit IP ${args.exitIp ?? "unknown"} · proxy ${args.proxyName ?? "none"} · ${args.cookies.length} cookies${args.password !== undefined ? " · encrypted" : ""}`,
+        `**🍪 Cookie export** · ${safeText(args.profileName, 120)} · exit IP ${safeText(args.exitIp ?? "unknown", 64)} · proxy ${safeText(args.proxyName ?? "none", 120)} · ${args.cookies.length} cookies${args.password !== undefined ? " · encrypted" : ""}`,
       ),
       file,
     });
@@ -189,7 +211,8 @@ export class DiscordService {
 }
 
 function requestBody(m: Outgoing): { body: string | FormData; headers?: Record<string, string> } {
-  const payload = { content: m.content, allowed_mentions: { parse: [] as string[] } };
+  // flags 4 = SUPPRESS_EMBEDS: no link previews of page-supplied URLs.
+  const payload = { content: m.content, allowed_mentions: { parse: [] as string[] }, flags: 4 };
   if (!m.file) return { body: JSON.stringify(payload), headers: { "content-type": "application/json" } };
   const fd = new FormData();
   fd.append("payload_json", JSON.stringify(payload));
@@ -246,8 +269,9 @@ export function decryptExport(file: unknown, password: string): string {
     throw new DomainError(ErrorCodes.VALIDATION_FAILED, "not a QueuePilot encrypted cookie export");
   }
   try {
+    if (Buffer.from(f.tag, "base64").length !== 16 || Buffer.from(f.iv, "base64").length !== 12) throw new Error("bad sizes");
     const key = scryptSync(password, Buffer.from(f.salt, "base64"), 32, { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-    const d = createDecipheriv("aes-256-gcm", key, Buffer.from(f.iv, "base64"));
+    const d = createDecipheriv("aes-256-gcm", key, Buffer.from(f.iv, "base64"), { authTagLength: 16 });
     d.setAuthTag(Buffer.from(f.tag, "base64"));
     return Buffer.concat([d.update(Buffer.from(f.data, "base64")), d.final()]).toString("utf8");
   } catch {

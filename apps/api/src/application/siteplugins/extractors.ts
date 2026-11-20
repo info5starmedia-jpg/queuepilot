@@ -14,7 +14,9 @@
 /** Queue domains (Jancy's list): Ticketmaster's 11+ TLDs, Live Nation, Queue-it, AXS, ATG, PAC. */
 const QUEUE_HOST =
   /^(queue\.ticketmaster\.(com|ca|co\.uk|ie|com\.mx|com\.au|co\.nz|de|nl|be|se|dk|no|fi|es|fr|at|ch|pl|cz)|queue\.livenation\.com|[a-z0-9-]+\.queue-it\.net|queue\.atgtickets\.com|queue\.paclive\.com)$/i;
-const TM_HOST = /(^|\.)(ticketmaster|livenation)\.[a-z.]+$/i;
+// Exact TLD list (audit H1): an open suffix accepted ticketmaster.evil.com.
+const TM_HOST =
+  /(^|\.)(ticketmaster\.(com|ca|co\.uk|ie|com\.mx|com\.au|co\.nz|de|nl|be|se|dk|no|fi|es|fr|at|ch|pl|cz)|livenation\.(com|co\.uk))$/i;
 const AXS_HOST = /(^|\.)axs\.com$/i;
 const ETIX_HOST = /(^|\.)etix\.com$/i;
 const SEATGEEK_HOST = /(^|\.)seatgeek\.com$/i;
@@ -26,7 +28,7 @@ export function siteKindOf(url: string): SiteKind | null {
   let host: string;
   try {
     const u = new URL(url);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.protocol !== "https:") return null;
     host = u.hostname;
   } catch {
     return null;
@@ -124,10 +126,10 @@ export function readQueuePosition(p: ProbeResult): number | null {
   if (fromWidget !== null) return fromWidget;
   const text = p.text;
   const patterns = [
-    /(?:users?|people|fans?)\s+(?:in\s+line\s+)?ahead\s+of\s+you[^\d]{0,20}(\d[\d,.]*)/i,
-    /(\d[\d,.]*)\s+(?:users?|people|fans?)\s+(?:are\s+)?(?:in\s+line\s+)?ahead\s+of\s+you/i,
-    /(?:more\s+than\s+)?(\d[\d,.]*)\s+(?:people|fans)\s+in\s+(?:the\s+)?(?:line|queue)/i,
-    /your\s+(?:number|place|position)\s+in\s+(?:the\s+)?(?:line|queue)[^\d]{0,20}(\d[\d,.]*)/i,
+    /(?:users?|people|fans?)\s+(?:in\s+line\s+)?ahead\s+of\s+you[^\d]{0,20}(\d[\d,.]{0,15})/i,
+    /(\d[\d,.]{0,15})\s+(?:users?|people|fans?)\s+(?:are\s+)?(?:in\s+line\s+)?ahead\s+of\s+you/i,
+    /(?:more\s+than\s+)?(\d[\d,.]{0,15})\s+(?:people|fans)\s+in\s+(?:the\s+)?(?:line|queue)/i,
+    /your\s+(?:number|place|position)\s+in\s+(?:the\s+)?(?:line|queue)[^\d]{0,20}(\d[\d,.]{0,15})/i,
   ];
   for (const re of patterns) {
     const m = re.exec(text);
@@ -191,11 +193,12 @@ export function readEvent(p: ProbeResult): EventInfo | null {
   return eventId ? { eventId, eventName: p.title || null, artistName: null, venueName: null, startDate: null } : null;
 }
 
-function flattenLd(j: unknown): Record<string, unknown>[] {
-  if (Array.isArray(j)) return j.flatMap(flattenLd);
+function flattenLd(j: unknown, depth = 0): Record<string, unknown>[] {
+  if (depth > 5) return []; // a hostile page's nested JSON must not blow the stack
+  if (Array.isArray(j)) return j.flatMap((x) => flattenLd(x, depth + 1));
   if (j && typeof j === "object") {
     const o = j as Record<string, unknown>;
-    return Array.isArray(o["@graph"]) ? [o, ...flattenLd(o["@graph"])] : [o];
+    return Array.isArray(o["@graph"]) ? [o, ...flattenLd(o["@graph"], depth + 1)] : [o];
   }
   return [];
 }

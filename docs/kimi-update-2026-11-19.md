@@ -349,3 +349,13 @@ pastes it into the live install.
 
 **Owner choices:** the owner picked task 1 (W) for this window. J3a is
 next.
+
+### 9. J6 security audit and fixes (2026-11-20)
+
+In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDIUM, 5 LOW). All fixed, re-verified **CLEAR**.
+
+- **HIGH:** the Ticketmaster host test accepted `ticketmaster.evil.com`; now an exact TLD list, https only.
+- **MEDIUM:** DNS-rebinding Host and `127.evil.com` origins refused; `/settings` is browser-denied; page text is sanitised before it reaches Discord (no mentions, links, markdown or forged lines; embeds off; flap throttle); probe fields are validated and capped, query strings dropped, CSV capped at 5 MB.
+- **LOW:** ReDoS bounds, JSON-LD depth limit, per-tab try/catch, GCM tag/IV length check, `maskWebhook` no longer throws.
+- Not done (LOW, optional): an `ALLOWED_HOSTS` list for LAN-hostname installs; pinning the loopback Origin port; cookie-export sends still unencrypted when no password is given (operator's choice).
+- Gates: 785 API + 39 server tests, typecheck and build clean.

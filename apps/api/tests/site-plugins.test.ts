@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { makeTestContext } from "./helpers.js";
 import { interpretProbe, siteKindOf, readCartSeconds, readQueuePosition, readEvent } from "../src/application/siteplugins/extractors.js";
-import { decryptExport, encryptExport, isDiscordWebhook } from "../src/application/discord/discord.service.js";
+import { cleanProbe } from "../src/application/siteplugins/site-plugin.service.js";
+import { decryptExport, encryptExport, isDiscordWebhook, safeText } from "../src/application/discord/discord.service.js";
 
 /** J6 — site readers, queue-position log, events and Discord (fixtures; not live-verified). */
 
@@ -117,5 +118,52 @@ describe("Discord", () => {
     expect(JSON.stringify(enc)).not.toContain("sid");
     expect(decryptExport(enc, "correct horse")).toContain("sid");
     expect(() => decryptExport(enc, "wrong password")).toThrow(/wrong password/);
+  });
+});
+
+describe("J6 audit regressions", () => {
+  it("H1: look-alike hosts and plain http are not site pages", () => {
+    expect(siteKindOf("https://ticketmaster.evil.com/event/1")).toBeNull();
+    expect(siteKindOf("https://x.livenation.attacker.io/")).toBeNull();
+    expect(siteKindOf("http://www.ticketmaster.com/event/1")).toBeNull();
+    expect(siteKindOf("https://www.ticketmaster.co.uk/event/1")).toBe("ticketmaster");
+  });
+
+  it("M4/L2: a hostile probe is clamped, stripped of its query and cannot crash the reader", () => {
+    expect(cleanProbe({ url: 1, text: "x" })).toBeNull();
+    const c = cleanProbe({ url: `https://queue.ticketmaster.com/${"a".repeat(5000)}?token=secret#h`, title: "t", text: "y".repeat(99999), timers: "no", ld: [5, "ok"], qi: { ahead: 7 } })!;
+    expect(c.url.length).toBeLessThanOrEqual(512);
+    expect(c.url).not.toContain("token");
+    expect(c.text.length).toBe(20000);
+    expect(c.timers).toEqual([]);
+    expect(c.ld).toEqual(["ok"]);
+    expect(c.qi?.ahead).toBeNull();
+    const deep = "[".repeat(50000) + "]".repeat(50000);
+    expect(() => interpretProbe("ticketmaster", { url: "https://www.ticketmaster.com/", title: "", text: "", ld: [deep] })).not.toThrow();
+    const t0 = Date.now();
+    readQueuePosition({ url: "https://queue.ticketmaster.com/", title: "", text: "1,".repeat(10000) + " people in the line" });
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+
+  it("M3: page text cannot forge markdown, links or lines in a Discord message", () => {
+    const t = safeText("Big Show\n**@everyone** [click](https://evil.example/x)");
+    expect(t).not.toContain("\n");
+    expect(t).not.toContain("://");
+    expect(t).toContain("\\[");
+  });
+
+  it("M1/M2: rebinding Hosts and look-alike loopback origins are refused; /settings is browser-denied", async () => {
+    const ctx = makeTestContext();
+    const get = (headers: Record<string, string>, url = "/integrations/discord") => ctx.app.inject({ method: "GET", url, headers });
+    expect((await get({ host: "evil.example.com:50325" })).statusCode).toBe(403);
+    expect((await get({ host: "127.0.0.1:50325", origin: "http://127.evil.com" })).statusCode).toBe(403);
+    expect((await get({ host: "127.0.0.1:50325", origin: "http://localhost:3000", "sec-fetch-site": "cross-site" }, "/settings/sections")).statusCode).toBe(403);
+    expect((await get({ host: "127.0.0.1:50325" }, "/settings/sections")).statusCode).toBe(200);
+  });
+
+  it("L3: a decrypt file with a truncated tag or IV is refused", () => {
+    const enc = encryptExport("hello", "correct horse");
+    expect(() => decryptExport({ ...enc, tag: Buffer.alloc(4).toString("base64") }, "correct horse")).toThrow(/wrong password/);
+    expect(() => decryptExport({ ...enc, iv: Buffer.alloc(8).toString("base64") }, "correct horse")).toThrow(/wrong password/);
   });
 });

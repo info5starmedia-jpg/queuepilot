@@ -1,3 +1,4 @@
+import { isIPv4 } from "node:net";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 /**
@@ -43,6 +44,8 @@ const SENSITIVE_PATTERNS = [
   /^\/profiles\/[^/]+\/discord(\/|$)/,
   /^\/queue-positions$/,
   /^\/tools(\/|$)/,
+  // Audit M2: the "sites" settings section flips Discord export and page clicks.
+  /^\/settings(\/|$)/,
 ];
 
 function isScriptingUrl(url: string): boolean {
@@ -68,8 +71,8 @@ function isLoopbackHost(hostname: string): boolean {
     hostname === "localhost" ||
     hostname === "[::1]" ||
     hostname === "::1" ||
-    hostname.endsWith(".localhost") ||
-    /^127\./.test(hostname)
+    // Exact check: "127.evil.com" must not pass (audit M1).
+    (isIPv4(hostname) && hostname.startsWith("127."))
   );
 }
 
@@ -78,6 +81,14 @@ export function denyBrowserScriptingRequest(
   reply: FastifyReply,
 ): void {
   if (!isScriptingUrl(req.url)) return;
+
+  // DNS rebinding (audit M1): a page on evil.com that re-resolves to 127.0.0.1
+  // sends Host: evil.com. Real clients use an IP literal or localhost.
+  const hostName = (req.headers.host ?? "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  if (hostName && !isIPv4(hostName) && !hostName.includes(":") && hostName !== "localhost") {
+    void reply.code(403).send({ error: { code: "FORBIDDEN", message: "unexpected Host header" } });
+    return;
+  }
 
   const secFetchSite = req.headers["sec-fetch-site"];
   if (secFetchSite === "cross-site") {

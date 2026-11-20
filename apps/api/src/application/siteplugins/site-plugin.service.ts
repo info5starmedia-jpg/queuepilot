@@ -123,8 +123,16 @@ export class SitePluginService {
     for (const t of targets) {
       const kind = siteKindOf(t.url)!;
       const raw = (await this.pages.evaluate(ws, t.targetId, PAGE_PROBE).catch(() => null)) as ProbeResult | null;
-      if (!raw || typeof raw.text !== "string") continue;
-      readings.push({ r: interpretProbe(kind, raw), url: raw.url, text: raw.text });
+      const clean = cleanProbe(raw);
+      if (!clean) continue;
+      // One hostile tab must not blind the profile's other tabs (audit L2).
+      let r: Reading;
+      try {
+        r = interpretProbe(kind, clean);
+      } catch {
+        continue;
+      }
+      readings.push({ r, url: clean.url, text: clean.text });
       if (kind === "ticketmaster") await this.pageActions(ws, t.targetId, s);
     }
     const now = (this.deps.now ?? Date.now)();
@@ -211,6 +219,7 @@ export class SitePluginService {
         fs.mkdirSync(dir, { recursive: true });
         const name = (event?.eventId ?? "unknown").replace(/[^\w-]/g, "_").slice(0, 64) || "unknown";
         const file = path.join(dir, `${name}.csv`);
+        if (fs.existsSync(file) && fs.statSync(file).size > 5_000_000) return; // a flapping page can't fill the disk
         const head = fs.existsSync(file) ? "" : "time,profile,email,position,eventId,eventName,artist,venue,proxy,url\r\n";
         const row = [new Date(now).toISOString(), p.name, p.email ?? "", position, event?.eventId ?? "", event?.eventName ?? "", event?.artistName ?? "", event?.venueName ?? "", rec.proxyStr ?? "", url]
           .map(csvCell)
@@ -285,3 +294,27 @@ export const cdpPageAccess: PageAccess = {
     }
   },
 };
+
+/**
+ * The probe runs in a page we don't trust: check its shape and cap every
+ * field before it is stored, logged or sent anywhere (audit M4). The query
+ * string is dropped — it can carry tokens and is unbounded.
+ */
+export function cleanProbe(raw: unknown): ProbeResult | null {
+  const p = raw as Partial<ProbeResult> | null;
+  if (!p || typeof p.text !== "string" || typeof p.url !== "string") return null;
+  const cap = (v: unknown, n: number): string | null => (typeof v === "string" ? v.slice(0, n) : null);
+  const qi = p.qi && typeof p.qi === "object" ? p.qi : undefined;
+  return {
+    url: p.url.split(/[?#]/)[0]!.slice(0, 512),
+    title: cap(p.title, 300) ?? "",
+    text: p.text.slice(0, 20_000),
+    ...(qi
+      ? { qi: { ahead: cap(qi.ahead, 300), queueNumber: cap(qi.queueNumber, 300), wait: cap(qi.wait, 300), progress: cap(qi.progress, 300) } }
+      : {}),
+    timers: Array.isArray(p.timers)
+      ? p.timers.slice(0, 10).flatMap((t) => (t && typeof t.value === "string" ? [{ value: t.value.slice(0, 8), context: cap(t.context, 300) }] : []))
+      : [],
+    ld: Array.isArray(p.ld) ? p.ld.slice(0, 5).flatMap((x) => (typeof x === "string" ? [x.slice(0, 20_000)] : [])) : [],
+  };
+}
