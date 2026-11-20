@@ -88,9 +88,26 @@ export class DeckService {
   /** Auto-adopt launches while Settings → Launch → Deck is on; drop tabs when a run ends. */
   start(): void {
     this.deps.lifecycle.events.on("lifecycle", (e) => {
-      if (e.type === "run.started" && this.deps.settings().deckEnabled && this.supported) void this.adopt(e.profileId).catch(() => {});
+      if (e.type === "run.started" && this.deps.settings().deckEnabled && this.supported && !this.tabs.has(e.profileId))
+        void this.adopt(e.profileId).catch((err) => this.logAdoptError(e.profileId, err));
       else if (e.type === "run.stopped" || e.type === "run.crashed") this.remove(e.profileId);
     });
+    /* Runs recovered on boot (reconcileOnBoot) never emit run.started, so
+       after a deck-enabled API restart every running profile sat OUTSIDE the
+       container — "Deck open · 0 tabs" with a RUNNING profile (found live
+       2026-11-20). Adopt every profile that is running right now. */
+    if (this.deps.settings().deckEnabled && this.supported) {
+      for (const { profileId } of this.deps.labels()) {
+        void this.adopt(profileId).catch((err) => this.logAdoptError(profileId, err));
+      }
+    }
+  }
+
+  /** Adopt failures were silently swallowed (void …catch(() => {})), which
+      made a broken host indistinguishable from "deck disabled". Logged now;
+      the dashboard Deck view surfaces adopted:false per tab as well. */
+  private logAdoptError(profileId: string, err: unknown): void {
+    console.warn(`[deck] adopt ${profileId} failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   status(): { supported: boolean; open: boolean; tabs: { profileId: string; label: string; adopted: boolean | null }[] } {

@@ -10,6 +10,7 @@ import {
   type BrowserRun,
   type BrowserTab,
   type IdentityDrift,
+  type FingerprintIdentityOverrides,
   type LifecycleEvent,
   type OpenTabInput,
   type FingerprintIdentityWithOverrides,
@@ -28,6 +29,7 @@ import {
 import { CdpConnection } from "../runtime/cdp/cdp-connection.js";
 import { holdRelayPort, type RelayPortHold } from "../runtime/proxy-relay.js";
 import { compareFingerprint } from "../profiles/fingerprint-attestation.js";
+import { hostMemoryGb, hostPrimaryDisplay } from "../profiles/host-display.js";
 import { currentProfileProxy } from "../profiles/profile-proxies.js";
 import { rotationLinkOf } from "../profiles/rotation-link.js";
 import { startUrlsOf } from "../profiles/start-pages.js";
@@ -247,6 +249,50 @@ export class BrowserLifecycleService {
   }
 
   /**
+   * Launch-time host coherence (owner decision 2026-11-20): a profile running
+   * on THIS machine presents THIS machine's display and a memory claim the
+   * host can back. Identities minted before host info was wired (or on a
+   smaller machine) claim 1366x768-style screens — windows open small, and
+   the window-fit watcher reverts any maximize/fullscreen that exceeds the
+   claimed area (the "fullscreen pops up and disappears" report). A 4 GB
+   memory claim on an 8+ GB host is likewise flagged by fingerprint checks
+   (V8's heap limit exposes real RAM). The correction is written as identity
+   OVERRIDES (pins) on the existing row — the row itself stays immutable, the
+   profile's identityId never churns, and the dashboard's identity editor
+   shows the pins transparently. Operator-pinned fields are left alone; after
+   pinning, the staleness check sees the pinned values and skips, so this
+   costs one small write per stale profile, never a loop.
+   */
+  private ensureHostCoherentIdentity(profile: Profile): Profile {
+    const cur = profile.identityId ? this.identities.get(profile.identityId) : null;
+    if (!cur) return profile;
+    const host = hostPrimaryDisplay();
+    const hostMem = hostMemoryGb();
+    /* An operator-pinned field is deliberate — never override it. Pins also
+       keep this idempotent: after pinning, the staleness check below sees the
+       pinned values and skips, so this writes once per stale profile, never
+       in a loop. The identity ROW is untouched (immutable by design;
+       identityId stays stable across launch/refresh). */
+    const pins = cur.overrides ?? {};
+    const patch: Record<string, unknown> = {};
+    if (
+      host &&
+      pins.screenWidth === undefined &&
+      (cur.screenWidth !== host.width || cur.screenHeight !== host.height)
+    ) {
+      patch.screenWidth = host.width;
+      patch.screenHeight = host.height;
+    }
+    if (hostMem >= 8 && cur.deviceMemoryGb <= 4 && pins.deviceMemoryGb === undefined) {
+      patch.deviceMemoryGb = 8; // smallest coherent bucket (generator rule: >4, ≤ host)
+      if (pins.hardwareConcurrency === undefined) patch.hardwareConcurrency = 4; // tier-correct minimum
+    }
+    if (Object.keys(patch).length === 0) return profile;
+    this.identities.setOverrides(profile.identityId!, { ...pins, ...patch } as FingerprintIdentityOverrides);
+    return profile;
+  }
+
+  /**
    * Everything after the guards: proxy resolution, run row, spawn, session
    * bookkeeping. Lives in its own method so start()'s lease guard can wrap it
    * in a try/finally (release the lease on a failed launch, keep it on
@@ -254,6 +300,7 @@ export class BrowserLifecycleService {
    */
   private async launchInner(profile: Profile, opts: StartOptions): Promise<BrowserRun> {
     const profileId = profile.id;
+    profile = this.ensureHostCoherentIdentity(profile);
     const identity = profile.identityId
         ? this.identities.get(profile.identityId)
         : null;

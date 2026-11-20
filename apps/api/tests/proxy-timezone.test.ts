@@ -61,7 +61,9 @@ describe("browser timezone follows the proxy", () => {
     // Per-launch only: the profile's identity of record is unchanged.
     const ident = (await ctx.app.inject({ method: "GET", url: `/profiles/${profileId}/identity` })).json().identity;
     expect(ident.timezone).not.toBe("America/New_York");
-    expect(ident.overrides ?? null).toBeNull();
+    // The launch must not persist a timezone pin (host-coherence screen pins
+    // are a separate, intentional write and must never smuggle one in).
+    expect(ident.overrides?.timezone ?? null).toBeNull();
     expect(before.identityId).toBe(ident.id);
   });
 

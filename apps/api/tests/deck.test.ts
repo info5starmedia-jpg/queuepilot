@@ -39,9 +39,13 @@ const ID = "11111111-1111-4111-8111-111111111111";
 describe("Profile Deck service", () => {
   it("adopts a started profile with its tab label and tracks the host's answers", async () => {
     const t = setup();
+    // Boot adoption (2026-11-20): the running profile is adopted the moment
+    // start() runs — recovered runs never emit run.started.
+    expect(t.sent).toEqual([{ cmd: "adopt", id: ID, pid: 4242, label: "a@x.com · #12" }]);
+    // A duplicate run.started does not re-send (the profile is already tracked).
     t.events.emit("lifecycle", { type: "run.started", profileId: ID });
     await new Promise((r) => setTimeout(r, 5));
-    expect(t.sent).toEqual([{ cmd: "adopt", id: ID, pid: 4242, label: "a@x.com · #12" }]);
+    expect(t.sent).toHaveLength(1);
     t.reply({ event: "ready" });
     t.reply({ event: "adopted", id: ID, ok: true });
     expect(t.deck.status()).toMatchObject({ open: true, tabs: [{ profileId: ID, label: "a@x.com · #12", adopted: true }] });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ErrorCodes, type DomainError } from "@queuepilot/contracts";
 import { makeTestContext } from "./helpers.js";
+import { hostPrimaryDisplay } from "../src/application/profiles/host-display.js";
 
 /**
  * The lifecycle guarantees, tested against the fake engine:
@@ -16,6 +17,41 @@ describe("BrowserLifecycleService", () => {
     expect(run.pid).toBeGreaterThan(0);
     expect(run.wsEndpoint).toContain("ws://127.0.0.1");
     expect(profiles.get(p.id).status).toBe("running");
+  });
+
+  it("pins a stale identity to the host display at launch (owner 2026-11-20)", async () => {
+    const { lifecycle, profiles, db } = makeTestContext();
+    const p = profiles.create({ name: "host-fit", generateFingerprint: true });
+    const host = hostPrimaryDisplay();
+    if (!host) return; // headless CI — nothing to be coherent with
+    // Vacuous on a host whose display IS 1024x768 — no machine in the fleet.
+    expect(host).not.toEqual({ width: 1024, height: 768 });
+    const before = db
+      .prepare("SELECT identity_id AS id FROM profiles WHERE id = ?")
+      .get(p.id) as { id: string };
+    // Force the pre-host-coherence shape: small screen, 4 GB on an 8+ GB host.
+    db.prepare("UPDATE fingerprint_identities SET screen_width = 1024, screen_height = 768 WHERE id = ?").run(before.id);
+    await lifecycle.start(p.id);
+    await lifecycle.stop(p.id);
+    // The identity ROW is immutable — same id, no churn.
+    const after = db
+      .prepare("SELECT identity_id AS id FROM profiles WHERE id = ?")
+      .get(p.id) as { id: string };
+    expect(after.id).toBe(before.id);
+    // The correction rides in the overrides bag; effective values match host.
+    const row = db
+      .prepare("SELECT overrides FROM fingerprint_identities WHERE id = ?")
+      .get(before.id) as { overrides: string | null };
+    const pins = JSON.parse(row.overrides ?? "{}") as Record<string, unknown>;
+    expect(pins.screenWidth).toBe(host.width);
+    expect(pins.screenHeight).toBe(host.height);
+    // A second launch must not rewrite anything — the pins make it idempotent.
+    await lifecycle.start(p.id);
+    await lifecycle.stop(p.id);
+    const row2 = db
+      .prepare("SELECT overrides FROM fingerprint_identities WHERE id = ?")
+      .get(before.id) as { overrides: string | null };
+    expect(row2.overrides).toBe(row.overrides);
   });
 
   it("rejects a second concurrent launch — the double-launch guard", async () => {
