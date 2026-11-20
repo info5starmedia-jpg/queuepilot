@@ -1959,6 +1959,78 @@ async function refreshEngineUpdate() {
   }
 }
 
+/* Settings → General: app self-update (family packaging). Mirrors the
+   engine card; installs swap the release files and restart the app —
+   profiles/proxies/settings live in the data dir and survive. Dev checkouts
+   (no install.json) honestly report "update with git pull" instead. */
+let appUpdatePoll = null;
+
+async function renderAppUpdateCard(box) {
+  const card = document.createElement("div");
+  card.className = "info-card";
+  card.style.marginTop = "12px";
+  card.innerHTML = `
+    <h4>App updates</h4>
+    <p>Installs are checksummed and automatic: download, file swap, restart. Your profiles, proxies and settings are untouched. Uses the same download switch as engine updates (Settings → Engine → Allow engine binary downloads). Running profiles close during the swap.</p>
+    <div id="app-update-status" class="hint">Checking…</div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" id="app-update-check">Check again</button>
+      <button type="button" class="primary" id="app-update-install" hidden>Install update</button>
+    </div>`;
+  box.appendChild(card);
+  $("#app-update-check").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    const status = $("#app-update-status");
+    const prev = status?.textContent ?? "";
+    btn.disabled = true;
+    if (status) status.textContent = "Checking…";
+    try {
+      await refreshAppUpdate();
+    } finally {
+      btn.disabled = false;
+      if (status && status.textContent === "Checking…") status.textContent = prev;
+    }
+  });
+  $("#app-update-install").addEventListener("click", async () => {
+    try {
+      const r = await api("/app/update", { method: "POST" });
+      if (r.started) {
+        $("#app-update-status").textContent = `Installing ${r.version}… QueuePilot will close and reopen in a moment. Running profiles will close.`;
+        $("#app-update-install").hidden = true;
+      } else {
+        toast(`app ${r.version} is already current`);
+      }
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
+  await refreshAppUpdate();
+}
+
+async function refreshAppUpdate() {
+  const status = $("#app-update-status");
+  const install = $("#app-update-install");
+  if (!status) return;
+  clearTimeout(appUpdatePoll);
+  try {
+    const u = await api("/app/update");
+    const size = u.latest?.sizeBytes ? ` (${Math.round(u.latest.sizeBytes / 1048576)} MB)` : "";
+    let line =
+      u.status === "current" ? `Up to date — v${esc(u.version)}.`
+      : u.status === "available" ? `Update available: v${esc(u.latest.version)}${size}.`
+      : u.status === "unavailable" ? esc(u.error ?? "app self-update is not available on this install.")
+      : `Cannot check: ${esc(u.error)}`;
+    if (u.job?.state === "restarting") line = `Installing ${u.job.version}… QueuePilot will close and reopen in a moment. Running profiles will close.`;
+    else if (u.job?.state === "failed") line += ` Last install failed: ${esc(u.job.error ?? "?")}`;
+    status.textContent = line;
+    install.hidden = !(u.status === "available" && u.consent && u.job?.state !== "restarting");
+    appUpdatePoll = setTimeout(refreshAppUpdate, u.job?.state === "running" ? 2000 : 30000);
+  } catch (err) {
+    status.textContent = err.message;
+    install.hidden = true;
+  }
+}
+
 /* Settings → Automation: Plugins (B3b). Import needs the scripting switch
    above AND a token-protected install (the API refuses otherwise and says
    why). An imported plugin lands disabled; its code first runs when the
@@ -2062,6 +2134,7 @@ function renderIntegrationsInfo() {
         <button type="button" id="signout-settings">Sign out</button>
       </div>`;
     $("#signout-settings").addEventListener("click", signOut);
+    void renderAppUpdateCard(box);
     return;
   }
   if (settingsSection === "email") {

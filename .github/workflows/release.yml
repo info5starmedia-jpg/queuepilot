@@ -1,0 +1,70 @@
+name: release
+
+# Family packaging pipeline. Push a tag "v<version>" that matches
+# apps/api/package.json's version: this builds the obfuscated single-file
+# server, vendors the two native/external deps, zips a zero-prerequisite
+# package (QueuePilot.cmd fetches a portable Node on first run), and
+# publishes a GitHub Release whose latest.json the app's self-updater reads.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tag must match the app version
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content apps/api/package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ($pkg -ne $tag) { throw "tag ${{ github.ref_name }} does not match apps/api/package.json version $pkg" }
+          echo "version=$pkg" >> $env:GITHUB_ENV
+
+      - run: npm ci
+
+      - name: Build the release bundle
+        run: node scripts/build-release.mjs
+
+      - name: Vendor externals into the package
+        working-directory: dist-release
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Zip the family package
+        shell: pwsh
+        run: |
+          $zip = "queuepilot-windows-x64.zip"
+          Compress-Archive -Path dist-release\* -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          $size = (Get-Item $zip).Length
+          echo "sha256=$hash" >> $env:GITHUB_ENV
+          echo "size=$size" >> $env:GITHUB_ENV
+
+      - name: Write latest.json for the self-updater
+        shell: pwsh
+        run: |
+          $o = @{
+            version  = "$env:version"
+            url      = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/queuepilot-windows-x64.zip"
+            sha256   = "$env:sha256"
+            sizeBytes = [int64]$env:size
+          }
+          $o | ConvertTo-Json | Set-Content latest.json -Encoding utf8
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            queuepilot-windows-x64.zip
+            latest.json
+          generate_release_notes: true

@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { EngineUpdateService, DEFAULT_MANIFEST_URL } from "./application/engine/engine-update.service.js";
+import { AppUpdateService, DEFAULT_LATEST_URL } from "./application/update/app-update.service.js";
+import { registerAppUpdateRoutes } from "./http/app-update.routes.js";
 import { createProvider, type ModelProvider } from "./application/agent/provider.js";
 import { buildAgentTools } from "./application/agent/agent-tools.js";
 import { AgentService } from "./application/agent/agent.service.js";
@@ -100,6 +102,8 @@ export interface AppDeps {
   settingsStore?: SettingsService;
   /** C1 engine updates; built from config + settings when absent. */
   engineUpdate?: EngineUpdateService;
+  /** Family-release app self-update; built from config + settings when absent. */
+  appUpdate?: AppUpdateService;
   /** P9: model provider override (tests inject a scripted fake). */
   agentProvider?: () => ModelProvider;
   secrets?: SecretStore;
@@ -125,6 +129,17 @@ export function engineUpdateServiceFor(config: AppConfig, settings?: SettingsSer
     enginesDir: path.join(config.dataDir, "engines"),
     manifestRef: () => settings?.get("engine").updateUrl || config.engineManifest || DEFAULT_MANIFEST_URL,
     consent: () => settings?.get("engine").downloadConsent === true,
+  });
+}
+
+/** Family-release app self-update. Shares the engine download consent
+ * switch (one "allow updates" mental model for family) and honors
+ * SPECTRA_APP_UPDATE_URL for a private mirror, else the GitHub release. */
+export function appUpdateServiceFor(config: AppConfig, settings?: SettingsService): AppUpdateService {
+  return new AppUpdateService({
+    dataDir: config.dataDir,
+    consent: () => settings?.get("engine").downloadConsent === true,
+    latestRef: () => process.env.SPECTRA_APP_UPDATE_URL || DEFAULT_LATEST_URL,
   });
 }
 
@@ -218,6 +233,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
   const engineUpdate = deps.engineUpdate ?? engineUpdateServiceFor(deps.config, deps.settingsStore);
   registerEngineRoutes(app, deps.engineHealth, engineUpdate);
+  registerAppUpdateRoutes(app, deps.appUpdate ?? appUpdateServiceFor(deps.config, deps.settingsStore));
   registerTabRoutes(app, deps.lifecycle);
   const warmups = new WarmupService(deps.lifecycle, deps.config.dataDir);
   registerWarmupRoutes(app, warmups);

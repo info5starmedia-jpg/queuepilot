@@ -183,6 +183,17 @@ fs.writeFileSync(
 // A thin launcher so a tester runs one command.
 fs.writeFileSync(path.join(out, "start-queuepilot.cmd"), "@echo off\r\nnode \"%~dp0server\\queuepilot.mjs\" %*\r\n");
 
+// Family packaging: the zero-prerequisite launcher (fetches a portable Node
+// when none is installed), the detached self-update helper the AppUpdate
+// service spawns, and the install marker the service uses to find the
+// release root (dev checkouts have none and update via git).
+fs.copyFileSync(path.join(root, "scripts", "QueuePilot.cmd"), path.join(out, "QueuePilot.cmd"));
+fs.copyFileSync(path.join(root, "scripts", "update-app.ps1"), path.join(out, "update-app.ps1"));
+fs.writeFileSync(
+  path.join(out, "install.json"),
+  JSON.stringify({ flavor: "release", version: apiPkg.version, builtAt: new Date().toISOString() }, null, 2),
+);
+
 const bytes = fs.statSync(path.join(out, "server", "queuepilot.mjs")).size;
 console.log(`[release] ${tester ? "TESTER" : "internal"} build -> ${path.relative(root, out)}`);
 console.log(`[release] server/queuepilot.mjs  ${(bytes / 1024 / 1024).toFixed(2)} MB  (externals: ${keep.join(", ")})`);
