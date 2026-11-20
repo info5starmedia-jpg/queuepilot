@@ -83,10 +83,13 @@ export class FuryCoreRuntime implements BrowserRuntime {
     }
     fs.mkdirSync(request.profileDataDir, { recursive: true });
 
-    // Start pages on EVERY launch (Fury 0.5.2 parity): the engine opens the
-    // profile's start URLs each start, not just the first. extra.url is the
-    // Jancy URL column (single); extra.startUrls is the array form.
-    const startUrls = startUrlsOf(request.profile);
+    // Start pages are opened by the LIFECYCLE layer over CDP after the run is
+    // up (browser.lifecycle.service.ts) — one mechanism, so every start page
+    // lands in the tab registry as a tracked, closable tab and a failed page
+    // reports startpage.failed. Passing the URLs again as engine CLI
+    // arguments (the old Fury 0.5.2 behavior) opened every page TWICE per
+    // launch (found live 2026-11-20: 8 pages for a 4-startUrl profile) and
+    // the CLI-opened copies were invisible to the Tabs view and to tab close.
     // Bookmark sets (Fury 0.5.3 parity), runtime-side: merged into Chromium's
     // own Bookmarks file before launch; browser-made bookmarks untouched.
     const bookmarkSets = normalizeBookmarkSets(request.profile.extra?.bookmarkSets);
@@ -161,7 +164,6 @@ export class FuryCoreRuntime implements BrowserRuntime {
       `--window-size=${initialSize.width},${initialSize.height}`,
       ...(relay ? [`--proxy-server=http://127.0.0.1:${relay.port}`] : []),
       ...ENGINE_FEATURE_SWITCHES,
-      ...startUrls,
     ];
 
     // Named launch refusals (AliasMode discipline): every failure says WHICH
@@ -624,6 +626,10 @@ export class FurySession implements BrowserSession {
 
   async closeTab(engineTabId: string): Promise<void> {
     return this.tabs.closeTab(engineTabId);
+  }
+
+  async closeInitialBlankTab(): Promise<boolean> {
+    return this.tabs.closeInitialBlankTab();
   }
 
   async reloadTab(engineTabId: string, opts?: { hard?: boolean }): Promise<void> {

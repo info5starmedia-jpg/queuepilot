@@ -7,6 +7,12 @@ interface CreateBrowserContextResult {
 interface CreateTargetResult {
   targetId: string;
 }
+interface TargetInfo {
+  targetId: string;
+  type: string;
+  url: string;
+  browserContextId?: string;
+}
 
 /**
  * CdpTabController — engine-side tab routing over CDP.
@@ -69,6 +75,36 @@ export class CdpTabController {
   async closeTab(engineTabId: string): Promise<void> {
     const conn = await this.ensureConnection();
     await conn.call("Target.closeTarget", { targetId: engineTabId });
+  }
+
+  /**
+   * Close the engine's startup blank tab (the window anchor Chromium opens
+   * when launched without URL arguments). Only fires when it is unambiguous:
+   * exactly one page target sitting on about:blank / the new-tab page OUTSIDE
+   * the partition contexts we created, and at least one other page exists.
+   * Without this, every launch shows a stray blank tab next to the tracked
+   * start-page tabs (found live 2026-11-20 when start URLs moved off the CLI).
+   * Note: fury-core gives EVERY tab its own browser context — the anchor has
+   * an engine-created contextId, so "default context" is never the right test.
+   */
+  async closeInitialBlankTab(): Promise<boolean> {
+    const conn = await this.ensureConnection();
+    const { targetInfos } = await conn.call<{ targetInfos: TargetInfo[] }>(
+      "Target.getTargets",
+      {},
+    );
+    const pages = targetInfos.filter((t) => t.type === "page");
+    if (pages.length <= 1) return false;
+    const ours = new Set(this.contexts.values());
+    const blanks = pages.filter(
+      (t) =>
+        (t.url === "about:blank" ||
+          /^chrome:\/\/(newtab|new-tab-page)\/?$/.test(t.url)) &&
+        (!t.browserContextId || !ours.has(t.browserContextId)),
+    );
+    if (blanks.length !== 1) return false;
+    await conn.call("Target.closeTarget", { targetId: blanks[0]!.targetId });
+    return true;
   }
 
   /** Reload a tab (Page.reload on its attached page session). */

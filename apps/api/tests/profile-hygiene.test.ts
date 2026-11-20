@@ -41,9 +41,40 @@ describe("cleanProfileDirStaleness", () => {
   });
 
   it("is a quiet no-op on a fresh/empty profile dir", () => {
-    expect(cleanProfileDirStaleness(dir)).toEqual({ removed: [] });
+    expect(cleanProfileDirStaleness(dir)).toEqual({
+      removed: [],
+      sessionMarkedClean: false,
+    });
     expect(cleanProfileDirStaleness(path.join(dir, "does-not-exist"))).toEqual({
       removed: [],
+      sessionMarkedClean: false,
     });
+  });
+
+  it("rewrites a Crashed exit marker to Normal so relaunch never restores old tabs", () => {
+    fs.mkdirSync(path.join(dir, "Default"));
+    const prefsPath = path.join(dir, "Default", "Preferences");
+    fs.writeFileSync(
+      prefsPath,
+      JSON.stringify({ profile: { exit_type: "Crashed", name: "Default" } }),
+    );
+
+    const report = cleanProfileDirStaleness(dir);
+    expect(report.sessionMarkedClean).toBe(true);
+
+    const after = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as {
+      profile: { exit_type: string; name: string };
+    };
+    expect(after.profile.exit_type).toBe("Normal");
+    expect(after.profile.name).toBe("Default"); // untouched fields survive
+  });
+
+  it("leaves a clean exit marker alone", () => {
+    fs.mkdirSync(path.join(dir, "Default"));
+    fs.writeFileSync(
+      path.join(dir, "Default", "Preferences"),
+      JSON.stringify({ profile: { exit_type: "Normal" } }),
+    );
+    expect(cleanProfileDirStaleness(dir).sessionMarkedClean).toBe(false);
   });
 });

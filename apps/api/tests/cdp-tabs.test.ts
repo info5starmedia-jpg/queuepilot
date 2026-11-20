@@ -98,6 +98,82 @@ describe("CdpTabController", () => {
     expect(srv.callsFor("Target.disposeBrowserContext")).toHaveLength(2);
   });
 
+  it("closeInitialBlankTab closes the engine-context blank, never our partition tabs", async () => {
+    const { server: srv, wsUrl } = await startServer();
+    const tabs = new CdpTabController(wsUrl);
+    await tabs.openTab("https://a.example", "partition-1");
+    await tabs.openTab("https://b.example", "partition-2");
+    // fury-core reality (verified live 2026-11-20): the anchor tab sits in an
+    // ENGINE-created context, same shape as our partition contexts.
+    srv.pageTargets = [
+      { targetId: "anchor", type: "page", url: "chrome://newtab/", browserContextId: "engine-ctx" },
+      { targetId: "page-1", type: "page", url: "https://a.example", browserContextId: "ctx-1" },
+      { targetId: "page-2", type: "page", url: "https://b.example", browserContextId: "ctx-2" },
+    ];
+
+    const closed = await tabs.closeInitialBlankTab();
+
+    expect(closed).toBe(true);
+    const closes = srv.callsFor("Target.closeTarget");
+    expect(closes).toHaveLength(1);
+    expect(closes[0]!.params).toEqual({ targetId: "anchor" });
+
+    await tabs.dispose();
+  });
+
+  it("closeInitialBlankTab is a no-op when the blank is the only page target", async () => {
+    const { server: srv, wsUrl } = await startServer();
+    const tabs = new CdpTabController(wsUrl);
+    srv.pageTargets = [{ targetId: "anchor", type: "page", url: "about:blank" }];
+
+    const closed = await tabs.closeInitialBlankTab();
+
+    expect(closed).toBe(false);
+    expect(srv.callsFor("Target.closeTarget")).toHaveLength(0);
+
+    await tabs.dispose();
+  });
+
+  it("closeInitialBlankTab never touches a blank inside one of our own partitions", async () => {
+    const { server: srv, wsUrl } = await startServer();
+    const tabs = new CdpTabController(wsUrl);
+    await tabs.openTab("about:blank", "partition-1"); // user's blank in OUR context
+    await tabs.openTab("https://b.example", "partition-2");
+    srv.pageTargets = [
+      { targetId: "anchor", type: "page", url: "chrome://newtab/", browserContextId: "engine-ctx" },
+      { targetId: "page-1", type: "page", url: "about:blank", browserContextId: "ctx-1" },
+      { targetId: "page-2", type: "page", url: "https://b.example", browserContextId: "ctx-2" },
+    ];
+
+    const closed = await tabs.closeInitialBlankTab();
+
+    // Only the engine anchor qualifies; our ctx-1 blank stays.
+    expect(closed).toBe(true);
+    const closes = srv.callsFor("Target.closeTarget");
+    expect(closes).toHaveLength(1);
+    expect(closes[0]!.params).toEqual({ targetId: "anchor" });
+
+    await tabs.dispose();
+  });
+
+  it("closeInitialBlankTab is a no-op when no unambiguous single blank exists", async () => {
+    const { server: srv, wsUrl } = await startServer();
+    const tabs = new CdpTabController(wsUrl);
+    await tabs.openTab("https://a.example", "partition-1");
+    await tabs.openTab("https://b.example", "partition-2");
+    srv.pageTargets = [
+      { targetId: "page-1", type: "page", url: "https://a.example", browserContextId: "ctx-1" },
+      { targetId: "page-2", type: "page", url: "https://b.example", browserContextId: "ctx-2" },
+    ];
+
+    const closed = await tabs.closeInitialBlankTab();
+
+    expect(closed).toBe(false);
+    expect(srv.callsFor("Target.closeTarget")).toHaveLength(0);
+
+    await tabs.dispose();
+  });
+
   it("an engine without browser contexts gets TABS_UNSUPPORTED, never a fake isolated tab", async () => {
     const { server: srv, wsUrl } = await startServer();
     srv.supportsContexts = false;

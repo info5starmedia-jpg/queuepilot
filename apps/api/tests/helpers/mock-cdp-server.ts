@@ -27,9 +27,12 @@ export class MockCdpServer {
   /** Test hook: what the next Runtime.evaluate returns (returnByValue). */
   evaluateResult: unknown = { filled: [], missing: [] };
   /** Test hook: page targets Target.getTargets reports. */
-  pageTargets: { targetId: string; type: string; browserContextId?: string }[] = [
-    { targetId: "page-1", type: "page" },
-  ];
+  pageTargets: {
+    targetId: string;
+    type: string;
+    url?: string;
+    browserContextId?: string;
+  }[] = [{ targetId: "page-1", type: "page" }];
   supportsContexts = true;
   /** Test hook: cookies Network.getAllCookies reports. */
   allCookies: Record<string, unknown>[] = [];

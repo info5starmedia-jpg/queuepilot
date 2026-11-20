@@ -245,6 +245,16 @@ export class BrowserLifecycleService {
         });
       }
     }
+    // The engine always spawns one stray blank "window anchor" tab even
+    // with no CLI URLs (startUrls now open exclusively via CDP). Close it
+    // once the real pages are up so a launch leaves exactly its startUrls.
+    if (startUrls.length > 0) {
+      try {
+        await this.sessions.get(profileId)?.closeInitialBlankTab?.();
+      } catch {
+        // Best-effort: a leftover blank tab is cosmetic, never launch-fatal.
+      }
+    }
     return live;
   }
 

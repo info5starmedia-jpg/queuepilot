@@ -35,6 +35,13 @@ export interface BrowserSession {
    */
   openTab?(request: OpenTabRequest): Promise<{ engineTabId: string }>;
   closeTab?(engineTabId: string): Promise<void>;
+  /**
+   * Best-effort close of the engine's stray initial blank tab. The engine
+   * always opens one "window anchor" tab even when no CLI URLs are passed;
+   * with startUrls opened via CDP that blank tab is unreferenced junk.
+   * Returns true if a blank page target was actually closed.
+   */
+  closeInitialBlankTab?(): Promise<boolean>;
   /** Optional per-tab ops (tab-ops depth). Absent = TABS_UNSUPPORTED. */
   reloadTab?(engineTabId: string, opts?: { hard?: boolean }): Promise<void>;
   /** J3b: change the tab's URL, and bring it to the front (focus delay needs it visible). */
