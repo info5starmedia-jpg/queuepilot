@@ -124,6 +124,13 @@ export class TeamServerStore {
     this.db.pragma("foreign_keys = ON");
     this.migrate();
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS warmup_sites (
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        persona_id TEXT NOT NULL,
+        settings TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, persona_id)
+      );
       CREATE TABLE IF NOT EXISTS invites (
         code_hash TEXT PRIMARY KEY,
         account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -345,7 +352,30 @@ export class TeamServerStore {
    * Every account-scoped content table. New content tables (W2 warmup
    * settings…) MUST be added here so a re-invite wipes them too.
    */
-  static readonly CONTENT_TABLES = ["bundles", "leases"];
+  static readonly CONTENT_TABLES = ["bundles", "leases", "warmup_sites"];
+
+  // ---- W2: per-account warmup site settings ----
+
+  getSiteSettings(accountId: string, personaId: string): unknown | null {
+    const r = this.db.prepare("SELECT settings FROM warmup_sites WHERE account_id = ? AND persona_id = ?").get(accountId, personaId) as
+      | { settings: string }
+      | undefined;
+    if (!r) return null;
+    try {
+      return JSON.parse(r.settings) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  setSiteSettings(accountId: string, personaId: string, json: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO warmup_sites (account_id, persona_id, settings, updated_at) VALUES (?,?,?,?)
+         ON CONFLICT(account_id, persona_id) DO UPDATE SET settings = excluded.settings, updated_at = excluded.updated_at`,
+      )
+      .run(accountId, personaId, json, new Date().toISOString());
+  }
 
   private wipeAccountContent(accountId: string): void {
     for (const t of TeamServerStore.CONTENT_TABLES) {

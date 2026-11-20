@@ -77,27 +77,16 @@ export function registerPersonaWarmupRoutes(
   app: FastifyInstance,
   svc: import("../application/warmups/persona-warmup.service.js").PersonaWarmupService,
 ): void {
-  app.get("/warmups/personas", async () => ({
-    personas: svc.personas().map((p) => ({ id: p.id, name: p.name, description: p.description ?? null, sites: p.sites.length })),
-  }));
-  // Site settings: every site the persona ships with (and whether it is
-  // excluded), plus the operator's added sites.
+  // Personas and site settings: from the team server when one is configured
+  // (W2), else the local fallback.
+  app.get("/warmups/personas", async () => ({ personas: await svc.listPersonas() }));
   app.get("/warmups/personas/:id/sites", async (req) => {
     const { id } = req.params as { id: string };
-    const settings = svc.siteSettings(id);
-    const base = svc.basePersonas().find((p) => p.id === id)!;
-    const host = (u: string) => new URL(u).hostname.toLowerCase().replace(/^www\./, "");
-    const skip = new Set(settings.excluded.map((h) => h.toLowerCase().replace(/^www\./, "")));
-    const row = (s: { url: string; category: string }, pool: string) => ({ url: s.url, host: host(s.url), category: s.category, pool, excluded: skip.has(host(s.url)) });
-    return {
-      sites: [...base.sites.map((s) => row(s, "main")), ...base.extraSites.map((s) => row(s, "extra"))],
-      added: settings.added,
-      excluded: settings.excluded,
-    };
+    return svc.sitesView(id);
   });
   app.put("/warmups/personas/:id/sites", async (req) => {
     const { id } = req.params as { id: string };
-    return svc.setSiteSettings(id, req.body ?? {});
+    return svc.saveSites(id, req.body ?? {});
   });
   app.post("/profiles/:id/warmup/persona", async (req, reply) => {
     const { id } = req.params as { id: string };

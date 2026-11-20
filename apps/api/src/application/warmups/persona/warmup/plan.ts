@@ -172,10 +172,12 @@ function buildVisits(rng: Rng, persona: Persona, pool: Site[]): PlannedVisit[] {
     };
   };
   const out: PlannedVisit[] = [];
-  for (let i = 0; i < n && used.size < nonSearch.length; i++) {
-    let site: Site;
-    do site = rng.weighted(nonSearch.map((s) => ({ value: s, weight: s.weight })));
-    while (used.has(site.url));
+  // QueuePilot (security audit 2026-11-19): bound by UNIQUE urls and draw only
+  // from unused sites — with duplicate urls the original retry loop never ended.
+  for (let i = 0; i < n; i++) {
+    const left = nonSearch.filter((s) => !used.has(s.url));
+    if (left.length === 0) break;
+    const site: Site = rng.weighted(left.map((s) => ({ value: s, weight: s.weight })));
     used.add(site.url);
     out.push(toVisit(site));
   }

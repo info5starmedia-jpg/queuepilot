@@ -15,13 +15,19 @@ export function isPublicWebUrl(v: string): boolean {
     return false;
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h.endsWith(".localhost") || h === "::1" || h === "0.0.0.0") return false;
-  if (/^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-  if (/^(fc|fd|fe80)/i.test(h) && h.includes(":")) return false;
+  if (v.length > 2048) return false;
+  // Trailing dots ("localhost.") resolve like the bare name.
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h === "::1") return false;
+  // Names that resolve on the local network, never on the public web.
+  if (/\.(local|internal|lan|home|localdomain|intranet|corp|home\.arpa)$/.test(h) || /(^|\.)localtest\.me$/.test(h)) return false;
+  // IPv4: loopback, private, link-local, CGNAT, "this network", benchmark and IETF ranges.
+  if (/^(0|10|127)\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\.|^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|^192\.0\.0\.|^198\.1[89]\./.test(h)) return false;
+  // IPv6: unique-local, link-local, IPv4-mapped / unspecified.
+  if (h.includes(":") && (/^(fc|fd|fe80)/i.test(h) || /^::/.test(h))) return false;
   return h.includes(".");
 }
-const PublicUrl = z.string().refine(isPublicWebUrl, "must be a public http(s) website");
+const PublicUrl = z.string().max(2048).refine(isPublicWebUrl, "must be a public http(s) website");
 
 export const SiteSchema = z.object({
   url: PublicUrl,
@@ -30,12 +36,15 @@ export const SiteSchema = z.object({
    * { "CA": "https://www.bestbuy.ca" } — the warmer picks the one matching
    * the profile's proxy so country splash screens never appear.
    */
-  urlByCountry: z.record(PublicUrl).default({}),
+  urlByCountry: z
+    .record(z.string().regex(/^[A-Z]{2}$/, "an ISO-2 country like CA"), PublicUrl)
+    .refine((r) => Object.keys(r).length <= 50, "at most 50 countries")
+    .default({}),
   /** search | shopping | sports | crypto | news | social | video | utility */
-  category: z.string().default("general"),
+  category: z.string().max(40).default("general"),
   weight: z.number().positive().default(1),
   /** Queries that lead to this site via the search engine ("nike running shoes"). */
-  searchTerms: z.array(z.string()).default([]),
+  searchTerms: z.array(z.string().min(1).max(100)).max(20).default([]),
   /** Scales the persona dwell for this site (video 3x, listing 0.7x …). */
   dwellMultiplier: z.number().positive().default(1),
   /** Max internal pages to open after landing. */

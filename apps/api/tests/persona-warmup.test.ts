@@ -109,3 +109,70 @@ describe("persona site settings", () => {
     expect(bad.statusCode).toBe(400);
   });
 });
+
+describe("W2 — plans and site settings from the team server", () => {
+  it("runs a server-planned warmup; site settings go to the server; the local planner is unused", async () => {
+    const { buildTeamServerApp } = await import("@queuepilot/server");
+    const server = buildTeamServerApp({ host: "127.0.0.1", port: 0, dbPath: ":memory:", adminToken: "boot", machineName: "t" });
+    await server.app.listen({ host: "127.0.0.1", port: 0 });
+    const base = `http://127.0.0.1:${(server.app.server.address() as { port: number }).port}`;
+    try {
+      const acct = server.store.createAccount("tester-1", null);
+      const { token } = server.store.mintToken("pc", "operator", acct.id);
+      const ctx = makeTestContext();
+      ctx.settings.patch("team", { serverUrl: base, token });
+
+      // Console routes now read from and write to the server, per account.
+      const put = await ctx.app.inject({ method: "PUT", url: "/warmups/personas/us-shopper/sites", payload: { excluded: ["espn.com"] } });
+      expect(put.statusCode).toBe(200);
+      expect(server.store.getSiteSettings(acct.id, "us-shopper")).toMatchObject({ excluded: ["espn.com"] });
+      const view = (await ctx.app.inject({ method: "GET", url: "/warmups/personas/us-shopper/sites" })).json();
+      expect(view.sites.find((s: { host: string }) => s.host === "espn.com").excluded).toBe(true);
+
+      const { TeamServerClient } = await import("../src/application/team/team-client.js");
+      const log: string[] = [];
+      const svc = new PersonaWarmupService({
+        lifecycle: ctx.lifecycle,
+        personaDirs: [],
+        driverFactory: () => fakeDriver(log),
+        sleep: async () => {},
+        exitCountry: async () => "CA",
+        remote: () => new TeamServerClient(base, token),
+      });
+      const p = ctx.profiles.create({ name: "remote-warm", generateFingerprint: true });
+      svc.start(p.id, { sessions: 1 });
+      for (let i = 0; i < 300 && svc.statusOf(p.id)!.state === "running"; i++) await new Promise((r) => setTimeout(r, 10));
+      const st = svc.statusOf(p.id)!;
+      expect(st.error).toBeNull();
+      expect(st.state).toBe("done");
+      expect(st.visits).toBeGreaterThan(0);
+      expect(log.some((l) => l === "goto www.espn.com")).toBe(false); // excluded on the server
+    } finally {
+      await server.close();
+    }
+  }, 20000);
+
+  it("refuses a server plan that points anywhere but public websites", async () => {
+    const { checkRemotePlan } = await import("../src/application/warmups/persona-warmup.service.js");
+    const visit = { site: "x", url: "https://www.example.com", category: "general", entry: "direct", dwellMs: 1000, hops: 1 };
+    const session = { searchEngine: "https://www.google.com/search?q=", visits: [visit] };
+    expect(checkRemotePlan([session], 1)).toHaveLength(1);
+    for (const bad of [
+      [{ ...session, visits: [{ ...visit, url: "http://127.0.0.1:50325/profiles" }] }],
+      [{ ...session, visits: [{ ...visit, url: "file:///C:/x" }] }],
+      [{ ...session, visits: [{ ...visit, productSearchUrl: "http://192.168.1.1/" }] }],
+      [{ ...session, searchEngine: "http://localhost/?q=" }],
+      [{ ...session, visits: [{ ...visit, dwellMs: -1 }] }],
+      // engine + query composed into a local address
+      [{ ...session, searchEngine: "https://a.local", visits: [{ ...visit, entry: "search", searchQuery: "host" }] }],
+      [{ ...session, searchEngine: "https://www.google.com/?x=", visits: [{ ...visit, entry: "search", searchQuery: "q".repeat(101) }] }],
+      [{ ...session, visits: [{ ...visit, entry: "teleport" }] }],
+      [{ ...session, visits: [{ ...visit, url: "http://localhost.:50325/" }] }],
+      [session, session],
+      [],
+      "nope",
+    ]) {
+      expect(() => checkRemotePlan(bad, 1)).toThrow(/invalid warmup plan/);
+    }
+  });
+});

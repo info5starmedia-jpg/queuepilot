@@ -1,6 +1,9 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { MAX_BUNDLE_BYTES, type TeamRole, type TeamServerConfig } from "./config.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { TeamServerStore } from "./store.js";
+import { WarmupPlanner } from "./warmup/service.js";
 
 /**
  * Team server HTTP surface. Design rules:
@@ -42,6 +45,10 @@ const MAX_LICENCE_DAYS = 3650;
 
 export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
   const store = new TeamServerStore(config.dbPath);
+  const planner = new WarmupPlanner(
+    store,
+    config.personaDir === undefined ? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../personas") : config.personaDir,
+  );
   const app = Fastify({
     bodyLimit: MAX_BUNDLE_BYTES + 4096,
     logger: false,
@@ -448,6 +455,40 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     if (!accountId) return;
     if (!store.forceReleaseLease(accountId, req.params.profileId)) return notFound(reply, "no live lease for this profile");
     return { released: req.params.profileId };
+  });
+
+  // ---- W2: warmup personas, site settings and plans (account-scoped) ----
+
+  app.get("/warmup/personas", async (req, reply) => {
+    const accountId = contentAccount(req, reply, false);
+    if (!accountId) return;
+    return { personas: planner.personas(accountId) };
+  });
+
+  app.get<{ Params: { id: string } }>("/warmup/personas/:id/sites", async (req, reply) => {
+    const accountId = contentAccount(req, reply, false);
+    if (!accountId) return;
+    return planner.sites(accountId, req.params.id) ?? notFound(reply, "unknown persona");
+  });
+
+  app.put<{ Params: { id: string } }>("/warmup/personas/:id/sites", { bodyLimit: 64 * 1024 }, async (req, reply) => {
+    const accountId = contentAccount(req, reply, true);
+    if (!accountId) return;
+    const r = planner.setSites(accountId, req.params.id, req.body);
+    if (r === null) return notFound(reply, "unknown persona");
+    if ("error" in r) return bad(reply, r.error);
+    return r;
+  });
+
+  /** The concrete visits for one warmup run; nothing else about the persona leaves the server. */
+  app.post("/warmup/plan", { bodyLimit: 4096 }, async (req, reply) => {
+    const accountId = contentAccount(req, reply, true);
+    if (!accountId) return;
+    const r = planner.plan(accountId, req.body);
+    if ("error" in r) {
+      return reply.code(r.status).send({ error: { code: r.status === 404 ? "NOT_FOUND" : "VALIDATION_FAILED", message: r.error } });
+    }
+    return r;
   });
 
   return { app, store, close: () => app.close() };

@@ -113,6 +113,33 @@ export class TeamServerClient {
     };
   }
 
+  // ---- W2: server-side warmup planning (implements RemoteWarmup) ----
+
+  private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await this.req(method, path, body === undefined ? {} : { body: Buffer.from(JSON.stringify(body), "utf8"), asJson: true });
+    return (await res.json()) as T;
+  }
+
+  async warmupPersonas(): Promise<{ id: string; name: string; description: string | null; sites: number }[]> {
+    return (await this.json<{ personas: { id: string; name: string; description: string | null; sites: number }[] }>("GET", "/warmup/personas")).personas;
+  }
+
+  async warmupSites(personaId: string): Promise<{
+    sites: { url: string; host: string; category: string; pool: string; excluded: boolean }[];
+    added: unknown[];
+    excluded: string[];
+  }> {
+    return this.json("GET", `/warmup/personas/${encodeURIComponent(personaId)}/sites`);
+  }
+
+  async putWarmupSites(personaId: string, body: unknown): Promise<{ excluded: string[]; added: never[] }> {
+    return this.json("PUT", `/warmup/personas/${encodeURIComponent(personaId)}/sites`, body);
+  }
+
+  async warmupPlan(req: { persona?: string; sessions: number; country?: string; target: string }): Promise<{ personaId: string; sessions: never[] }> {
+    return this.json("POST", "/warmup/plan", req);
+  }
+
   async listBundles(): Promise<TeamBundleHead[]> {
     const res = await this.req("GET", "/bundles");
     const body = (await res.json()) as { bundles: TeamBundleHead[] };

@@ -22,6 +22,11 @@ export interface TeamServerConfig {
   adminToken: string | null;
   /** Machine name recorded as `updatedBy` on pushes this server initiates. */
   machineName: string;
+  /**
+   * W2: folder of persona JSON files (plus the built-in default). Absent =
+   * the bundled `apps/server/personas`; null = built-in default only.
+   */
+  personaDir?: string | null;
 }
 
 export function teamServerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): TeamServerConfig {
@@ -31,6 +36,7 @@ export function teamServerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): T
     dbPath: env.QUEUEPILOT_TEAM_DB ?? "team-server.db",
     adminToken: env.QUEUEPILOT_TEAM_ADMIN_TOKEN ?? null,
     machineName: env.QUEUEPILOT_TEAM_MACHINE ?? "server",
+    ...(env.QUEUEPILOT_TEAM_PERSONAS ? { personaDir: env.QUEUEPILOT_TEAM_PERSONAS } : {}),
   };
 }
 

@@ -1,0 +1,23 @@
+{
+  "id": "crypto-heavy",
+  "name": "Crypto watcher",
+  "description": "Checks prices and crypto news several times a day, with some general shopping so it doesn't look one-dimensional.",
+  "timezone": "America/Chicago",
+  "activeHours": { "start": 7, "end": 24 },
+  "days": 14,
+  "sessionsPerDay": { "min": 3, "max": 5 },
+  "sitesPerSession": { "min": 2, "max": 5 },
+  "offDayChance": 0.1,
+  "dwell": { "medianSec": 40, "sigma": 0.8, "minSec": 4, "maxSec": 480, "bounceRate": 0.12 },
+  "entryMix": { "search": 0.6, "direct": 0.4 },
+  "sites": [
+    { "url": "https://www.google.com", "category": "search", "weight": 3, "maxHops": 1, "dwellMultiplier": 0.4 },
+    { "url": "https://coinmarketcap.com", "category": "crypto", "weight": 3, "searchTerms": ["bitcoin price", "coinmarketcap ethereum", "top gainers crypto"] },
+    { "url": "https://www.coingecko.com", "category": "crypto", "weight": 2.5, "searchTerms": ["coingecko solana price", "crypto prices today"] },
+    { "url": "https://www.coindesk.com", "category": "crypto", "weight": 2, "dwellMultiplier": 1.5, "searchTerms": ["coindesk news", "bitcoin etf news"] },
+    { "url": "https://www.coinbase.com", "category": "crypto", "weight": 1.5, "maxHops": 2, "searchTerms": ["coinbase learn crypto"] },
+    { "url": "https://www.kraken.com", "category": "crypto", "weight": 1, "maxHops": 2, "searchTerms": ["kraken exchange"] },
+    { "url": "https://www.amazon.com", "category": "shopping", "weight": 1.5, "searchTerms": ["amazon hardware wallet", "amazon deals"] },
+    { "url": "https://www.espn.com", "category": "sports", "weight": 1, "dwellMultiplier": 1.2, "searchTerms": ["espn scores"] }
+  ]
+}
