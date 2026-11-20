@@ -17,7 +17,9 @@
     "test": "npm run test --workspaces --if-present",
     "format:check": "prettier --check .",
     "dev": "npm run dev -w apps/api",
-    "start": "npm run start -w apps/api"
+    "start": "npm run start -w apps/api",
+    "build:release": "node scripts/build-release.mjs",
+    "build:release:tester": "node scripts/build-release.mjs --tester"
   },
   "devDependencies": {
     "prettier": "^3.4.2"

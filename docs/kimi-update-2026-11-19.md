@@ -398,3 +398,9 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - Settings → Integrations: **Redeem an invite** and **Discord notifications** cards; new Settings sections **sites**, **ui**, and the Deck switch.
 - Persona warmup **Stop** button + `stopped` state.
 - Re-verified audit (CLEAR) → two MEDIUM + several LOW fixed: presets exclude the team URL and the scripting switch; netlog strip mode is an allowlist; `/profiles/:id/cookies*` browser-denied; secret fields can't be swapped into plain ones; reset validates before deleting.
+
+### 15. R — release packaging (2026-11-20)
+
+- `scripts/build-release.mjs` (esbuild) bundles the whole API + console into one minified, identifier-mangled `dist-release/server/queuepilot.mjs`; only `better-sqlite3` and `playwright-core` stay external (native). Console `app.js` is minified (Kimi #7).
+- `--tester` excludes the local warmup planner (`plan.ts` → throwing stub) and the bundled personas, so warmups require the team server. Verified: the tester build refuses a local warmup and carries no planner/persona URLs.
+- Commands + full how-to: `docs/RELEASE.md`. Root scripts: `npm run build:release`, `npm run build:release:tester`.
