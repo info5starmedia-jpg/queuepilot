@@ -9,7 +9,9 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # The product and its packaging are Windows-only for now
+        # (fury-core engine, .cmd/.ps1 launcher/updater).
+        os: [windows-latest]
         node: [20, 22]
     runs-on: ${{ matrix.os }}
     steps:
@@ -17,6 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm ci
+      # --ignore-scripts: better-sqlite3 ships N-API prebuilds; skip npm's
+      # auto node-gyp rebuild so no C++ toolchain is required.
+      - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test

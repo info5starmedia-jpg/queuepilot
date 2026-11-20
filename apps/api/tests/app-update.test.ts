@@ -45,7 +45,7 @@ function releaseDir(): { dir: string; zip: Buffer } {
 
 describe("AppUpdateService", () => {
   it("reports a dev checkout as unavailable (git is the updater)", async () => {
-    const svc = new AppUpdateService({ consent: () => true, dataDir: os.tmpdir(), appRoot: null, fetchImpl: fetchFor({}) });
+    const svc = new AppUpdateService({ consent: () => true, dataDir: os.tmpdir(), appRoot: null, platform: "win32", fetchImpl: fetchFor({}) });
     const check = await svc.check();
     expect(check.flavor).toBe("dev");
     expect(check.status).toBe("unavailable");
@@ -56,7 +56,7 @@ describe("AppUpdateService", () => {
   it("reports current when the release is not newer", async () => {
     const { dir } = releaseDir();
     const current = { ...LATEST, version: APP_VERSION };
-    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": current }) });
+    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, platform: "win32", latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": current }) });
     const check = await svc.check();
     expect(check.status).toBe("current");
     expect(check.flavor).toBe("release");
@@ -65,7 +65,7 @@ describe("AppUpdateService", () => {
 
   it("reports available when the release is newer", async () => {
     const { dir } = releaseDir();
-    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": LATEST }) });
+    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, platform: "win32", latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": LATEST }) });
     expect((await svc.check()).status).toBe("available");
   });
 
@@ -74,7 +74,7 @@ describe("AppUpdateService", () => {
     const svc = new AppUpdateService({
       consent: () => true,
       dataDir: dir,
-      appRoot: dir,
+      appRoot: dir, platform: "win32",
       latestRef: LATEST_URL,
       fetchImpl: (async () => new Response("boom", { status: 500 })) as typeof fetch,
     });
@@ -85,12 +85,12 @@ describe("AppUpdateService", () => {
 
   it("refuses to install without consent", async () => {
     const { dir } = releaseDir();
-    const svc = new AppUpdateService({ consent: () => false, dataDir: dir, appRoot: dir, latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": LATEST }) });
+    const svc = new AppUpdateService({ consent: () => false, dataDir: dir, appRoot: dir, platform: "win32", latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": LATEST }) });
     await expect(svc.start()).rejects.toThrow(/downloads are off/);
   });
 
   it("refuses to install on a dev checkout even with consent", async () => {
-    const svc = new AppUpdateService({ consent: () => true, dataDir: os.tmpdir(), appRoot: null, fetchImpl: fetchFor({}) });
+    const svc = new AppUpdateService({ consent: () => true, dataDir: os.tmpdir(), appRoot: null, platform: "win32", fetchImpl: fetchFor({}) });
     await expect(svc.start()).rejects.toThrow(/git pull/);
   });
 
@@ -101,7 +101,7 @@ describe("AppUpdateService", () => {
     const svc = new AppUpdateService({
       consent: () => true,
       dataDir: dir,
-      appRoot: dir,
+      appRoot: dir, platform: "win32",
       latestRef: LATEST_URL,
       fetchImpl: fetchFor({ "https://example.test/latest.json": LATEST }),
       spawnImpl: (cmd: string, args: string[]) => void spawned.push({ cmd, args }),
@@ -135,7 +135,7 @@ describe("AppUpdateService", () => {
     const svc = new AppUpdateService({
       consent: () => true,
       dataDir: dir,
-      appRoot: dir,
+      appRoot: dir, platform: "win32",
       latestRef: LATEST_URL,
       fetchImpl: fetchFor({ "https://example.test/latest.json": bad }),
       spawnImpl: () => void spawned.push(1),
@@ -156,7 +156,7 @@ describe("AppUpdateService", () => {
   it("an up-to-date release reports current without downloading", async () => {
     const { dir } = releaseDir();
     const current = { ...LATEST, version: APP_VERSION };
-    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": current }) });
+    const svc = new AppUpdateService({ consent: () => true, dataDir: dir, appRoot: dir, platform: "win32", latestRef: LATEST_URL, fetchImpl: fetchFor({ "https://example.test/latest.json": current }) });
     expect(await svc.start()).toEqual({ started: false, version: APP_VERSION, status: "current" });
   });
 });

@@ -31,14 +31,20 @@ jobs:
           if ($pkg -ne $tag) { throw "tag ${{ github.ref_name }} does not match apps/api/package.json version $pkg" }
           echo "version=$pkg" >> $env:GITHUB_ENV
 
-      - run: npm ci
+      # --ignore-scripts: skip npm's auto node-gyp rebuild for better-sqlite3's
+      # binding.gyp — the package ships N-API prebuilds (prebuilds/win32-x64.node)
+      # that load on any Node ABI, so no compiler is needed.
+      - run: npm ci --ignore-scripts
+
+      - name: Verify the native binding loads
+        run: node -e "require('better-sqlite3'); console.log('better-sqlite3 prebuild OK')"
 
       - name: Build the release bundle
         run: node scripts/build-release.mjs
 
       - name: Vendor externals into the package
         working-directory: dist-release
-        run: npm ci --omit=dev --no-audit --no-fund
+        run: npm ci --omit=dev --no-audit --no-fund --ignore-scripts
 
       - name: Zip the family package
         shell: pwsh
