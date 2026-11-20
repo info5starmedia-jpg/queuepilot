@@ -47,9 +47,11 @@ export function resolveContainedPath(rawPath: string, roots: string[]): string {
     }
   }
 
-  // Containment against realpath'd roots (falls back to the lexical path
-  // when the root itself does not exist yet).
-  const realTarget = safeRealpath(resolved);
+  // Containment against realpath'd roots. The target itself may not exist
+  // yet (a download tail): realpath the deepest EXISTING ancestor and append
+  // the missing remainder, so Windows 8.3 short names (C:\Users\RUNNER~1)
+  // in the lexical path cannot diverge from the long form of the root.
+  const realTarget = realpathDeepest(resolved);
   for (const allowed of roots) {
     const realRoot = safeRealpath(path.resolve(allowed));
     const rel = path.relative(realRoot, realTarget);
@@ -68,5 +70,25 @@ function safeRealpath(p: string): string {
     return fs.realpathSync.native(p);
   } catch {
     return p;
+  }
+}
+
+/** Realpath the deepest existing ancestor of `p`, then re-append the tail. */
+function realpathDeepest(p: string): string {
+  const root = path.parse(p).root;
+  const segments: string[] = [];
+  let probe = p;
+  for (;;) {
+    try {
+      const real = fs.realpathSync.native(probe);
+      return segments.length ? path.join(real, ...segments.reverse()) : real;
+    } catch {
+      const parent = path.dirname(probe);
+      if (parent === probe || parent === root || probe === root) {
+        return p; // nothing exists — give up and use the lexical form
+      }
+      segments.push(path.basename(probe));
+      probe = parent;
+    }
   }
 }

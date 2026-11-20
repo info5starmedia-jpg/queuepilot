@@ -12,7 +12,7 @@ jobs:
         # The product and its packaging are Windows-only for now
         # (fury-core engine, .cmd/.ps1 launcher/updater).
         os: [windows-latest]
-        node: [20, 22]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
