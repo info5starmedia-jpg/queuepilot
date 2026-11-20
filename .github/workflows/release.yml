@@ -42,9 +42,11 @@ jobs:
       - name: Build the release bundle
         run: node scripts/build-release.mjs
 
+      # npm install (not ci): dist-release has a package.json but no lockfile —
+      # the release manifest is generated at build time.
       - name: Vendor externals into the package
         working-directory: dist-release
-        run: npm ci --omit=dev --no-audit --no-fund --ignore-scripts
+        run: npm install --omit=dev --no-audit --no-fund --ignore-scripts
 
       - name: Zip the family package
         shell: pwsh

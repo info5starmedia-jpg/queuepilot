@@ -1,13 +1,13 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 rem ============================================================================
-rem  QueuePilot — the family launcher (zero prerequisites).
+rem  QueuePilot - the family launcher (zero prerequisites).
 rem
 rem  Double-click to run. Needs NO admin rights and NO installed Node:
 rem    1. node on PATH? use it.
 rem    2. portable runtime already fetched into .runtime\node? use it.
 rem    3. otherwise download the official Node zip once (~28 MB) into
-rem       .runtime\node and use that — nothing is installed system-wide.
+rem       .runtime\node and use that - nothing is installed system-wide.
 rem
 rem  Then: API already healthy -> open dashboard; else boot it minimized,
 rem  wait for /health, open the dashboard. Log: .runtime\launcher.log and
