@@ -1627,7 +1627,14 @@ async function refreshCookiesProfiles() {
   sel.innerHTML =
     `<option value="">(${running.length} running — pick one)</option>` +
     running.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
-  if (running.some((p) => p.id === current)) sel.value = current;
+  if (running.some((p) => p.id === current)) {
+    sel.value = current;
+  } else if (running.length === 1) {
+    // Exactly one engine running: making the operator pick it is noise —
+    // preselect it and load the jar right away.
+    sel.value = running[0].id;
+    await loadCookieJar();
+  }
 }
 
 function cookieStatus(msg, isErr = false) {
@@ -3266,12 +3273,16 @@ async function loadTabView() {
     );
     rows = applyUiExpressions(rows);
     const tbody = $("#tabview-table tbody");
+    // The 5s auto-refresh re-renders the table — carry the operator's
+    // selection across it, or Log note / Clear codes / Export silently
+    // target nothing (found live 2026-11-20).
+    const keepSelected = new Set(tabViewSelected());
     tbody.innerHTML = rows
       .map((r) => {
         const d = r.state?.data ?? {};
         const colour = r.state?.colour ? ` style="border-left:4px solid ${esc(r.state.colour)}"` : "";
         return `<tr${colour}>
-          <td><input type="checkbox" data-profile="${esc(r.profileId)}" /></td>
+          <td><input type="checkbox" data-profile="${esc(r.profileId)}"${keepSelected.has(r.profileId) ? " checked" : ""} /></td>
           <td>${esc(r.uiLabel ?? r.label)}${r.state?.subtitle ? `<div class="mono" style="color:var(--muted)">${esc(r.state.subtitle)}</div>` : ""}</td>
           <td>${esc(d.stage ?? "—")}</td><td>${esc(d.queuePosition ?? "—")}</td><td>${esc(d.cartTimer ?? "—")}</td>
           <td>${esc(r.state?.priority ?? "—")}</td><td>${esc(r.state?.notes ?? "")}</td>
