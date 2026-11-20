@@ -87,7 +87,7 @@ describe("engine liveness watchdog", () => {
     let calls = 0;
     const ctx = makeCtx(async () => {
       calls++;
-      return calls < 2; // exactly one failure, then healthy again
+      return calls !== 2; // exactly ONE failure (call 2), healthy before and after
     }, 3);
     const events = collect(ctx.lifecycle);
     const p = ctx.profiles.create({ name: "below-threshold", generateFingerprint: true });

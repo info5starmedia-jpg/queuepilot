@@ -24,8 +24,9 @@ describe("BrowserLifecycleService", () => {
     const p = profiles.create({ name: "host-fit", generateFingerprint: true });
     const host = hostPrimaryDisplay();
     if (!host) return; // headless CI — nothing to be coherent with
-    // Vacuous on a host whose display IS 1024x768 — no machine in the fleet.
-    expect(host).not.toEqual({ width: 1024, height: 768 });
+    // Vacuous on a host whose display IS 1024x768 — GitHub runners use
+    // exactly that as their headless default, so skip there too.
+    if (host.width === 1024 && host.height === 768) return;
     const before = db
       .prepare("SELECT identity_id AS id FROM profiles WHERE id = ?")
       .get(p.id) as { id: string };
