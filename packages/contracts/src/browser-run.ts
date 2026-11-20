@@ -39,6 +39,10 @@ export const LifecycleEventSchema = z.object({
     "run.started",
     "run.stopped",
     "run.crashed",
+    /** Engine alive but uncommandable (DevTools server wedged); run.degraded latched. */
+    "run.degraded",
+    /** A degraded engine answered a probe again — flag cleared. */
+    "run.healthy",
     "profile.updated",
     "tab.opened",
     "tab.closed",

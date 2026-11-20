@@ -128,6 +128,20 @@ export class BrowserLifecycleService {
   /** Adopted-run watcher (D-002 follow-up); null when nothing is adopted. */
   private adoptedWatcher: ReturnType<typeof setInterval> | null = null;
   private adoptedWatchIntervalMs = 15_000;
+  /**
+   * Engine liveness watchdog: a fury-core engine can outlive its own DevTools
+   * server (found live 2026-11-20 — TCP accepts but answers nothing after a
+   * Target.closeTarget; process idle, run row "running" forever). One global
+   * unref'd timer probes every session's debug port; N consecutive failures
+   * latch the run DEGRADED (run.degraded event + isDegraded flag) until a
+   * probe succeeds or the run ends. Never auto-restarts: the browser window
+   * may still be in use even when uncommandable.
+   */
+  private livenessTimer: ReturnType<typeof setInterval> | null = null;
+  /** profileId -> consecutive failed probes. */
+  private readonly livenessFailures = new Map<string, number>();
+  /** runIds currently latched degraded. */
+  private readonly degradedRuns = new Set<string>();
   private readonly mutex = new ProfileOperationMutex();
   private readonly tabRegistry = new TabRegistry();
   /**
@@ -196,6 +210,18 @@ export class BrowserLifecycleService {
      * injectable so tests are machine-independent.
      */
     private readonly hostTimezone: () => string | null = systemHostTimezone,
+    /**
+     * Engine liveness watchdog tuning (probe is injectable so tests stay
+     * offline). Defaults: 20s interval, 3 consecutive failures to latch
+     * (≈60s of silence), 4s per-probe timeout, real HTTP probe of the debug
+     * port's /json/version.
+     */
+    private readonly liveness?: {
+      intervalMs?: number;
+      threshold?: number;
+      probeTimeoutMs?: number;
+      probe?: (port: number, timeoutMs: number) => Promise<boolean>;
+    },
   ) {
     this.events.setMaxListeners(0);
   }
@@ -494,6 +520,7 @@ export class BrowserLifecycleService {
       this.runs.update(live);
       this.sessions.set(profileId, session);
       this.startLeaseRenewal(profileId);
+      this.ensureLivenessTimer();
       // Identity of record: snapshot exactly what the engine launched with.
       // Later edits to the profile drift against this and apply at next start.
       this.snapshots?.capture({
@@ -529,6 +556,7 @@ export class BrowserLifecycleService {
       const session = this.sessions.get(profileId);
       this.sessions.delete(profileId);
       this.stopLeaseRenewal(profileId);
+      this.clearLivenessState(profileId, run.id);
       // Mark the row stopped BEFORE stopping the engine: session.stop()
       // resolves the exit promise, and the exit handler consults this row to
       // decide whether the exit was already accounted for. Writing first is
@@ -746,6 +774,84 @@ export class BrowserLifecycleService {
     const timer = this.leaseRenewers.get(profileId);
     if (timer) clearInterval(timer);
     this.leaseRenewers.delete(profileId);
+  }
+
+  /** A run is DEGRADED when its engine process is alive but uncommandable. */
+  isDegraded(profileId: string): boolean {
+    const run = this.runs.occupyingForProfile(profileId);
+    return !!run && this.degradedRuns.has(run.id);
+  }
+
+  private ensureLivenessTimer(): void {
+    if (this.livenessTimer) return;
+    const intervalMs = this.liveness?.intervalMs ?? 20_000;
+    this.livenessTimer = setInterval(() => void this.livenessTick(), intervalMs);
+    this.livenessTimer.unref?.();
+  }
+
+  private clearLivenessState(profileId: string, runId: string): void {
+    this.livenessFailures.delete(profileId);
+    this.degradedRuns.delete(runId);
+    if (this.sessions.size === 0 && this.livenessTimer) {
+      clearInterval(this.livenessTimer);
+      this.livenessTimer = null;
+      this.livenessFailures.clear();
+    }
+  }
+
+  private async livenessTick(): Promise<void> {
+    if (this.sessions.size === 0) {
+      if (this.livenessTimer) {
+        clearInterval(this.livenessTimer);
+        this.livenessTimer = null;
+        this.livenessFailures.clear();
+      }
+      return;
+    }
+    const threshold = this.liveness?.threshold ?? 3;
+    for (const profileId of [...this.sessions.keys()]) {
+      const run = this.runs.occupyingForProfile(profileId);
+      if (!run?.debugPort) continue;
+      const ok = await this.probeEngine(run.debugPort).catch(() => false);
+      if (ok) {
+        const wasDegraded = this.degradedRuns.has(run.id);
+        this.livenessFailures.delete(profileId);
+        if (wasDegraded) {
+          this.degradedRuns.delete(run.id);
+          this.emit({
+            type: "run.healthy",
+            profileId,
+            runId: run.id,
+            at: now(),
+            detail: "engine responsive again; degraded flag cleared",
+          });
+        }
+        continue;
+      }
+      const n = (this.livenessFailures.get(profileId) ?? 0) + 1;
+      this.livenessFailures.set(profileId, n);
+      if (n >= threshold && !this.degradedRuns.has(run.id)) {
+        this.degradedRuns.add(run.id);
+        this.emit({
+          type: "run.degraded",
+          profileId,
+          runId: run.id,
+          at: now(),
+          detail:
+            `engine unresponsive on 127.0.0.1:${run.debugPort} for ${n} consecutive probes ` +
+            "(alive but uncommandable; stop and restart the profile)",
+        });
+      }
+    }
+  }
+
+  private async probeEngine(port: number): Promise<boolean> {
+    const timeoutMs = this.liveness?.probeTimeoutMs ?? 4_000;
+    if (this.liveness?.probe) return this.liveness.probe(port, timeoutMs);
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok;
   }
 
   /**
@@ -1379,6 +1485,7 @@ export class BrowserLifecycleService {
       return;
     this.sessions.delete(profileId);
     this.stopLeaseRenewal(profileId);
+    this.clearLivenessState(profileId, runId);
     this.clearAutoReloadsForRun(runId);
     this.tabRegistry.clearRun(runId); // tabs die with the engine
     const clean = code === 0;

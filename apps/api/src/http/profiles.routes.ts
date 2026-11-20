@@ -42,7 +42,10 @@ export function registerProfileRoutes(
   app: FastifyInstance,
   service: ProfileService,
   proxies: ProxyService,
-  lifecycle?: { ensureIdle(profileId: string): Promise<void> },
+  lifecycle?: {
+    ensureIdle(profileId: string): Promise<void>;
+    isDegraded?(profileId: string): boolean;
+  },
   totp?: TotpService,
   proxyProviders?: ProxyProviderService,
 ): void {
@@ -75,6 +78,15 @@ export function registerProfileRoutes(
     // Jancy favorite filter — reads the persona bag (extra.favorite).
     if (q.favorite === "true") {
       profiles = profiles.filter((p) => personaFieldsOf(p.extra).favorite);
+    }
+    // Engine-liveness watchdog: a "running" profile whose engine wedged
+    // (alive but uncommandable) carries degraded:true so the console can
+    // badge it instead of showing a healthy green dot.
+    const isDegraded = lifecycle?.isDegraded?.bind(lifecycle);
+    if (isDegraded) {
+      profiles = profiles.map((p) =>
+        p.status === "running" && isDegraded(p.id) ? { ...p, degraded: true } : p,
+      );
     }
     return { profiles };
   });
