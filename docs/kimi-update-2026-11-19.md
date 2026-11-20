@@ -431,3 +431,10 @@ Closed the remaining console UI gaps. **Frontend only** (`apps/api/src/dashboard
 - Two items the old roadmap listed as leftovers are **already built — do not rebuild**: the **format/sort rule editor** (Settings → `ui`: `tabLabelFormat`, `tabSort`, applied in the console page) and **key binds** (command palette, Ctrl+Shift+Space → Shift+Enter, stored in `ui.keybinds`). Roadmap updated to say so.
 
 `jancy-j1` **pushed to the remote at the owner's request** (2026-11-20).
+
+**Merge / how to land this (for Kimi or the owner):**
+- `jancy-j1` is on `origin`, **50 commits ahead of `origin/main`** — it carries the whole Jancy workstream (J1 slices A–C, W1, LIC, W2, J3a, J6 + Discord, DECK, J3b, J4, J5, M5, R, and this console pass), not just §16.
+- `jancy-wiki-audit` is **NOT** on `origin`; `jancy-j1` already contains its docs, so merging `jancy-j1` brings them along. Open the PR against **`main`**.
+- One-click PR link GitHub printed on push: `https://github.com/info5starmedia-jpg/queuepilot/pull/new/jancy-j1`
+- The `gh` CLI is **not authenticated** in the Claude Code environment, so the PR was **not** opened from here — use the web link above, or `gh auth login` first. `main` is still untouched; nothing was merged.
+- Before merging, the owner's standing gate applies: nothing on `jancy-j1` has been run through the live app on :50325, and the queue readers (J6) have never seen a real queue.
