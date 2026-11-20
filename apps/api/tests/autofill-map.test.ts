@@ -104,7 +104,7 @@ describe("page script", () => {
   it("is syntactically valid JS and carries values only as inlined JSON", () => {
     const expr = buildMapFillExpression({
       rules: [{ kind: "attr", attr: "name", pattern: "e", field: "email", line: 1 }],
-      values: { email: "a@b.c" }, human: [], machine: [], defaultMode: "machine", fillPopulated: false, stripCommas: false, traverseShadow: true, wpm: 60,
+      values: { email: "a@b.c" }, href: "https://x.example/", human: [], machine: [], defaultMode: "machine", fillPopulated: false, stripCommas: false, traverseShadow: true, wpm: 60,
     });
     expect(() => new Function(`return ${expr}`)).not.toThrow();
   });
@@ -119,9 +119,10 @@ describe("AutofillMapService", () => {
       dataDir: dir,
       profiles: { get: () => ({ id: "p", name: "Ada Lovelace", email: "ada@example.com", extra: { address: { line1: "1 Main", city: "Austin", state: "TX", zip: "73301" } } }) } as never,
       pages: {
-        evaluate: async (_id: string, expr: string) => {
+        evaluate: async () => "https://shop.example.com/checkout",
+        evaluateIsolated: async (_id: string, expr: string) => {
           calls.push(expr);
-          return expr === "location.href" ? "https://shop.example.com/checkout" : { filled: ["email"], missing: [], clicked: 0, errors: [] };
+          return { filled: ["email"], missing: [], clicked: 0, errors: [] };
         },
       },
       tabState: { get: () => ({ codes: { emailCode: null, smsCode: null, otherCode: null } }) as never, takePasscode: () => passcodes.shift() ?? null },
@@ -143,12 +144,48 @@ describe("AutofillMapService", () => {
     fs.writeFileSync(path.join(dir, "autofill.map"), "url=https://*.example.com/*\nname=email; email");
     fs.utimesSync(path.join(dir, "autofill.map"), new Date(), new Date(Date.now() + 5000));
     await svc.fill("p");
-    expect(calls.at(-1)).not.toContain("passcode");
+    expect(calls.at(-1)).not.toContain('"passcode":');
   });
 
   it("broadcast isolates failures", async () => {
     const { svc } = setup();
     const res = await svc.broadcast(["a", "b"]);
     expect(res.every((x) => x.ok)).toBe(true);
+  });
+});
+
+describe("J4 audit regressions", () => {
+  const map = parseMap("url=https://shop.example.com/*\nname=cc; ccNumber\nname=pw; passcode\nname=e; email\nurl=any\nname=cvv; ccCVV");
+
+  it("secret fields are only filled where a block matched; the built-in any block has no card rules", () => {
+    expect(BUILTIN_ANY.some((r) => /^cc/.test(r.field ?? ""))).toBe(false);
+    const hit = resolveBlocks(map, "https://shop.example.com/x", BUILTIN_ANY);
+    expect(hit.rules.some((r) => r.field === "ccNumber")).toBe(true);
+    const miss = resolveBlocks(map, "https://evil.example.net/x", BUILTIN_ANY);
+    expect(miss.rules.some((r) => r.field === "ccCVV" || r.field === "ccNumber")).toBe(false); // file `any` secrets dropped too
+    expect(miss.rules.some((r) => r.field === "email")).toBe(true);
+  });
+
+  it("host wildcards cannot span userinfo, query or fragment; the page URL is re-checked in the fill", () => {
+    expect(globMatches("https://*.shop.com/*", "https://evil.com@a.shop.com/x")).toBe(false); // userinfo never matches a host wildcard
+    expect(globMatches("https://*.shop.com/*", "https://evil.com?x=.shop.com/x")).toBe(false);
+    expect(globMatches("https://*.shop.com/*", "https://evil.com#.shop.com/x")).toBe(false);
+    const expr = buildMapFillExpression({ rules: [], values: {}, href: "https://a.example/", human: [], machine: [], defaultMode: "machine", fillPopulated: false, stripCommas: false, traverseShadow: false, wpm: 60 });
+    expect(expr).toContain("location.href !== cfg.href");
+  });
+
+  it("only the fields a matched rule needs are sent into the page", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afmap-"));
+    let sent = "";
+    const svc = new AutofillMapService({
+      dataDir: dir,
+      profiles: { get: () => ({ id: "p", name: "Ada Lovelace", email: "ada@example.com", extra: { dob: "1990-02-03" } }) } as never,
+      pages: { evaluate: async () => "https://a.example/", evaluateIsolated: async (_i: string, e: string) => ((sent = e), {}) },
+      tabState: { get: () => ({ codes: { emailCode: null, smsCode: null, otherCode: null } }) as never, takePasscode: () => null },
+    });
+    svc.save("url=https://a.example/*\nname=e; email");
+    await svc.fill("p");
+    expect(sent).toContain("ada@example.com");
+    expect(sent).not.toContain("1990"); // dob: no rule asks for it
   });
 });

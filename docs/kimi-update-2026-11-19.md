@@ -381,3 +381,14 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - **J5:** `cookie-thinger.txt` with 10 groups, del/delall/copy/copyall/dcopy/paste, lists 1–5 (memory) and $1–$5 (secret store), cookies-for-profiles CSV. Live-checked on a real profile.
 - Both are browser-origin denied; responses name fields/counts, never values.
 - Not done: console screens for either file; the grammar for J5 is QueuePilot's own (Owner question 1).
+
+### 13. Audit of DECK / J3b / J4 / J5, then M5 (2026-11-20)
+
+**Audit (security-auditor): BLOCK → fixed.**
+- **HIGH** map fills ran in the page's *main* world, so a hostile page could swap `Function`/`String` and read every value. Now an isolated CDP world; only the fields a matched rule needs are sent in.
+- **HIGH** the glob was checked once, then the fill ran up to 2 minutes later; the built-in `any` block filled card fields on any URL. Now the fill aborts if `location.href` changes, card/code/passcode fields fill only where a block matched (and only visible inputs), and the built-in `any` block has no card rules.
+- **HIGH** the new tab-command routes were not browser-denied; the whole `/profiles/:id/tabs`, `/tabs`, `log-note` and `/profiles/:id/autofill` families now are (this also closes the older autofill/card route).
+- **MEDIUM** change-url / reopen only accept http(s); host wildcards can't cross `@ ? #`; glob length/star caps (no pathological backtracking).
+- **LOW** deck labels escaped and capped.
+
+**M5 built:** command registry + palette + key binds, tab-label format and custom sort (console-side), preference sets, tab strings, network logger, soft reset. See roadmap J7/J8 for what is not done and the new owner questions.

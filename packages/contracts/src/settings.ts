@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   "integrations",
   "automation",
   "sites",
+  "ui",
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -141,6 +142,21 @@ export const SitesSettingsSchema = z.object({
 });
 export type SitesSettings = z.infer<typeof SitesSettingsSchema>;
 
+/**
+ * J7 — console-side expressions and key binds. The two JS bodies are the
+ * operator's own code, run in the console page against a frozen tab context
+ * (`ctx`), never in the API.
+ */
+export const UiSettingsSchema = z.object({
+  /** Tab label: a JS function body over `ctx` returning a string; null = `email · #position`. */
+  tabLabelFormat: z.string().max(2000).nullable().default(null),
+  /** Tab View order: a JS function body over `a`, `b` (tab contexts) returning a number; null = priority then name. */
+  tabSort: z.string().max(2000).nullable().default(null),
+  /** Command id → key combo, e.g. { "tabs.clear-codes": "ctrl+shift+c" }. */
+  keybinds: z.record(z.string().max(60), z.string().max(40)).refine((k) => Object.keys(k).length <= 100, "at most 100 key binds").default({}),
+});
+export type UiSettings = z.infer<typeof UiSettingsSchema>;
+
 export const SettingsSchema = z.object({
   general: GeneralSettingsSchema.default({}),
   engine: EngineSettingsSchema.default({}),
@@ -149,6 +165,7 @@ export const SettingsSchema = z.object({
   integrations: IntegrationsSettingsSchema.default({}),
   automation: AutomationSettingsSchema.default({}),
   sites: SitesSettingsSchema.default({}),
+  ui: UiSettingsSchema.default({}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -161,4 +178,5 @@ export const SettingsPatchSchemas = {
   integrations: IntegrationsSettingsSchema.partial(),
   automation: AutomationSettingsSchema.partial(),
   sites: SitesSettingsSchema.partial(),
+  ui: UiSettingsSchema.partial(),
 } as const;

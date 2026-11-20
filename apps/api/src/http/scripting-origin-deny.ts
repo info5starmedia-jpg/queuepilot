@@ -46,6 +46,15 @@ const SENSITIVE_PATTERNS = [
   /^\/tools(\/|$)/,
   // ADR-0008: the Deck re-parents real windows.
   /^\/deck(\/|$)/,
+  // Audit: tab commands, tab export, notes, and every autofill route (card numbers).
+  /^\/profiles\/[^/]+\/tabs(\/|$)/,
+  /^\/tabs(\/|$)/,
+  /^\/profiles\/[^/]+\/log-note$/,
+  /^\/profiles\/[^/]+\/autofill(\/|$)/,
+  // J7/J8: commands, preference sets, tab strings, network logs.
+  /^\/commands(\/|$)/,
+  /^\/presets(\/|$)/,
+  /^\/profiles\/[^/]+\/(tab-string|netlog)(\/|$)/,
   // J5: cookie lists hold session cookies.
   /^\/cookie-thinger(\/|$)/,
   /^\/profiles\/[^/]+\/cookie-thinger(\/|$)/,

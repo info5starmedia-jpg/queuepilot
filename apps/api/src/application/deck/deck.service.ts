@@ -137,7 +137,9 @@ export class DeckService {
   }
 
   private labelOf(id: string): string {
-    return this.deps.labels().find((l) => l.profileId === id)?.label ?? id.slice(0, 8);
+    const raw = this.deps.labels().find((l) => l.profileId === id)?.label ?? id.slice(0, 8);
+    // Page-derived text: WinForms treats & as a mnemonic and a long label widens the strip.
+    return raw.replace(/&/g, "&&").slice(0, 60);
   }
 
   private requireSupported(): void {

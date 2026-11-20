@@ -2152,9 +2152,10 @@ async function loadTabView() {
   try {
     const data = await api(`/tab-view${$("#tabview-all").checked ? "?all=1" : ""}`);
     const q = $("#tabview-filter").value.trim().toLowerCase();
-    const rows = (data.rows ?? data.tabs ?? data).filter((r) =>
+    let rows = (data.rows ?? data.tabs ?? data).filter((r) =>
       !q || `${r.profileName} ${r.email ?? ""} ${r.state?.notes ?? ""}`.toLowerCase().includes(q),
     );
+    rows = applyUiExpressions(rows);
     const tbody = $("#tabview-table tbody");
     tbody.innerHTML = rows
       .map((r) => {
@@ -2162,7 +2163,7 @@ async function loadTabView() {
         const colour = r.state?.colour ? ` style="border-left:4px solid ${esc(r.state.colour)}"` : "";
         return `<tr${colour}>
           <td><input type="checkbox" data-profile="${esc(r.profileId)}" /></td>
-          <td>${esc(r.label)}${r.state?.subtitle ? `<div class="mono" style="color:var(--muted)">${esc(r.state.subtitle)}</div>` : ""}</td>
+          <td>${esc(r.uiLabel ?? r.label)}${r.state?.subtitle ? `<div class="mono" style="color:var(--muted)">${esc(r.state.subtitle)}</div>` : ""}</td>
           <td>${esc(d.stage ?? "—")}</td><td>${esc(d.queuePosition ?? "—")}</td><td>${esc(d.cartTimer ?? "—")}</td>
           <td>${esc(r.state?.priority ?? "—")}</td><td>${esc(r.state?.notes ?? "")}</td>
           <td>${(r.state?.passcodes ?? []).filter((p) => !p.used).length}/${(r.state?.passcodes ?? []).length}</td></tr>`;
@@ -2195,4 +2196,112 @@ $("#tabview-export").addEventListener("click", async () => {
   const url = URL.createObjectURL(await res.blob());
   Object.assign(document.createElement("a"), { href: url, download: "open-tabs.csv" }).click();
   URL.revokeObjectURL(url);
+});
+
+/* ============== J7: format string, custom sort, command palette, key binds ============== */
+
+let uiSettings = { tabLabelFormat: null, tabSort: null, keybinds: {} };
+let uiWarned = false;
+async function loadUiSettings() {
+  try { uiSettings = await api("/settings/sections/ui"); } catch { /* defaults */ }
+}
+loadUiSettings();
+
+/* The operator's own JS, run here in the console page against a frozen copy of the tab (never in the API). */
+function tabCtx(r) {
+  const s = r.state ?? {};
+  return Object.freeze({
+    profileName: r.profileName, email: r.email, label: r.label,
+    tab: Object.freeze({ data: Object.freeze({ ...(s.data ?? {}) }), notes: s.notes ?? "", priority: s.priority, priorityGroup: s.priorityGroup, colour: s.colour, passcodes: Object.freeze((s.passcodes ?? []).map((p) => ({ ...p }))) }),
+    emailCode: s.codes?.emailCode ?? null, smsCode: s.codes?.smsCode ?? null, otherCode: s.codes?.otherCode ?? null,
+  });
+}
+function applyUiExpressions(rows) {
+  const warn = (what, e) => { if (!uiWarned) { uiWarned = true; toast(`${what} failed: ${e.message}`, "error"); } };
+  let out = rows.map((r) => ({ ...r }));
+  if (uiSettings.tabLabelFormat) {
+    try {
+      const f = new Function("ctx", uiSettings.tabLabelFormat);
+      for (const r of out) { try { r.uiLabel = String(f(tabCtx(r))); } catch (e) { warn("tab label format", e); } }
+    } catch (e) { warn("tab label format", e); }
+  }
+  if (uiSettings.tabSort) {
+    try {
+      const f = new Function("a", "b", uiSettings.tabSort);
+      out = out.sort((x, y) => Number(f(tabCtx(x), tabCtx(y))) || 0);
+    } catch (e) { warn("tab sort", e); }
+  }
+  return out;
+}
+
+const currentSelection = () => (activeView === "tabview" ? tabViewSelected() : [...batchSelection]);
+let commandCatalogue = null;
+
+async function runCommand(cmd) {
+  const ids = currentSelection();
+  if (!ids.length) return toast("select profiles first", "error");
+  const args = {};
+  for (const a of cmd.args) {
+    const v = window.prompt(`${cmd.title}: ${a.name}${a.optional ? " (optional)" : ""}`, "");
+    if (v === null) return;
+    if (v !== "") args[a.name] = a.type === "number" ? Number(v) : v;
+  }
+  try {
+    const { results } = await api("/commands/run", { method: "POST", body: JSON.stringify({ command: cmd.id, profileIds: ids, args }) });
+    const bad = results.filter((r) => !r.ok);
+    toast(`${cmd.title}: ${results.length - bad.length} ok${bad.length ? `, ${bad.length} failed (${bad[0].error})` : ""}`, bad.length ? "error" : "info");
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function openPalette() {
+  if (document.getElementById("palette")) return;
+  commandCatalogue ??= (await api("/commands")).commands;
+  const box = document.createElement("div");
+  box.id = "palette";
+  box.style.cssText = "position:fixed;inset:0;background:#0009;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh;z-index:50";
+  box.innerHTML = `<div style="background:var(--panel);border:1px solid var(--panel-3);border-radius:8px;width:min(560px,92vw);padding:10px">
+    <input id="palette-q" placeholder="command…  (Enter runs on the selection · Shift+Enter binds a key)" style="width:100%" autocomplete="off" />
+    <div id="palette-list" style="margin-top:8px;max-height:50vh;overflow:auto"></div></div>`;
+  document.body.appendChild(box);
+  const q = $("#palette-q"), list = $("#palette-list");
+  let shown = [], idx = 0;
+  const draw = () => {
+    const t = q.value.toLowerCase();
+    shown = commandCatalogue.filter((c) => !t || `${c.id} ${c.title}`.toLowerCase().includes(t));
+    idx = Math.min(idx, Math.max(0, shown.length - 1));
+    list.innerHTML = shown.map((c, i) => `<div data-i="${i}" style="padding:6px 8px;border-radius:4px;cursor:pointer;${i === idx ? "background:var(--panel-3)" : ""}">${esc(c.title)} <span class="mono" style="color:var(--muted)">${esc(c.id)}${uiSettings.keybinds[c.id] ? ` · ${esc(uiSettings.keybinds[c.id])}` : ""}</span></div>`).join("");
+  };
+  const close = () => box.remove();
+  box.addEventListener("click", (e) => { if (e.target === box) close(); const d = e.target.closest("[data-i]"); if (d) { close(); runCommand(shown[Number(d.dataset.i)]); } });
+  q.addEventListener("input", () => { idx = 0; draw(); });
+  q.addEventListener("keydown", async (e) => {
+    if (e.key === "Escape") return close();
+    if (e.key === "ArrowDown") { idx = Math.min(idx + 1, shown.length - 1); e.preventDefault(); draw(); }
+    if (e.key === "ArrowUp") { idx = Math.max(idx - 1, 0); e.preventDefault(); draw(); }
+    if (e.key === "Enter" && shown[idx]) {
+      const c = shown[idx];
+      if (e.shiftKey) {
+        const combo = window.prompt(`Key combo for "${c.title}" (e.g. ctrl+shift+c; empty clears)`, uiSettings.keybinds[c.id] ?? "");
+        if (combo === null) return;
+        const keybinds = { ...uiSettings.keybinds };
+        if (combo.trim()) keybinds[c.id] = combo.trim().toLowerCase(); else delete keybinds[c.id];
+        try { uiSettings = await api("/settings/sections/ui", { method: "PATCH", body: JSON.stringify({ keybinds }) }); draw(); } catch (err) { toast(err.message, "error"); }
+      } else { close(); runCommand(c); }
+    }
+  });
+  draw();
+  q.focus();
+}
+
+const comboOf = (e) => [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "meta", e.key === " " ? "space" : e.key.toLowerCase()].filter(Boolean).join("+");
+window.addEventListener("keydown", async (e) => {
+  const combo = comboOf(e);
+  if (combo === "ctrl+shift+space") { e.preventDefault(); return openPalette(); }
+  if (!combo.includes("+") || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target?.tagName)) return;
+  const id = Object.keys(uiSettings.keybinds).find((k) => uiSettings.keybinds[k] === combo);
+  if (!id) return;
+  e.preventDefault();
+  commandCatalogue ??= (await api("/commands")).commands;
+  const cmd = commandCatalogue.find((c) => c.id === id);
+  if (cmd) runCommand(cmd);
 });

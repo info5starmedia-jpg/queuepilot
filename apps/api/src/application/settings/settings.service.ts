@@ -66,6 +66,7 @@ export class SettingsService {
       integrations: this.merged("integrations"),
       automation: this.merged("automation"),
       sites: this.merged("sites"),
+      ui: this.merged("ui"),
     };
   }
 
@@ -74,6 +75,16 @@ export class SettingsService {
   get(section: string): Settings[SettingsSection] {
     assertSection(section);
     return this.merged(section);
+  }
+
+  /** Soft reset: forget the stored values of these sections (all when omitted) so defaults apply. */
+  reset(sections?: string[]): Settings {
+    const list = sections ?? [...SETTINGS_SECTIONS];
+    for (const s of list) {
+      assertSection(s);
+      this.db.prepare("DELETE FROM settings WHERE section = ?").run(s);
+    }
+    return this.getAll();
   }
 
   patch<S extends SettingsSection>(section: S, partial: unknown): Settings[S];

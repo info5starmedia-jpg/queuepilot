@@ -45,6 +45,8 @@ export interface MapFillResult {
 
 export interface MapEvaluator {
   evaluate(profileId: string, expression: string, targetId?: string, timeoutMs?: number): Promise<unknown>;
+  /** The fill itself runs here: an isolated world, not the page's own. */
+  evaluateIsolated(profileId: string, expression: string, targetId?: string, timeoutMs?: number): Promise<unknown>;
 }
 
 export class AutofillMapService {
@@ -126,7 +128,10 @@ export class AutofillMapService {
       const [mm, yy] = (c.expDate ?? "").split("/");
       source.card = { number: c.number, cvv: c.cvv, expMonth: mm ?? null, expYear: yy ?? null, note: c.note };
     }
-    const values = fieldValues(source, map.swaps);
+    const all = fieldValues(source, map.swaps);
+    // Only the fields a matched rule (or a format function mentioning it) needs travel into the page.
+    const needed = (k: string) => block.rules.some((r) => r.field === k || (r.format ?? "").includes(k));
+    const values = Object.fromEntries(Object.entries(all).filter(([k]) => needed(k)));
     // The passcode is consumed (marked used) only when a rule asks for it.
     if (block.rules.some((r) => r.field === "passcode")) {
       const code = this.deps.tabState.takePasscode(profileId);
@@ -136,6 +141,7 @@ export class AutofillMapService {
     const expression = buildMapFillExpression({
       rules: block.rules,
       values,
+      href: url,
       human: [...block.human],
       machine: [...block.machine],
       defaultMode: opts.defaultMode ?? "machine",
@@ -144,7 +150,7 @@ export class AutofillMapService {
       traverseShadow: block.traverseShadow,
       wpm: opts.wpm ?? 60,
     });
-    const raw = (await this.deps.pages.evaluate(profileId, expression, opts.targetId, 120_000)) as Partial<MapFillResult> | null;
+    const raw = (await this.deps.pages.evaluateIsolated(profileId, expression, opts.targetId, 120_000)) as Partial<MapFillResult> | null;
     return {
       profileId,
       blocks: block.blocks,

@@ -66,6 +66,10 @@ export function parseThinger(text: string): ThingerFile {
       return;
     }
     const w = t.split(/\s+/);
+    if ((t.match(/\*/g) ?? []).length > 6) {
+      out.errors.push({ line, message: "too many * in one line (max 6)" });
+      return;
+    }
     const a = actionOf(w);
     if (typeof a === "string") out.errors.push({ line, message: a });
     else if (group === null) out.errors.push({ line, message: "action before any [group N]" });
@@ -250,7 +254,8 @@ export class CookieThinger {
 
 /** `*` glob, case-insensitive, whole string (leading dots ignored on both sides). */
 export function globRe(pattern: string): RegExp {
-  const p = pattern.replace(/^\./, "");
+  // (cookie names/domains come from pages: the patterns are bounded by the 6-star line cap above)
+  const p = pattern.replace(/^\./, "").replace(/\*{2,}/g, "*");
   const esc = (s: string) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   // "*.shop.com" means the domain and its subdomains, so bare "shop.com" matches too.
   if (p.startsWith("*.")) return new RegExp(`^(.*\\.)?${p.slice(2).split("*").map(esc).join(".*")}$`, "i");

@@ -42,6 +42,16 @@ describe("J3b tab commands", () => {
     ]);
   });
 
+  it("only http(s) pages can be navigated to; the browser-origin deny list covers the tab commands", async () => {
+    const { ctx, id, tabs } = await running(["https://example.com/a"]);
+    const res = await post(ctx, `/profiles/${id}/tabs/change-url`, { items: [{ tabId: tabs[0]!.id, url: "file:///C:/Windows/win.ini" }] });
+    expect(res.json().results[0].ok).toBe(false);
+    for (const url of [`/profiles/${id}/tabs/change-url`, `/profiles/${id}/tabs/reopen`, "/tabs/export", `/profiles/${id}/log-note`, `/profiles/${id}/autofill/card`]) {
+      const r = await ctx.app.inject({ method: "POST", url, payload: {}, headers: { "sec-fetch-site": "cross-site" } });
+      expect(r.statusCode, url).toBe(403);
+    }
+  });
+
   it("no focus delay (-1) navigates without bringing the tab forward", async () => {
     const { ctx, id, tabs, session } = await running(["https://example.com/a"]);
     await post(ctx, `/profiles/${id}/tabs/change-url`, { items: [{ tabId: tabs[0]!.id, url: "https://example.com/z" }] });

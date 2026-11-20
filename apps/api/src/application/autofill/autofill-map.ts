@@ -17,7 +17,8 @@
  * Button: <attr>=<pattern>; button[; clicks]       (after filling, in file order)
  * XPath:  `//input[@x]`; <field | "literal" | bool>[; <format>]
  * Format: a JS function body taking (field, allFields), run in an ISOLATED
- * world of the page — never in this process.
+ * world of the page (own globals, so the page cannot swap Function/String to
+ * read the values) — never in this process.
  *
  * Parsing is pure and returns errors per line; a bad line never loads half a
  * rule. The page half is a single Runtime.evaluate that reports field NAMES
@@ -168,6 +169,9 @@ const stripSlashes = (p: string) => {
   return m ? m[1]! : p;
 };
 
+export const SECRET_FIELD = /^(cc[A-Z]\w*|passcode|password|emailCode|smsCode|otherCode)/;
+export const isSecretField = (f: string | undefined): boolean => f !== undefined && SECRET_FIELD.test(f);
+
 /** Glob with `*`, case-insensitive, whole URL. */
 export function globMatches(glob: string, url: string): boolean {
   // A `*` in the scheme/host part may not cross a `/` — otherwise
@@ -175,8 +179,9 @@ export function globMatches(glob: string, url: string): boolean {
   const pathAt = glob.indexOf("/", glob.indexOf("://") + 3);
   const [hostPart, pathPart] = pathAt < 0 ? [glob, ""] : [glob.slice(0, pathAt), glob.slice(pathAt)];
   const conv = (s: string, any: string) => s.split("*").map(escapeRe).join(any);
+  if (url.length > 2048 || glob.split("*").length > 7) return false; // bounded: no pathological backtracking
   // A glob without a path ("https://shop.com") also matches "https://shop.com/...".
-  return new RegExp(`^${conv(hostPart, "[^/]*")}${pathPart ? conv(pathPart, ".*") : "(/.*)?"}$`, "i").test(url);
+  return new RegExp(`^${conv(hostPart, "[^/?#@]*")}${pathPart ? conv(pathPart, ".*") : "(/.*)?"}$`, "i").test(url);
 }
 
 export interface ResolvedBlock {
@@ -212,10 +217,17 @@ export function resolveBlocks(map: ParsedMap, url: string, builtinAny: MapRule[]
     add(any, 0);
     res.rules.push(...builtinAny);
   }
+  // Secrets (card, codes, passcode, password) are filled only on a URL some
+  // block explicitly matched, never by the catch-all `any` block alone.
+  if (matched.length === 0) res.rules = res.rules.filter((r) => !isSecretField(r.field));
   return res;
 }
 
-/** Today's hint-based fills, as map rules: the built-in `any` block. */
+/**
+ * Today's hint-based fills, as map rules: the built-in `any` block. Card
+ * fields are deliberately absent: a card goes only where a map block for
+ * that site says so (audit: any URL with a `cardnumber` input got the card).
+ */
 export const BUILTIN_ANY: MapRule[] = (
   [
     ["email", "email|e-mail"],
@@ -227,9 +239,6 @@ export const BUILTIN_ANY: MapRule[] = (
     ["city", "city|town"],
     ["state", "state|province|region"],
     ["zip", "zip|postal"],
-    ["ccNumber", "card.?number|cc.?num|cardnumber"],
-    ["ccCVV", "cvv|cvc|security.?code"],
-    ["ccExpDate", "exp(iry|iration)?.?date"],
   ] as const
 ).map(([field, pattern], i) => ({ kind: "attr" as const, attr: "name", pattern, field, line: -1 - i }));
 
@@ -333,6 +342,8 @@ export function fieldValues(src: FieldSource, swaps: Record<string, string> = {}
 export interface FillConfig {
   rules: MapRule[];
   values: Record<string, string>;
+  /** The URL the blocks were matched against; the fill aborts if the page has moved. */
+  href: string;
   human: string[];
   machine: string[];
   defaultMode: FillMode;
@@ -355,6 +366,8 @@ export function buildMapFillExpression(cfg: FillConfig): string {
   };
   const all = (sel) => roots(document).flatMap((r) => [...r.querySelectorAll(sel)]);
   const handled = new Set();
+  const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 2 && r.height > 2 && s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0.05; };
+  const secret = (f) => /^(cc[A-Z]|passcode|password|emailCode|smsCode|otherCode)/.test(f || "");
   const nativeSet = (el, v) => {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
@@ -394,6 +407,7 @@ export function buildMapFillExpression(cfg: FillConfig): string {
   const buttons = [];
   for (const rule of cfg.rules) {
     if (rule.kind === "button" || (rule.kind === "xpath" && rule.field === "button")) { buttons.push(rule); continue; }
+    if (location.href !== cfg.href) { errors.push("page changed; fill stopped"); break; }
     const name = rule.field ?? "(literal)";
     let raw = rule.literal !== undefined ? rule.literal : rule.bool !== undefined ? rule.bool : cfg.values[rule.field];
     if (raw === undefined) { if (rule.field && !missing.includes(name)) missing.push(name); continue; }
@@ -406,6 +420,7 @@ export function buildMapFillExpression(cfg: FillConfig): string {
     let did = false;
     for (const el of candidates(rule)) {
       if (handled.has(el) || el.disabled || el.type === "hidden") continue;
+      if (secret(rule.field) && !visible(el)) continue;
       const tag = el.tagName;
       if (el.type === "checkbox") { const want = typeof value === "boolean" ? value : /^(true|1)$/i.test(String(value)); if (el.checked !== want) el.click(); }
       else if (el.type === "radio") { if (typeof value === "boolean" ? value : String(el.value).toLowerCase() === String(value).toLowerCase()) el.click(); else continue; }
@@ -422,6 +437,7 @@ export function buildMapFillExpression(cfg: FillConfig): string {
   }
   let clicked = 0;
   for (const rule of buttons) {
+    if (location.href !== cfg.href) break;
     const el = candidates(rule)[0];
     if (!el) continue;
     for (let i = 0; i < (rule.clicks || 1); i++) { el.click(); clicked++; await sleep(120); }

@@ -132,6 +132,14 @@ export class CdpConnection {
     });
   }
 
+  private readonly listeners = new Set<(method: string, params: Record<string, unknown>, sessionId?: string) => void>();
+
+  /** J8: subscribe to protocol events (the network logger). Returns an unsubscribe. */
+  onEvent(cb: (method: string, params: Record<string, unknown>, sessionId?: string) => void): () => void {
+    this.listeners.add(cb);
+    return () => this.listeners.delete(cb);
+  }
+
   close(): void {
     this.closed = true;
     this.failAll(new Error("CDP connection closed"));
@@ -147,13 +155,19 @@ export class CdpConnection {
       id?: number;
       result?: unknown;
       error?: { code: number; message: string };
+      method?: string;
+      params?: Record<string, unknown>;
+      sessionId?: string;
     };
     try {
       msg = JSON.parse(data);
     } catch {
       return; // not JSON — not for us
     }
-    if (typeof msg.id !== "number") return; // events have no id; we don't subscribe
+    if (typeof msg.id !== "number") {
+      if (msg.method) for (const cb of this.listeners) cb(msg.method, msg.params ?? {}, msg.sessionId);
+      return;
+    }
     const call = this.pending.get(msg.id);
     if (!call) return;
     this.pending.delete(msg.id);

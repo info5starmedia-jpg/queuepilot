@@ -835,6 +835,7 @@ export class BrowserLifecycleService {
   /** J3b: change a tab's URL (optionally bringing it to the front first). */
   async navigateTab(profileId: string, tabId: string, url: string, opts: { focus?: boolean } = {}): Promise<BrowserTab> {
     return this.mutex.runExclusive(profileId, async () => {
+      if (!/^https?:\/\//i.test(url)) throw new DomainError(ErrorCodes.VALIDATION_FAILED, "only http(s) pages can be opened this way");
       const { tab, session, engineTabId } = this.requireTabOp(profileId, tabId, "navigateTab");
       if (opts.focus && session.focusTab) await session.focusTab(engineTabId);
       await session.navigateTab!(engineTabId, url);
@@ -855,7 +856,7 @@ export class BrowserLifecycleService {
     if (!run) throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
     const closed = this.tabRegistry
       .listForRun(run.id)
-      .tabs.filter((t) => t.status === "closed" && t.url)
+      .tabs.filter((t) => t.status === "closed" && t.url && /^https?:\/\//i.test(t.url))
       .sort((a, b) => (b.closedAt ?? "").localeCompare(a.closedAt ?? ""))
       .slice(0, maxRestorable);
     const last = closed[0];

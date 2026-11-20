@@ -155,6 +155,42 @@ export class AutofillService {
     };
   }
 
+  /**
+   * J4: run one expression in an ISOLATED world of the page (own globals and
+   * prototypes: a hostile page can't swap Function/String/value setters to
+   * read what is filled). Shares the DOM only.
+   */
+  async evaluateIsolated(profileId: string, expression: string, targetId?: string, timeoutMs = 120_000): Promise<unknown> {
+    this.requireRunning(profileId);
+    const run = this.lifecycle.activeRun(profileId);
+    const conn = await CdpConnection.connect(run!.wsEndpoint!);
+    try {
+      const target = await this.pickPageTarget(conn, targetId);
+      const { sessionId } = await conn.call<{ sessionId: string }>("Target.attachToTarget", { targetId: target, flatten: true });
+      try {
+        const tree = await conn.call<{ frameTree: { frame: { id: string } } }>("Page.getFrameTree", {}, 10_000, sessionId);
+        const world = await conn.call<{ executionContextId: number }>(
+          "Page.createIsolatedWorld",
+          { frameId: tree.frameTree.frame.id, worldName: "qp-autofill", grantUniveralAccess: false },
+          10_000,
+          sessionId,
+        );
+        const r = await conn.call<{ result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }>(
+          "Runtime.evaluate",
+          { expression, contextId: world.executionContextId, returnByValue: true, awaitPromise: true, timeout: timeoutMs },
+          timeoutMs + 5_000,
+          sessionId,
+        );
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? "autofill evaluation failed");
+        return r.result?.value;
+      } finally {
+        await conn.call("Target.detachFromTarget", { sessionId }, 5_000).catch(() => {});
+      }
+    } finally {
+      conn.close();
+    }
+  }
+
   /** J4: run one page expression on the profile's page (the map engine's entry point). */
   async evaluate(profileId: string, expression: string, targetId?: string, timeoutMs?: number): Promise<unknown> {
     this.requireRunning(profileId);

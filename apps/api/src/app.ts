@@ -30,6 +30,9 @@ import { registerTabStateRoutes } from "./http/tab-state.routes.js";
 import { registerSiteRoutes } from "./http/sites.routes.js";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { registerDeckRoutes } from "./http/deck.routes.js";
+import { registerPowerRoutes } from "./http/power.routes.js";
+import { PresetStore } from "./application/power/power.js";
+import { NetworkLogger } from "./application/netlog/network-logger.js";
 import { registerCookieThingerRoutes, cdpCookieOps } from "./http/cookie-thinger.routes.js";
 import { CookieThinger } from "./application/cookies/cookie-thinger-file.js";
 import { registerAutofillMapRoutes } from "./http/autofill-map.routes.js";
@@ -224,6 +227,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     },
     dataDir: deps.config.dataDir,
   });
+  if (deps.settingsStore) {
+    registerPowerRoutes(app, {
+      presets: new PresetStore(deps.config.dataDir),
+      settings: deps.settingsStore,
+      openUrls: (id) => deps.lifecycle.listTabs(id).tabs.filter((t) => t.status === "open" && t.url).map((t) => t.url!),
+      openTab: (id, url) => deps.lifecycle.openTab(id, { url }),
+      netlog: new NetworkLogger(deps.config.dataDir),
+      wsEndpoint: (id) => {
+        const run = deps.lifecycle.activeRun(id);
+        if (!run || run.status !== "running" || !run.wsEndpoint) throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${id} is not running`);
+        return run.wsEndpoint;
+      },
+    });
+  }
   if (deps.secrets) {
     registerCookieThingerRoutes(app, {
       thinger: new CookieThinger({ dataDir: deps.config.dataDir, secrets: deps.secrets }),
