@@ -1673,15 +1673,27 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
 - [x] **Console follow-ups (BUILT 2026-11-20, `3c696896c`):** Settings → Integrations now has **Redeem an invite** (server + `qpi_…` → `POST /team/redeem`; the key goes to Settings → Team and is never returned or shown; shows the licence and days left) and **Discord notifications** (masked webhook, Save / Send test / Remove); Settings has new **sites** and **ui** sections and a Deck switch under **launch**; the persona warmup has a **Stop** button (`POST /profiles/:id/warmup/persona/stop`, ends as `stopped`, stops a profile the warmup started). Audit follow-ups: presets no longer carry `team.serverUrl` or `automation.scriptingEndpoints`; the network log's strip mode is a header allowlist and drops `user:pass@`; cookie routes are browser-denied. Tests: 2 redeem + 1 stop + 3 audit.
   - **Not done / needs an owner decision:** userscripts + preloaders (touch the fingerprint surface — needs a claim check first), temp-proxy recall (semantics unclear: which proxy is recalled, and when?), remote proxy providers / Proxy Resolver, engine-side titles, arc2 provider, Jancy-plugin shim.
 
+## What's left to do (2026-11-20)
+
+Everything in the owner's roadmap is built and committed on `jancy-j1` (W1, LIC, W2, J3a, J6, DECK, J3b, J4, J5, M5/J7-partial, R). Not pushed. Remaining work, roughly in order:
+
+- **Console UI gaps** — the Deck, autofill map (J4), cookie thinger (J5) and some J3b buttons are API-only; they need console screens. (Settings cards for Sites/Discord, licence redeem and the warmup Stop button are done.)
+- **Userscripts / preloaders (J8)** — approved in principle to build behind an off-by-default setting after a fingerprint claim check. Buildable without more owner input.
+- **J8/J7 leftovers that are self-contained** — `keybinds.txt` import, format strings for window title/tooltip/screenshot name, console editor for the format/sort rules.
+- **Needs owner input** — the 5 open questions below, plus Google Sheet sink (needs a Google account + sheet), the real autofill maps, and a live-queue check (owner has no live queue yet).
+- **Not verified** — queue readers never saw a real queue; Deck taskbar grouping visual, multi-monitor and high-DPI untested; the ADR claim suite was not run inside a container.
+
 ## Owner questions
 
-Raised by the 2026-11-20 unattended run. None blocks the next piece.
+**Answered 2026-11-20:**
+- **Deck default** → ON by default now (`554a2d12`, Settings → Launch still lets you turn it off).
+- **Cookie-thinger file** → owner has no real `cookie-thinger.txt`; keep QueuePilot's own grammar, `dcopy` = move (copy then delete). Revisit if a real file turns up.
+- **Obfuscation (R)** → strong pass added (`554a2d12`): javascript-obfuscator over the esbuild output; verified the obfuscated server boots and serves /health.
 
-1. **Cookie-thinger file syntax (J5).** Jancy's wiki only names the actions, so QueuePilot's grammar is its own (`[group N]`, `copy <list> <name> <domain>`, …; see `cookie-thinger-file.ts`). Is it fine, or can you paste a real `cookie-thinger.txt` so the parser accepts it as-is? Also: is `dcopy` a *move* (copy then delete)? That is what was built.
-2. **Autofill wiki maps (J4).** The 56 published site maps are not in the repo. Drop a few into `docs/fixtures/autofill/` and they become acceptance tests.
-3. **Deck (ADR-0008).** Popups/new windows a profile opens stay separate windows. Should they become sub-tabs under that profile's tab? Also: should the Deck be the default launch mode, or stay opt-in (Settings → Launch → Deck, off by default)?
-4. **LAN hostnames.** After the J6 audit, sensitive routes refuse a non-IP, non-`localhost` Host header (DNS-rebinding guard). If you ever reach the console by a machine name, tell me and I'll add an allow-list setting.
-5. **Temp-proxy recall (J8).** What exactly should be recalled — the last temporary proxy used per profile (to re-apply it on next launch), or a history list to pick from? Not built until answered.
-6. **Userscripts / preloaders (J8).** They inject scripts into every page and so touch the fingerprint surface. OK to build behind an off-by-default setting after a claim check?
-7. **Named windows (J7).** Should "named windows" be real engine windows (one OS window per name, tabs moved between them) or only labels in the console?
-8. **Obfuscation depth (R).** The release is minified + identifier-mangled (esbuild), not control-flow-obfuscated. Want a stronger pass (e.g. `javascript-obfuscator`) added to the build? It would be a new build-only dependency, so it's left out until you say so.
+Still open (none blocks the next piece):
+
+1. **Autofill wiki maps (J4).** The 56 published site maps are not in the repo. Drop a few into `docs/fixtures/autofill/` and they become acceptance tests.
+2. **Deck popups.** Popups/new windows a profile opens stay separate windows — should they become sub-tabs under that profile's tab?
+3. **LAN hostnames.** Sensitive routes refuse a non-IP, non-`localhost` Host header (DNS-rebinding guard). If you ever reach the console by a machine name, say so and I'll add an allow-list setting.
+4. **Temp-proxy recall (J8).** Recall the last temporary proxy per profile (re-apply on next launch), or a history list to pick from? Not built until answered.
+5. **Named windows (J7).** Real engine windows (one OS window per name) or only labels in the console?
