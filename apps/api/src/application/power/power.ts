@@ -61,8 +61,17 @@ export function commandById(cmd: string): CommandDef {
 
 /* ------------------------------- preference sets --------------------------- */
 
-/** Fields that never go into a preference set (credentials; they stay where they are). */
-const SECRET_FIELDS: Record<string, string[]> = { team: ["token", "syncPassphrase"] };
+/**
+ * Fields that never go into (or come out of) a preference set: credentials, the
+ * team server address (a preset must not redirect the stored token) and the
+ * scripting switch (which has its own token guard).
+ */
+const SECRET_FIELDS: Record<string, string[]> = { team: ["token", "syncPassphrase", "serverUrl"], automation: ["scriptingEndpoints"] };
+
+export function presetSafe(section: string, value: unknown): Record<string, unknown> {
+  const drop = new Set(SECRET_FIELDS[section] ?? []);
+  return Object.fromEntries(Object.entries((value ?? {}) as object).filter(([k]) => !drop.has(k)));
+}
 
 export class PresetStore {
   constructor(private readonly dataDir: string) {}
@@ -86,13 +95,13 @@ export class PresetStore {
   save(name: string, current: Settings): void {
     const snap: Record<string, unknown> = {};
     for (const [section, value] of Object.entries(current)) {
-      const drop = new Set(SECRET_FIELDS[section] ?? []);
-      snap[section] = Object.fromEntries(Object.entries(value as object).filter(([k]) => !drop.has(k)));
+      snap[section] = presetSafe(section, value);
     }
     this.write({ ...this.read(), [name]: snap as Partial<Settings> });
   }
   get(name: string): Partial<Settings> {
-    const p = this.read()[name];
+    const all = this.read();
+    const p = Object.hasOwn(all, name) ? all[name] : undefined;
     if (!p) throw new DomainError(ErrorCodes.VALIDATION_FAILED, `no preference set "${name}"`);
     return p;
   }

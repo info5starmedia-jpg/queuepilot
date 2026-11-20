@@ -28,8 +28,10 @@ import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerTabStateRoutes } from "./http/tab-state.routes.js";
 import { registerSiteRoutes } from "./http/sites.routes.js";
+import { z } from "zod";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { registerDeckRoutes } from "./http/deck.routes.js";
+import { redeemInvite } from "./application/team/redeem.js";
 import { registerPowerRoutes } from "./http/power.routes.js";
 import { PresetStore } from "./application/power/power.js";
 import { NetworkLogger } from "./application/netlog/network-logger.js";
@@ -196,6 +198,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const e = err as { code?: string; message?: string };
       return { configured: true, error: { code: e.code ?? "HTTP_ERROR", message: e.message ?? String(err) } };
     }
+  });
+  // LIC follow-up: redeem the owner's one-time invite; the key lands in Settings -> Team, never in the response.
+  app.post("/team/redeem", async (req) => {
+    if (!deps.settingsStore) throw new DomainError(ErrorCodes.VALIDATION_FAILED, "settings are not available");
+    const b = z.object({ serverUrl: z.string().max(300), invite: z.string().max(100), name: z.string().max(80).optional() }).strict().parse(req.body ?? {});
+    const got = await redeemInvite(b.serverUrl.trim(), b.invite.trim(), b.name?.trim() || undefined);
+    deps.settingsStore.patch("team", { serverUrl: got.serverUrl, token: got.token });
+    return { redeemed: true, serverUrl: got.serverUrl };
   });
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a

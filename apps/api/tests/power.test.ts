@@ -36,10 +36,13 @@ describe("preference sets and soft reset", () => {
     const ctx = mk();
     await ctx.app.inject({ method: "PATCH", url: "/settings/sections/team", payload: { token: "SECRET-TOKEN", syncPassphrase: "SECRET-PASS" } });
     await ctx.app.inject({ method: "PATCH", url: "/settings/sections/launch", payload: { batchStaggerMs: 750 } });
+    await ctx.app.inject({ method: "PATCH", url: "/settings/sections/team", payload: { serverUrl: "https://team.example" } });
     expect((await ctx.app.inject({ method: "PUT", url: "/presets/mine" })).json().presets).toEqual(["mine"]);
     const file = fs.readFileSync(path.join(ctx.dataDir, "presets.json"), "utf8");
     expect(file).toContain("750");
     expect(file).not.toContain("SECRET");
+    expect(file).not.toContain("team.example"); // a preset must not redirect the team token
+    expect(file).not.toContain("scriptingEndpoints"); // that switch has its own token guard
     await ctx.app.inject({ method: "PATCH", url: "/settings/sections/launch", payload: { batchStaggerMs: 0 } });
     await ctx.app.inject({ method: "POST", url: "/presets/mine/apply" });
     expect((await ctx.app.inject({ method: "GET", url: "/settings/sections/launch" })).json().batchStaggerMs).toBe(750);
@@ -78,6 +81,8 @@ describe("network log privacy", () => {
   it("strip drops cookies, auth and query strings; cookies keeps cookies but not auth; everything keeps all", () => {
     const h = { Cookie: "a=b", "Set-Cookie": "c=d", Authorization: "Bearer x", Accept: "*/*" };
     expect(sanitizeHeaders(h, "strip")).toEqual({ Accept: "*/*" });
+    expect(sanitizeHeaders({ "X-Api-Key": "k", "x-auth-token": "t", "Content-Type": "a" }, "strip")).toEqual({ "Content-Type": "a" }); // allowlist, not a deny-list
+    expect(sanitizeUrl("https://user:pw@a.example/p?x=1", "strip")).toBe("https://a.example/p");
     expect(sanitizeHeaders({ Referer: "https://a.example/p?token=1" }, "strip")).toEqual({ Referer: "https://a.example/p" });
     expect(sanitizeHeaders(h, "cookies")).toEqual({ Cookie: "a=b", "Set-Cookie": "c=d", Accept: "*/*" });
     expect(sanitizeHeaders(h, "everything")).toEqual(h);

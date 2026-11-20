@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { SETTINGS_SECTIONS, type Settings } from "@queuepilot/contracts";
-import { COMMANDS, PresetStore, commandById, decodeTabString, encodeTabString } from "../application/power/power.js";
+import { COMMANDS, PresetStore, commandById, decodeTabString, encodeTabString, presetSafe } from "../application/power/power.js";
 import type { NetworkLogger } from "../application/netlog/network-logger.js";
 
 /**
@@ -60,7 +60,7 @@ export function registerPowerRoutes(
   app.post("/presets/:name/apply", async (req) => {
     const preset = deps.presets.get(name(req)) as Record<string, unknown>;
     for (const [section, value] of Object.entries(preset)) {
-      if ((SETTINGS_SECTIONS as readonly string[]).includes(section)) deps.settings.patch(section, value);
+      if ((SETTINGS_SECTIONS as readonly string[]).includes(section)) deps.settings.patch(section, presetSafe(section, value));
     }
     return { applied: true };
   });

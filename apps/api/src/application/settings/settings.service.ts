@@ -80,10 +80,8 @@ export class SettingsService {
   /** Soft reset: forget the stored values of these sections (all when omitted) so defaults apply. */
   reset(sections?: string[]): Settings {
     const list = sections ?? [...SETTINGS_SECTIONS];
-    for (const s of list) {
-      assertSection(s);
-      this.db.prepare("DELETE FROM settings WHERE section = ?").run(s);
-    }
+    for (const s of list) assertSection(s); // validate everything before deleting anything
+    for (const s of list) this.db.prepare("DELETE FROM settings WHERE section = ?").run(s);
     return this.getAll();
   }
 

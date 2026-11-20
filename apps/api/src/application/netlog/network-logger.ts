@@ -28,20 +28,24 @@ interface Active {
   stopped: boolean;
 }
 
-const PRIVATE_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-csrf.*|x-xsrf.*)$/i;
 const COOKIE_HEADERS = /^(cookie|set-cookie)$/i;
+/** Strip mode is an allowlist: only headers known to carry no credentials survive. */
+const SAFE_HEADERS = /^(accept(-.*)?|content-(type|length|encoding|language)|cache-control|date|etag|expires|last-modified|server|user-agent|referer|location|origin|host|vary|age|connection|keep-alive|upgrade-insecure-requests|sec-ch-.*|sec-fetch-.*|x-content-type-options|strict-transport-security)$/i;
 
 export function sanitizeHeaders(h: unknown, mode: NetLogMode): Record<string, unknown> {
   if (!h || typeof h !== "object" || mode === "everything") return (h as Record<string, unknown>) ?? {};
-  const drop = mode === "strip" ? PRIVATE_HEADERS : /^(authorization|proxy-authorization)$/i;
-  const kept = Object.entries(h as Record<string, unknown>).filter(([k]) => !drop.test(k) && !(mode === "strip" && COOKIE_HEADERS.test(k)));
+  const kept = Object.entries(h as Record<string, unknown>).filter(([k]) =>
+    mode === "strip" ? SAFE_HEADERS.test(k) && !COOKIE_HEADERS.test(k) : !/^(authorization|proxy-authorization)$/i.test(k),
+  );
   // Referer / Location carry the query string of another URL: strip it there too.
   return Object.fromEntries(kept.map(([k, v]) => [k, mode === "strip" && /^(referer|location)$/i.test(k) ? sanitizeUrl(v, mode) : v]));
 }
 
 export function sanitizeUrl(url: unknown, mode: NetLogMode): string {
   const s = typeof url === "string" ? url.slice(0, 2000) : "";
-  return mode === "everything" ? s : s.split(/[?#]/)[0]!;
+  if (mode === "everything") return s;
+  // No query, no fragment, and no user:password@ in front of the host.
+  return s.split(/[?#]/)[0]!.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1");
 }
 
 export class NetworkLogger {
@@ -51,15 +55,22 @@ export class NetworkLogger {
 
   status(profileId: string): { active: boolean; file?: string; bytes?: number; events?: number; mode?: NetLogMode } {
     const a = this.active.get(profileId);
-    return a ? { active: true, file: path.basename(a.file), bytes: a.bytes, events: a.events, mode: a.mode } : { active: false };
+    return a?.file ? { active: true, file: path.basename(a.file), bytes: a.bytes, events: a.events, mode: a.mode } : { active: false };
   }
 
   async start(profileId: string, wsEndpoint: string, opts: { mode: NetLogMode; maxBytes: number }): Promise<ReturnType<NetworkLogger["status"]>> {
     if (this.active.has(profileId)) throw new DomainError(ErrorCodes.CONFLICT, "the network logger is already running for this profile");
+    this.active.set(profileId, null as unknown as Active); // reserve the slot before the first await
     const dir = path.join(this.dataDir, "netlogs");
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${profileId}-${new Date().toISOString().replace(/[:.]/g, "-")}.ndjson`);
-    const conn = await CdpConnection.connect(wsEndpoint, 10_000);
+    let conn: CdpConnection;
+    try {
+      conn = await CdpConnection.connect(wsEndpoint, 10_000);
+    } catch (e) {
+      this.active.delete(profileId);
+      throw e;
+    }
     const a: Active = { conn, file, bytes: 0, events: 0, max: opts.maxBytes, mode: opts.mode, stopped: false };
     this.active.set(profileId, a);
     conn.onEvent((method, params, sessionId) => {
@@ -89,6 +100,10 @@ export class NetworkLogger {
   stop(profileId: string): ReturnType<NetworkLogger["status"]> & { stopped: boolean } {
     const a = this.active.get(profileId);
     if (!a) return { active: false, stopped: false };
+    if (!a.file) {
+      this.active.delete(profileId); // still connecting: drop the reservation
+      return { active: false, stopped: false };
+    }
     a.stopped = true;
     this.active.delete(profileId);
     a.conn.close();
@@ -109,12 +124,13 @@ export class NetworkLogger {
     }
     if (!row) return;
     const line = `${JSON.stringify(row)}\n`;
-    if (a.bytes + line.length > a.max) {
+    const size = Buffer.byteLength(line);
+    if (a.bytes + size > a.max) {
       this.stop(profileId); // size cap reached: the file is complete up to here
       return;
     }
     fs.appendFileSync(a.file, line);
-    a.bytes += line.length;
+    a.bytes += size;
     a.events++;
   }
 }

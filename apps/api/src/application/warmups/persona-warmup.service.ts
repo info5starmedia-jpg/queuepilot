@@ -28,7 +28,7 @@ import { compilePlan } from "./persona/warmup/plan.js";
 export interface PersonaWarmupStatus {
   profileId: string;
   persona: string;
-  state: "running" | "done" | "failed";
+  state: "running" | "done" | "failed" | "stopped";
   sessionsPlanned: number;
   sessionsDone: number;
   visits: number;
@@ -122,6 +122,9 @@ export function applySiteSettings(p: Persona, s: SiteSettings | undefined): Pers
 
 export class PersonaWarmupService {
   private readonly status = new Map<string, PersonaWarmupStatus>();
+  /** Profiles whose running warmup the operator asked to stop. */
+  private readonly cancelled = new Set<string>();
+  private readonly drivers = new Map<string, Driver>();
 
   constructor(private readonly deps: PersonaWarmupDeps) {}
 
@@ -217,6 +220,23 @@ export class PersonaWarmupService {
     return this.status.get(profileId) ?? null;
   }
 
+  /**
+   * Stop a running warmup: no further session starts and the current one is
+   * cut off by dropping the driver. The profile is left as the warmup found
+   * it (a profile it started is stopped, unless keepRunning).
+   */
+  async stop(profileId: string): Promise<PersonaWarmupStatus | null> {
+    const st = this.status.get(profileId);
+    if (!st || st.state !== "running") return st ?? null;
+    this.cancelled.add(profileId);
+    try {
+      await this.drivers.get(profileId)?.dispose();
+    } catch {
+      /* the run loop handles whatever this interrupts */
+    }
+    return st;
+  }
+
   /** Starts a warmup in the background; returns the initial status at once. */
   start(profileId: string, opts: { persona?: string; sessions?: number; keepRunning?: boolean } = {}): PersonaWarmupStatus {
     const current = this.status.get(profileId);
@@ -296,7 +316,9 @@ export class PersonaWarmupService {
       driver = this.deps.driverFactory
         ? await this.deps.driverFactory(browserUrl)
         : await CdpDriver.connect({ browserUrl, logger });
+      this.drivers.set(profileId, driver);
       for (const session of sessions) {
+        if (this.cancelled.has(profileId)) break;
         const r = await runSession(session, driver, {
           logger,
           searchEngine: session.searchEngine,
@@ -306,11 +328,16 @@ export class PersonaWarmupService {
         st.visits += r.visits.length;
         st.results.push({ visits: r.visits.length, aborted: r.aborted, score: r.score });
       }
-      st.state = "done";
+      st.state = this.cancelled.has(profileId) ? "stopped" : "done";
     } catch (err) {
-      st.state = "failed";
-      st.error = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+      if (this.cancelled.has(profileId)) st.state = "stopped";
+      else {
+        st.state = "failed";
+        st.error = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+      }
     } finally {
+      this.drivers.delete(profileId);
+      this.cancelled.delete(profileId);
       try {
         await driver?.dispose();
       } catch {

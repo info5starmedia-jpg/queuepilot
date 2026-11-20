@@ -176,3 +176,21 @@ describe("W2 — plans and site settings from the team server", () => {
     }
   });
 });
+
+describe("persona warmup stop", () => {
+  it("stop cuts off the running session, ends as 'stopped' (not failed) and stops the profile it started", async () => {
+    const ctx = makeTestContext();
+    const p = ctx.profiles.create({ name: "warm-stop", generateFingerprint: true });
+    let release: (() => void) | null = null;
+    const hang = new Promise<never>((_, reject) => (release = () => reject(new Error("driver disposed"))));
+    const driver = { ...fakeDriver([]), goto: () => hang, dispose: async () => release?.() } as Driver;
+    const svc = new PersonaWarmupService({ lifecycle: ctx.lifecycle, personaDirs: [], driverFactory: async () => driver, sleep: async () => {} });
+    svc.start(p.id, { sessions: 2 });
+    for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 10));
+    expect((await svc.stop(p.id))?.state).toBe("running"); // returns the status it interrupted
+    for (let i = 0; i < 200 && svc.statusOf(p.id)!.state === "running"; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(svc.statusOf(p.id)).toMatchObject({ state: "stopped", error: null });
+    expect(ctx.lifecycle.activeRun(p.id)).toBeNull();
+    expect(await svc.stop(p.id)).toMatchObject({ state: "stopped" }); // idempotent
+  }, 20000);
+});

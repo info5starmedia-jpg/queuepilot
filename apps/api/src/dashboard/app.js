@@ -1443,6 +1443,7 @@ const SETTINGS_FIELDS = {
     { key: "batchStaggerMs", label: "Batch start delay (ms)", type: "number", min: 0, max: 60000 },
     { key: "maxConcurrent", label: "Max concurrent profiles (0 = built-in cap)", type: "number", min: 0, max: 500 },
     { key: "openStartPages", label: "Open start pages at launch", type: "checkbox" },
+    { key: "deckEnabled", label: "Profile Deck: put each launched profile in one window with a tab per profile (Windows)", type: "checkbox" },
   ],
   team: [
     { key: "serverUrl", label: "Team server URL", type: "text", placeholder: "https://… (empty = off)" },
@@ -1453,6 +1454,22 @@ const SETTINGS_FIELDS = {
   integrations: [
     { key: "googleAccount", label: "Google account", type: "text", placeholder: "display name (empty = none)" },
     { key: "providersNote", label: "Providers note", type: "textarea", placeholder: "where credentials live — never store secrets here" },
+  ],
+  sites: [
+    { key: "extractorsEnabled", label: "Read queue position / cart timer / event info from open tabs", type: "checkbox" },
+    { key: "extractorIntervalSec", label: "Read every (seconds)", type: "number", min: 2, max: 60 },
+    { key: "queuePositionCsv", label: "Log every new queue position to a CSV per event", type: "checkbox" },
+    { key: "tmDismissOverlay", label: "Ticketmaster: dismiss the overlay (clicks)", type: "checkbox" },
+    { key: "tmAutoNoInsurance", label: "Ticketmaster: choose no insurance (clicks)", type: "checkbox" },
+    { key: "tmAutoTerms", label: "Ticketmaster: accept terms (clicks)", type: "checkbox" },
+    { key: "discordEnabled", label: "Send Discord notifications (set the webhook under Integrations)", type: "checkbox" },
+    { key: "discordEvents", label: "Discord events (comma-separated)", type: "text", placeholder: "queue.passed, cart.timer, code.failed, run.crashed" },
+    { key: "discordPositionEveryMin", label: "Post queue position every N minutes (0 = never)", type: "number", min: 0, max: 1440 },
+    { key: "discordCookieExport", label: "Allow sending a profile's cookies + exit IP to Discord (needs SPECTRA_API_TOKEN)", type: "checkbox" },
+  ],
+  ui: [
+    { key: "tabLabelFormat", label: "Tab label format (JS body over ctx, e.g. return ctx.email + \" #\" + ctx.tab.data.queuePosition)", type: "textarea", placeholder: "empty = email · #position" },
+    { key: "tabSort", label: "Tab View sort (JS body over a, b returning a number)", type: "textarea", placeholder: "empty = priority, then name" },
   ],
   automation: [
     { key: "scriptingEndpoints", label: "Enable scripting endpoints (JYL run, plugins/parsers/resolvers, aliases) — runs code, keep off unless needed", type: "checkbox" },
@@ -1477,9 +1494,9 @@ function settingsToForm(section, doc) {
 function settingsFromField(f, raw) {
   if (f.type === "checkbox") return raw;
   if (f.type === "number") return Number(raw);
-  if (f.key === "syncGroups" || f.key === "enabledPlugins" || f.key === "enabledJyl")
+  if (f.key === "syncGroups" || f.key === "enabledPlugins" || f.key === "enabledJyl" || f.key === "discordEvents")
     return String(raw).split(",").map((s) => s.trim()).filter(Boolean);
-  if (["serverUrl", "token", "googleAccount", "syncPassphrase"].includes(f.key))
+  if (["serverUrl", "token", "googleAccount", "syncPassphrase", "tabLabelFormat", "tabSort"].includes(f.key))
     return String(raw).trim() === "" ? null : String(raw).trim();
   return raw;
 }
@@ -1541,6 +1558,30 @@ function renderIntegrationsInfo() {
       <p class="hint" id="email-account-status"></p>
       <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=imap:you@gmail.com:ticketmaster</code> returns the code (the parser picks the right email). Raw body for scripts: <code>imap:you@gmail.com</code>.</p>
     </div>
+    <div class="info-card" id="team-redeem-card">
+      <h4>Redeem an invite</h4>
+      <p>Paste the server address and the one-time invite (<code>qpi_…</code>) the owner sent. The licence key is stored in Settings → Team and never shown.</p>
+      <p id="licence-state" class="hint">checking…</p>
+      <form id="redeem-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(220px,2fr) minmax(220px,2fr) minmax(120px,1fr) auto;gap:8px;align-items:end;margin-top:6px">
+        <label>Server <input id="redeem-server" maxlength="300" placeholder="https://…" /></label>
+        <label>Invite <input id="redeem-invite" type="password" maxlength="100" autocomplete="off" placeholder="qpi_…" /></label>
+        <label>Your name <input id="redeem-name" maxlength="80" placeholder="optional" /></label>
+        <button type="submit" class="primary">Redeem</button>
+      </form>
+      <p class="hint" id="redeem-status"></p>
+    </div>
+    <div class="info-card" id="discord-card">
+      <h4>Discord notifications</h4>
+      <p>Paste a Discord <b>webhook URL</b> (channel settings → Integrations → Webhooks). It is stored encrypted on this machine and only a masked form is ever shown. Choose what to send under Settings → sites.</p>
+      <p id="discord-state" class="hint">checking…</p>
+      <form id="discord-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(260px,3fr) auto auto auto;gap:8px;align-items:end;margin-top:6px">
+        <label>Webhook URL <input id="discord-url" type="password" maxlength="400" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/…" /></label>
+        <button type="submit" class="primary">Save</button>
+        <button type="button" class="ghost" id="discord-test">Send test</button>
+        <button type="button" class="danger" id="discord-remove">Remove</button>
+      </form>
+      <p class="hint" id="discord-status"></p>
+    </div>
     <div class="info-card" id="aycd-card">
       <h4>AYCD Inbox</h4>
       <p>Reads 2FA codes through AYCD Inbox. Paste the <b>Inbox API key</b> (Inbox → Settings → Tasks (API)). It is stored encrypted on this machine and never shown again. <b>The Inbox app must be open</b> while codes are fetched.</p>
@@ -1557,6 +1598,98 @@ function renderIntegrationsInfo() {
   $("#email-account-form").addEventListener("submit", addEmailAccount);
   loadEmailAccounts();
   wireAycdCard();
+  wireDiscordCard();
+  wireRedeemCard();
+}
+
+function wireDiscordCard() {
+  const state = $("#discord-state");
+  const status = $("#discord-status");
+  const say = (msg, color) => {
+    status.textContent = msg;
+    status.style.color = color;
+  };
+  const refresh = async () => {
+    try {
+      const s = await api("/integrations/discord");
+      state.textContent = s.configured ? `Webhook stored: ${s.webhook}` : "No webhook stored yet.";
+      state.style.color = s.configured ? "var(--green)" : "var(--faint)";
+    } catch (err) {
+      state.textContent = err.message;
+      state.style.color = "var(--red)";
+    }
+  };
+  $("#discord-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#discord-url");
+    const webhookUrl = input.value.trim();
+    input.value = "";
+    if (!webhookUrl) return say("paste the webhook URL first", "var(--red)");
+    try {
+      await api("/integrations/discord", { method: "PUT", body: JSON.stringify({ webhookUrl }) });
+      say("webhook saved — click Send test", "var(--faint)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    refresh();
+  });
+  $("#discord-test").addEventListener("click", async (ev) => {
+    ev.target.disabled = true;
+    say("sending…", "var(--faint)");
+    try {
+      await api("/integrations/discord/test", { method: "POST" });
+      say("test message sent", "var(--green)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    ev.target.disabled = false;
+  });
+  $("#discord-remove").addEventListener("click", async () => {
+    if (!window.confirm("Remove the stored Discord webhook?")) return;
+    try {
+      await api("/integrations/discord", { method: "DELETE" });
+      say("webhook removed", "var(--faint)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    refresh();
+  });
+  refresh();
+}
+
+function wireRedeemCard() {
+  const status = $("#redeem-status");
+  const say = (msg, color) => {
+    status.textContent = msg;
+    status.style.color = color;
+  };
+  const refresh = async () => {
+    const el = $("#licence-state");
+    try {
+      const r = await api("/team/licence");
+      if (!r.configured) el.textContent = "Not connected to a team server.";
+      else if (r.error) el.textContent = `Connected, but: ${r.error.message}`;
+      else el.textContent = `Licence: ${r.licence.account?.name ?? "?"}${r.licence.daysLeft != null ? ` · ${r.licence.daysLeft} days left` : ""}`;
+    } catch (err) {
+      el.textContent = err.message;
+    }
+  };
+  const server = $("#redeem-server");
+  api("/settings/sections/team").then((t) => { if (t.serverUrl) server.value = t.serverUrl; }).catch(() => {});
+  $("#redeem-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const invite = $("#redeem-invite").value.trim();
+    $("#redeem-invite").value = "";
+    if (!server.value.trim() || !invite) return say("enter the server and the invite", "var(--red)");
+    try {
+      await api("/team/redeem", { method: "POST", body: JSON.stringify({ serverUrl: server.value.trim(), invite, name: $("#redeem-name").value.trim() || undefined }) });
+      say("invite redeemed — you are connected", "var(--green)");
+    } catch (err) {
+      say(err.message, "var(--red)");
+    }
+    refresh();
+  });
+  refresh();
 }
 
 function wireAycdCard() {
@@ -2034,6 +2167,7 @@ function describePersonaRun(s) {
   if (!s) return "";
   const base = `${s.persona}: ${s.sessionsDone}/${s.sessionsPlanned} sessions, ${s.visits} site visits`;
   if (s.state === "running") return `running — ${base}`;
+  if (s.state === "stopped") return `stopped — ${base}`;
   if (s.state === "done") return `done — ${base} (finished ${String(s.finishedAt ?? "").slice(11, 19)})`;
   return `failed — ${s.error ?? "unknown error"}`;
 }
@@ -2043,6 +2177,7 @@ async function showPersonaStatus(profileId) {
   const { status } = await api(`/profiles/${profileId}/warmup/persona`);
   personaStatus(describePersonaRun(status), status?.state === "failed");
   $("#persona-start").disabled = status?.state === "running";
+  $("#persona-stop").hidden = status?.state !== "running";
   if (status?.state === "running" && activeView === "warmups") {
     personaPoll = setTimeout(() => showPersonaStatus(profileId).catch(() => {}), 3000);
   }
@@ -2059,6 +2194,17 @@ $("#persona-start").addEventListener("click", async () => {
       body: JSON.stringify({ persona: $("#persona-pick").value, sessions, keepRunning: $("#persona-keep").checked }),
     });
     toast("persona warmup started");
+    await showPersonaStatus(profileId);
+  } catch (err) {
+    personaStatus(err.message, true);
+  }
+});
+$("#persona-stop").addEventListener("click", async () => {
+  const profileId = $("#persona-profile").value;
+  if (!profileId) return;
+  try {
+    await api(`/profiles/${profileId}/warmup/persona/stop`, { method: "POST", body: "{}" });
+    toast("stopping the warmup…");
     await showPersonaStatus(profileId);
   } catch (err) {
     personaStatus(err.message, true);

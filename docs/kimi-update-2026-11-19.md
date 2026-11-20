@@ -392,3 +392,9 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - **LOW** deck labels escaped and capped.
 
 **M5 built:** command registry + palette + key binds, tab-label format and custom sort (console-side), preference sets, tab strings, network logger, soft reset. See roadmap J7/J8 for what is not done and the new owner questions.
+
+### 14. Console follow-ups + audit LOWs (2026-11-20)
+
+- Settings → Integrations: **Redeem an invite** and **Discord notifications** cards; new Settings sections **sites**, **ui**, and the Deck switch.
+- Persona warmup **Stop** button + `stopped` state.
+- Re-verified audit (CLEAR) → two MEDIUM + several LOW fixed: presets exclude the team URL and the scripting switch; netlog strip mode is an allowlist; `/profiles/:id/cookies*` browser-denied; secret fields can't be swapped into plain ones; reset validates before deleting.

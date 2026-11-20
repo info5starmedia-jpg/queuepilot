@@ -46,6 +46,10 @@ const SENSITIVE_PATTERNS = [
   /^\/tools(\/|$)/,
   // ADR-0008: the Deck re-parents real windows.
   /^\/deck(\/|$)/,
+  // Audit: cookie import / clear / export are side-effecting too.
+  /^\/profiles\/[^/]+\/cookies(\/|$)/,
+  // LIC: the redeemed team key.
+  /^\/team(\/|$)/,
   // Audit: tab commands, tab export, notes, and every autofill route (card numbers).
   /^\/profiles\/[^/]+\/tabs(\/|$)/,
   /^\/tabs(\/|$)/,

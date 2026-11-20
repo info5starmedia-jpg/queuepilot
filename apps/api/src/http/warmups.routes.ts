@@ -98,6 +98,10 @@ export function registerPersonaWarmupRoutes(
     };
     return reply.code(202).send(svc.start(id, opts));
   });
+  app.post("/profiles/:id/warmup/persona/stop", async (req) => {
+    const { id } = req.params as { id: string };
+    return { status: await svc.stop(id) };
+  });
   app.get("/profiles/:id/warmup/persona", async (req) => {
     const { id } = req.params as { id: string };
     return { status: svc.statusOf(id) };

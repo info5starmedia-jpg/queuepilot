@@ -333,7 +333,8 @@ export function fieldValues(src: FieldSource, swaps: Record<string, string> = {}
     }
   }
   // Swapping: `swap firstName=lastName` makes firstName read lastName's value.
-  for (const [to, from] of Object.entries(swaps)) if (v[from] !== undefined) v[to] = v[from]!;
+  // (a secret field can't be swapped into a plain one: that would sidestep the secret-field rules)
+  for (const [to, from] of Object.entries(swaps)) if (v[from] !== undefined && !isSecretField(from)) v[to] = v[from]!;
   return v;
 }
 
