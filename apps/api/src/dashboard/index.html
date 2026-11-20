@@ -18,7 +18,10 @@
         <button data-view="proxies"><span class="ico">⇄</span><span class="lbl">Proxies</span><kbd>X</kbd></button>
         <button data-view="tabs"><span class="ico">⊞</span><span class="lbl">Tabs</span><kbd>T</kbd></button>
         <button data-view="tabview"><span class="ico">☰</span><span class="lbl">Tab View</span><kbd>N</kbd></button>
+        <button data-view="deck"><span class="ico">▤</span><span class="lbl">Deck</span><kbd>D</kbd></button>
         <button data-view="cookies"><span class="ico">◈</span><span class="lbl">Cookies</span><kbd>C</kbd></button>
+        <button data-view="thinger"><span class="ico">⿻</span><span class="lbl">Cookie Thinger</span><kbd>K</kbd></button>
+        <button data-view="autofill"><span class="ico">⌨</span><span class="lbl">Autofill Map</span><kbd>A</kbd></button>
         <button data-view="warmups"><span class="ico">♨</span><span class="lbl">Warmups</span><kbd>W</kbd></button>
         <button data-view="providers"><span class="ico">⇶</span><span class="lbl">Providers</span><kbd>V</kbd></button>
         <button data-view="events"><span class="ico">≡</span><span class="lbl">Events</span><kbd>E</kbd></button>
@@ -114,7 +117,7 @@
           </div>
           <div class="table-wrap">
             <table class="grid" id="tabview-table">
-              <thead><tr><th style="width:28px"><input type="checkbox" id="tabview-select" /></th><th>Tab</th><th style="width:90px">Stage</th><th style="width:90px">Position</th><th style="width:90px">Cart</th><th style="width:80px">Priority</th><th>Notes</th><th style="width:90px">Passcodes</th></tr></thead>
+              <thead><tr><th style="width:28px"><input type="checkbox" id="tabview-select" /></th><th>Tab</th><th style="width:90px">Stage</th><th style="width:90px">Position</th><th style="width:90px">Cart</th><th style="width:80px">Priority</th><th>Notes</th><th style="width:90px">Passcodes</th><th style="width:130px">Actions</th></tr></thead>
               <tbody></tbody>
             </table>
             <div class="empty-state" id="tabview-empty" hidden>No running profiles.</div>
@@ -189,6 +192,83 @@
             </div>
           </div>
           <div id="cookies-status" class="view-hint" style="margin-top:8px"></div>
+        </section>
+
+        <!-- ============================ deck (ADR-0008) ================= -->
+        <section class="view" id="view-deck" hidden>
+          <div class="view-hint">The <b>Profile Deck</b> gathers running profile windows into one window with a tab per profile (Windows only). Launches join automatically when <b>Settings → Launch → Profile Deck</b> is on.</div>
+          <div class="toolbar">
+            <button id="deck-open" class="primary" title="open the deck and adopt every running profile">Open Deck</button>
+            <button id="deck-group" title="group all running profile windows under one taskbar button">Group taskbar</button>
+            <button id="deck-close" class="danger" title="close the deck — windows go back to normal">Close Deck</button>
+            <div class="spacer"></div>
+            <button id="deck-refresh">Refresh</button>
+          </div>
+          <p class="view-hint" id="deck-state">checking…</p>
+          <div class="table-wrap">
+            <table class="grid" id="deck-table">
+              <thead><tr><th>Profile</th><th style="width:140px">In deck</th><th style="width:100px">Show</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="deck-empty" hidden><div class="big">▤</div>No profiles in the deck — start some profiles, then <b>Open Deck</b>.</div>
+          </div>
+        </section>
+
+        <!-- ======================= cookie thinger (J5) ================== -->
+        <section class="view" id="view-thinger" hidden>
+          <div class="view-hint">The <b>cookie thinger</b> runs numbered groups of cookie actions (copy / move / delete across domains) on <b>running</b> profiles, from a saved file. Different from <b>Cookies</b> (the live jar editor). The file holds cookie values, so it is write-only here: pasting and saving <b>replaces</b> the stored file; its contents are never shown back.</div>
+          <div class="toolbar">
+            <span id="thinger-state" class="hint" style="color:var(--faint)">checking…</span>
+            <div class="spacer"></div>
+            <button id="thinger-refresh">Refresh status</button>
+          </div>
+          <label style="display:block;margin:6px 0 2px">Paste the cookie-thinger file to replace the saved one:</label>
+          <textarea id="thinger-text" rows="8" spellcheck="false" autocomplete="off" placeholder="[group 1]&#10;copy .source.com -> .dest.com&#10;delete .olddomain.com"></textarea>
+          <div class="toolbar">
+            <button id="thinger-save" class="primary">Save file (replaces)</button>
+            <span id="thinger-save-status" class="hint"></span>
+          </div>
+          <div class="toolbar" style="margin-top:12px">
+            <label style="color:var(--muted);font-size:12px">Run group
+              <select id="thinger-group"></select>
+            </label>
+            <select id="thinger-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>
+            <button id="thinger-run" class="primary">Run on this profile</button>
+            <button id="thinger-run-all">Run on all running</button>
+            <div class="spacer"></div>
+          </div>
+          <details style="margin-top:10px">
+            <summary style="cursor:pointer">Load a cookies-for-profiles CSV into running profiles</summary>
+            <p class="hint">One cookie per row, matched to a running profile by name or email. Values never leave this machine.</p>
+            <input type="file" id="thinger-csv-file" accept=".csv,text/csv" />
+            <textarea id="thinger-csv" rows="5" spellcheck="false" placeholder="…or paste CSV rows here"></textarea>
+            <div class="toolbar"><button id="thinger-csv-load" class="primary">Load CSV</button><span id="thinger-csv-status" class="hint"></span></div>
+          </details>
+          <div id="thinger-result" class="view-hint" style="margin-top:8px"></div>
+        </section>
+
+        <!-- ========================= autofill map (J4) ================== -->
+        <section class="view" id="view-autofill" hidden>
+          <div class="view-hint">The <b>autofill map</b> fills a profile's open checkout page from a saved field map (one block per site). It moves card numbers and codes, so the file is write-only here: pasting and saving <b>replaces</b> the stored map; its contents are never shown back.</div>
+          <div class="toolbar">
+            <span id="autofill-state" class="hint" style="color:var(--faint)">checking…</span>
+            <div class="spacer"></div>
+            <button id="autofill-refresh">Refresh status</button>
+          </div>
+          <label style="display:block;margin:6px 0 2px">Paste the autofill map to replace the saved one:</label>
+          <textarea id="autofill-text" rows="8" spellcheck="false" autocomplete="off" placeholder="url = *ticketmaster.com*&#10;id = &quot;email&quot; ; email"></textarea>
+          <div class="toolbar">
+            <button id="autofill-save" class="primary">Save map (replaces)</button>
+            <span id="autofill-save-status" class="hint"></span>
+          </div>
+          <div class="toolbar" style="margin-top:12px">
+            <select id="autofill-profile" style="min-width:220px"><option value="">(running profiles…)</option></select>
+            <input id="autofill-card" placeholder="card name (optional)" maxlength="60" style="width:150px" />
+            <select id="autofill-mode" title="typing style for the fill"><option value="">default mode</option><option value="human">human (typed)</option><option value="machine">machine (instant)</option></select>
+            <button id="autofill-fill" class="primary">Fill this profile</button>
+            <button id="autofill-broadcast">Fill all running</button>
+          </div>
+          <div id="autofill-result" class="view-hint" style="margin-top:8px"></div>
         </section>
 
         <!-- =========================== warmups ========================== -->

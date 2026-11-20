@@ -1673,14 +1673,26 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
 - [x] **Console follow-ups (BUILT 2026-11-20, `3c696896c`):** Settings → Integrations now has **Redeem an invite** (server + `qpi_…` → `POST /team/redeem`; the key goes to Settings → Team and is never returned or shown; shows the licence and days left) and **Discord notifications** (masked webhook, Save / Send test / Remove); Settings has new **sites** and **ui** sections and a Deck switch under **launch**; the persona warmup has a **Stop** button (`POST /profiles/:id/warmup/persona/stop`, ends as `stopped`, stops a profile the warmup started). Audit follow-ups: presets no longer carry `team.serverUrl` or `automation.scriptingEndpoints`; the network log's strip mode is a header allowlist and drops `user:pass@`; cookie routes are browser-denied. Tests: 2 redeem + 1 stop + 3 audit.
   - **Not done / needs an owner decision:** userscripts + preloaders (touch the fingerprint surface — needs a claim check first), temp-proxy recall (semantics unclear: which proxy is recalled, and when?), remote proxy providers / Proxy Resolver, engine-side titles, arc2 provider, Jancy-plugin shim.
 
-## What's left to do (2026-11-20)
+## What's left to do (2026-11-20, console UIs built + userscripts finding)
 
-Everything in the owner's roadmap is built and committed on `jancy-j1` (W1, LIC, W2, J3a, J6, DECK, J3b, J4, J5, M5/J7-partial, R). Not pushed. Remaining work, roughly in order:
+The console UI gaps are now closed. On `jancy-j1`, not pushed.
 
-- **Console UI gaps** — the Deck, autofill map (J4), cookie thinger (J5) and some J3b buttons are API-only; they need console screens. (Settings cards for Sites/Discord, licence redeem and the warmup Stop button are done.)
-- **Userscripts / preloaders (J8)** — approved in principle to build behind an off-by-default setting after a fingerprint claim check. Buildable without more owner input.
-- **J8/J7 leftovers that are self-contained** — `keybinds.txt` import, format strings for window title/tooltip/screenshot name, console editor for the format/sort rules.
-- **Needs owner input** — the 5 open questions below, plus Google Sheet sink (needs a Google account + sheet), the real autofill maps, and a live-queue check (owner has no live queue yet).
+**Built this pass** (console screens only — no new API routes; all call existing, already-audited, browser-origin-denied endpoints):
+- **Deck screen** — Open / Close / Group-taskbar, a tab-per-profile list with Show; the Windows-only state is surfaced and buttons disable when unsupported/closed.
+- **Autofill map (J4) screen** — the map file holds card numbers, so it is **write-only** in the console (paste-to-replace; contents are never read back — the GET returns counts only by design). Shows block/error counts after save; Fill-this-profile and Fill-all-running with optional card name and typing mode.
+- **Cookie thinger (J5) screen** — same write-only paste-to-replace editor; run a numbered group on one or all running profiles; load a cookies-for-profiles CSV.
+- **Tab View per-row actions (J3b)** — take the next unused passcode, set priority / note / row colour per tab.
+- Verified live against a scratch API in the browser: every view renders, the autofill save error-path (400 → red, text kept) and success-path (200 → "saved · N block", text cleared) both correct, no console errors, live secret store untouched.
+
+**Already built earlier — do NOT rebuild** (the old roadmap listed these as leftovers; they exist):
+- **Format / sort rule editor** — Settings → `ui` (`tabLabelFormat`, `tabSort`), applied in the console page (app.js `applyUiExpressions`).
+- **Key binds** — bound from the command palette (Ctrl+Shift+Space, then Shift+Enter on a command), stored in `ui.keybinds`.
+
+**Still remaining:**
+- **Userscripts / preloaders (J8) — now an owner/engine item, not a console addition.** They must run at document-start (before the page's own scripts). The CDP layer has **no** `Page.addScriptToEvaluateOnNewDocument` hook — only `createIsolatedWorld`, which runs *after* load (used by autofill + site plugins). A document-start injection point is engine plumbing, so this can't be finished from the console/API side alone. Design intent stands: off by default, behind a fingerprint-claim check. Needs an engine decision before build.
+- **Window title / tooltip / screenshot-name format strings (J7)** — needs backend apply points (where engine windows are titled and screenshots are named); self-contained once those exist.
+- **`keybinds.txt` import** — small; needs the Jancy file format. Low value while the palette already binds keys one at a time.
+- **Needs owner input** — the questions below, Google Sheet sink (needs a Google account + sheet), real autofill maps, a live-queue check (owner has no live queue yet).
 - **Not verified** — queue readers never saw a real queue; Deck taskbar grouping visual, multi-monitor and high-DPI untested; the ADR claim suite was not run inside a container.
 
 ## Owner questions

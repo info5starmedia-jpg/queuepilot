@@ -39,7 +39,7 @@ function toast(detail, type = "info") {
 
 /* ============================ view switching ============================ */
 
-const VIEWS = ["profiles", "proxies", "tabs", "tabview", "cookies", "warmups", "providers", "events", "settings"];
+const VIEWS = ["profiles", "proxies", "tabs", "tabview", "deck", "cookies", "thinger", "autofill", "warmups", "providers", "events", "settings"];
 let activeView = "profiles";
 
 function setView(name) {
@@ -54,6 +54,9 @@ function setView(name) {
   renderStats();
   if (name === "cookies") refreshCookiesProfiles();
   if (name === "tabview") loadTabView();
+  if (name === "deck") loadDeck();
+  if (name === "thinger") loadThinger();
+  if (name === "autofill") loadAutofill();
   if (name === "warmups") { loadWarmups(); loadPersonaCard(); }
 }
 
@@ -65,7 +68,7 @@ window.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   const k = e.key.toLowerCase();
-  const map = { p: "profiles", x: "proxies", t: "tabs", n: "tabview", c: "cookies", w: "warmups", v: "providers", e: "events", g: "settings" };
+  const map = { p: "profiles", x: "proxies", t: "tabs", n: "tabview", d: "deck", c: "cookies", k: "thinger", a: "autofill", w: "warmups", v: "providers", e: "events", g: "settings" };
   if (map[k]) setView(map[k]);
   if (k === "/" && activeView === "profiles") {
     e.preventDefault();
@@ -2312,7 +2315,13 @@ async function loadTabView() {
           <td>${esc(r.uiLabel ?? r.label)}${r.state?.subtitle ? `<div class="mono" style="color:var(--muted)">${esc(r.state.subtitle)}</div>` : ""}</td>
           <td>${esc(d.stage ?? "—")}</td><td>${esc(d.queuePosition ?? "—")}</td><td>${esc(d.cartTimer ?? "—")}</td>
           <td>${esc(r.state?.priority ?? "—")}</td><td>${esc(r.state?.notes ?? "")}</td>
-          <td>${(r.state?.passcodes ?? []).filter((p) => !p.used).length}/${(r.state?.passcodes ?? []).length}</td></tr>`;
+          <td>${(r.state?.passcodes ?? []).filter((p) => !p.used).length}/${(r.state?.passcodes ?? []).length}</td>
+          <td><span class="row-actions">
+            <button data-tv="passcode" data-id="${esc(r.profileId)}" title="take the next unused passcode">🔑</button>
+            <button data-tv="priority" data-id="${esc(r.profileId)}" title="set priority">▲</button>
+            <button data-tv="notes" data-id="${esc(r.profileId)}" title="edit note">✎</button>
+            <button data-tv="colour" data-id="${esc(r.profileId)}" title="set row colour">🎨</button>
+          </span></td></tr>`;
       })
       .join("");
     $("#tabview-empty").hidden = rows.length !== 0;
@@ -2450,4 +2459,222 @@ window.addEventListener("keydown", async (e) => {
   commandCatalogue ??= (await api("/commands")).commands;
   const cmd = commandCatalogue.find((c) => c.id === id);
   if (cmd) runCommand(cmd);
+});
+
+/* ================= running-profile picker (shared) ===================== */
+async function fillProfileSelect(sel, { runningOnly = true } = {}) {
+  const current = sel.value;
+  const { profiles } = await api("/profiles");
+  const list = runningOnly ? profiles.filter((p) => p.status === "running") : profiles;
+  sel.innerHTML =
+    `<option value="">(${list.length} ${runningOnly ? "running" : "profile" + (list.length === 1 ? "" : "s")} — pick one)</option>` +
+    list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${runningOnly ? "" : ` · ${esc(String(p.status ?? "idle"))}`}</option>`).join("");
+  if (list.some((p) => p.id === current)) sel.value = current;
+  return list;
+}
+const runningIds = async () => (await api("/profiles")).profiles.filter((p) => p.status === "running").map((p) => p.id);
+
+/* ============================ Deck (ADR-0008) =========================== */
+async function loadDeck() {
+  const el = $("#deck-state");
+  let data;
+  try {
+    data = await api("/deck");
+  } catch (err) {
+    el.textContent = err.message;
+    el.style.color = "var(--red)";
+    return;
+  }
+  el.style.color = "var(--faint)";
+  el.textContent = !data.supported
+    ? "The Profile Deck is Windows-only for now — not available on this machine."
+    : data.open
+      ? `Deck open · ${data.tabs.length} tab${data.tabs.length === 1 ? "" : "s"}`
+      : "Deck closed.";
+  $("#deck-open").disabled = !data.supported;
+  $("#deck-group").disabled = !data.supported;
+  $("#deck-close").disabled = !data.supported || !data.open;
+  const nameOf = new Map(allProfiles.map((p) => [p.id, p.name]));
+  const tbody = $("#deck-table tbody");
+  tbody.innerHTML = "";
+  $("#deck-empty").hidden = data.tabs.length !== 0;
+  for (const t of data.tabs) {
+    const tr = document.createElement("tr");
+    const adopted = t.adopted === true ? "in deck" : t.adopted === false ? "separate" : "pending";
+    tr.innerHTML = `
+      <td>${esc(nameOf.get(t.profileId) ?? t.label ?? t.profileId.slice(0, 8))}</td>
+      <td><span class="tag">${esc(adopted)}</span></td>
+      <td><button class="ghost" data-select>Show</button></td>`;
+    tr.querySelector("[data-select]").addEventListener("click", async (ev) => {
+      ev.target.disabled = true;
+      try { await api(`/deck/profiles/${t.profileId}/select`, { method: "POST", body: "{}" }); }
+      catch (err) { toast(err.message, "error"); }
+      ev.target.disabled = false;
+    });
+    tbody.appendChild(tr);
+  }
+}
+$("#deck-refresh").addEventListener("click", loadDeck);
+$("#deck-open").addEventListener("click", async () => {
+  try { await api("/deck/open", { method: "POST", body: "{}" }); toast("deck opened"); } catch (err) { toast(err.message, "error"); }
+  loadDeck();
+});
+$("#deck-close").addEventListener("click", async () => {
+  if (!window.confirm("Close the Profile Deck? Each profile window goes back to a normal window.")) return;
+  try { await api("/deck", { method: "DELETE" }); toast("deck closed"); } catch (err) { toast(err.message, "error"); }
+  loadDeck();
+});
+$("#deck-group").addEventListener("click", async () => {
+  try { await api("/deck/group-taskbar", { method: "POST", body: "{}" }); toast("taskbar grouped"); } catch (err) { toast(err.message, "error"); }
+});
+
+/* ============================ Cookie Thinger (J5) ======================= */
+function thingerSay(sel, msg, isErr) { const el = $(sel); el.textContent = msg; el.style.color = isErr ? "var(--red)" : "var(--faint)"; }
+function thingerResult(data) {
+  const el = $("#thinger-result");
+  if (Array.isArray(data?.results)) {
+    const ok = data.results.filter((r) => r.ok).length;
+    el.textContent = `${ok}/${data.results.length} profile${data.results.length === 1 ? "" : "s"} ran`;
+  } else if (data) {
+    el.textContent = `group ${data.group}: ${data.deleted ?? 0} deleted, ${data.copied ?? 0} copied, ${data.pasted ?? 0} pasted${(data.errors ?? []).length ? ` · ${data.errors.length} error(s)` : ""}`;
+  }
+}
+async function loadThinger() {
+  const gsel = $("#thinger-group");
+  if (!gsel.options.length) gsel.innerHTML = Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+  fillProfileSelect($("#thinger-profile")).catch(() => {});
+  try {
+    const s = await api("/cookie-thinger");
+    const groups = Object.entries(s.groups ?? {}).map(([g, n]) => `#${g}:${n}`).join(" ") || "none";
+    const errs = (s.errors ?? []).length;
+    thingerSay("#thinger-state", `${s.exists ? "file saved" : "no file yet"} · groups ${groups}${errs ? ` · ${errs} error${errs === 1 ? "" : "s"}` : ""}`, errs > 0);
+  } catch (err) { thingerSay("#thinger-state", err.message, true); }
+}
+$("#thinger-refresh").addEventListener("click", loadThinger);
+$("#thinger-save").addEventListener("click", async () => {
+  const text = $("#thinger-text").value;
+  if (!text.trim()) return thingerSay("#thinger-save-status", "paste the file first", true);
+  try {
+    const s = await api("/cookie-thinger", { method: "PUT", body: JSON.stringify({ text }) });
+    const groups = Object.entries(s.groups ?? {}).map(([g, n]) => `#${g}:${n}`).join(" ") || "none";
+    thingerSay("#thinger-save-status", `saved · groups ${groups}`, false);
+    $("#thinger-text").value = "";
+    loadThinger();
+  } catch (err) { thingerSay("#thinger-save-status", err.message, true); }
+});
+$("#thinger-run").addEventListener("click", async () => {
+  const id = $("#thinger-profile").value;
+  const group = Number($("#thinger-group").value);
+  if (!id) return toast("pick a running profile", "error");
+  try { thingerResult(await api(`/profiles/${id}/cookie-thinger/run`, { method: "POST", body: JSON.stringify({ group }) })); }
+  catch (err) { toast(err.message, "error"); }
+});
+$("#thinger-run-all").addEventListener("click", async () => {
+  const group = Number($("#thinger-group").value);
+  const ids = await runningIds();
+  if (!ids.length) return toast("no running profiles", "error");
+  try { thingerResult(await api("/cookie-thinger/run", { method: "POST", body: JSON.stringify({ group, profileIds: ids }) })); }
+  catch (err) { toast(err.message, "error"); }
+});
+$("#thinger-csv-file").addEventListener("change", (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => { $("#thinger-csv").value = String(reader.result ?? ""); };
+  reader.readAsText(f);
+});
+$("#thinger-csv-load").addEventListener("click", async () => {
+  const csv = $("#thinger-csv").value.trim();
+  if (!csv) return thingerSay("#thinger-csv-status", "paste or choose a CSV first", true);
+  try {
+    const r = await api("/cookie-thinger/load-csv", { method: "POST", body: JSON.stringify({ csv }) });
+    const set = (r.results ?? []).reduce((n, x) => n + (x.set ?? 0), 0);
+    thingerSay("#thinger-csv-status", `loaded ${set} cookie${set === 1 ? "" : "s"} into ${(r.results ?? []).length} profile(s)${r.unmatched?.length ? ` · ${r.unmatched.length} unmatched` : ""}`, false);
+    $("#thinger-csv").value = ""; $("#thinger-csv-file").value = "";
+  } catch (err) { thingerSay("#thinger-csv-status", err.message, true); }
+});
+
+/* ============================ Autofill Map (J4) ========================= */
+function autofillSay(sel, msg, isErr) { const el = $(sel); el.textContent = msg; el.style.color = isErr ? "var(--red)" : "var(--faint)"; }
+function autofillOptions() {
+  const opts = {};
+  const card = $("#autofill-card").value.trim();
+  const mode = $("#autofill-mode").value;
+  if (card) opts.card = card;
+  if (mode) opts.defaultMode = mode;
+  return opts;
+}
+function autofillResult(data) {
+  const el = $("#autofill-result");
+  if (Array.isArray(data?.results)) {
+    const ok = data.results.filter((r) => r.ok).length;
+    el.textContent = `${ok}/${data.results.length} profile${data.results.length === 1 ? "" : "s"} filled`;
+  } else if (data) {
+    const filled = (data.filled ?? []).length, missing = (data.missing ?? []).length, errs = (data.errors ?? []).length;
+    el.textContent = `filled ${filled} field${filled === 1 ? "" : "s"}${missing ? `, ${missing} missing` : ""}${data.clicked ? `, ${data.clicked} clicked` : ""}${errs ? ` · ${errs} error(s)` : ""}`;
+  }
+}
+async function loadAutofill() {
+  fillProfileSelect($("#autofill-profile")).catch(() => {});
+  try {
+    const s = await api("/autofill/map");
+    const errs = (s.errors ?? []).length;
+    autofillSay("#autofill-state", `${s.exists ? "map saved" : "no map yet"} · ${s.blocks} site block${s.blocks === 1 ? "" : "s"}${errs ? ` · ${errs} error${errs === 1 ? "" : "s"}` : ""}`, errs > 0);
+  } catch (err) { autofillSay("#autofill-state", err.message, true); }
+}
+$("#autofill-refresh").addEventListener("click", loadAutofill);
+$("#autofill-save").addEventListener("click", async () => {
+  const text = $("#autofill-text").value;
+  if (!text.trim()) return autofillSay("#autofill-save-status", "paste the map first", true);
+  try {
+    const s = await api("/autofill/map", { method: "PUT", body: JSON.stringify({ text }) });
+    autofillSay("#autofill-save-status", `saved · ${s.blocks} block${s.blocks === 1 ? "" : "s"}`, false);
+    $("#autofill-text").value = "";
+    loadAutofill();
+  } catch (err) { autofillSay("#autofill-save-status", err.message, true); }
+});
+$("#autofill-fill").addEventListener("click", async () => {
+  const id = $("#autofill-profile").value;
+  if (!id) return toast("pick a running profile", "error");
+  try { autofillResult(await api(`/profiles/${id}/autofill/map`, { method: "POST", body: JSON.stringify(autofillOptions()) })); }
+  catch (err) { toast(err.message, "error"); }
+});
+$("#autofill-broadcast").addEventListener("click", async () => {
+  const ids = await runningIds();
+  if (!ids.length) return toast("no running profiles", "error");
+  try { autofillResult(await api("/autofill/map/broadcast", { method: "POST", body: JSON.stringify({ profileIds: ids, ...autofillOptions() }) })); }
+  catch (err) { toast(err.message, "error"); }
+});
+
+/* ============== Tab View per-row actions (J3b) ============== */
+$("#tabview-table tbody").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-tv]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  try {
+    if (btn.dataset.tv === "passcode") {
+      const r = await api(`/profiles/${id}/tab-state/passcode`, { method: "POST", body: "{}" });
+      if (r.passcode) window.prompt("Next passcode (copy it):", r.passcode);
+      else toast("no unused passcodes for this tab", "error");
+      return;
+    }
+    if (btn.dataset.tv === "priority") {
+      const v = window.prompt("Priority (higher sorts first; blank clears):", "");
+      if (v === null) return;
+      const priority = v.trim() === "" ? null : Number(v);
+      if (priority !== null && !Number.isInteger(priority)) return toast("priority must be a whole number", "error");
+      await api(`/profiles/${id}/tab-state`, { method: "PATCH", body: JSON.stringify({ priority }) });
+    } else if (btn.dataset.tv === "notes") {
+      const v = window.prompt("Note for this tab:", "");
+      if (v === null) return;
+      await api(`/profiles/${id}/tab-state`, { method: "PATCH", body: JSON.stringify({ notes: v }) });
+    } else if (btn.dataset.tv === "colour") {
+      const v = window.prompt("Row colour as #rrggbb (blank clears):", "#3366ff");
+      if (v === null) return;
+      const colour = v.trim() === "" ? null : v.trim();
+      if (colour !== null && !/^#[0-9a-fA-F]{6}$/.test(colour)) return toast("colour must be like #3366ff", "error");
+      await api(`/profiles/${id}/tab-state`, { method: "PATCH", body: JSON.stringify({ colour }) });
+    }
+    loadTabView();
+  } catch (err) { toast(err.message, "error"); }
 });
