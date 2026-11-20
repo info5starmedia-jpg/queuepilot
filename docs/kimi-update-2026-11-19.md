@@ -11,7 +11,8 @@ Jancy work.
 | `jancy-j1` | worktree `C:\Users\colli\qp-worktrees\jancy-j1` (D: is FAT32, so npm can't install there) | Built on `jancy-wiki-audit`, plus J1 slice A code, ADR-0008 and this note |
 
 `main` is untouched. The live API on :50325 is untouched; nothing was
-restarted or deployed.
+restarted or deployed. **Update 2026-11-20:** `jancy-j1` has now been pushed
+to the remote at the owner's request (§16); `main` is still untouched.
 
 ## What changed
 
@@ -404,3 +405,29 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - `scripts/build-release.mjs` (esbuild) bundles the whole API + console into one minified, identifier-mangled `dist-release/server/queuepilot.mjs`; only `better-sqlite3` and `playwright-core` stay external (native). Console `app.js` is minified (Kimi #7).
 - `--tester` excludes the local warmup planner (`plan.ts` → throwing stub) and the bundled personas, so warmups require the team server. Verified: the tester build refuses a local warmup and carries no planner/persona URLs.
 - Commands + full how-to: `docs/RELEASE.md`. Root scripts: `npm run build:release`, `npm run build:release:tester`.
+
+### 16. Console UIs — Deck, J4, J5 + Tab View actions (2026-11-20, `a7d216a01`)
+
+Closed the remaining console UI gaps. **Frontend only** (`apps/api/src/dashboard/{app.js,index.html}`) — **no new API routes**; every screen calls existing, already-audited, browser-origin-denied endpoints.
+
+**Did / built:**
+- **Deck** view — Open / Close / Group-taskbar and a tab-per-profile list with Show; the Windows-only state is surfaced and buttons disable when it's unsupported or closed.
+- **Autofill map (J4)** view — write-only paste-to-replace editor (the map holds card numbers; `GET /autofill/map` returns counts only by design — the body is never read back), block/error counts after save, Fill-this-profile + Fill-all-running with card name and typing mode.
+- **Cookie thinger (J5)** view — same write-only editor; run a numbered group on one or all running profiles; load a cookies-for-profiles CSV.
+- **Tab View (J3b)** — per-row take-passcode / set priority / note / row colour (delegated on the tbody so it survives the 5 s refresh).
+
+**Verified** live in the browser against a scratch API (port 50491, isolated `SPECTRA_DATA_DIR` + `QUEUEPILOT_DATA_DIR`): every view renders; the autofill save error-path (400 → red, text kept) and success-path (200 → "saved · 1 block", text cleared) both correct; no console errors; live secret store untouched (:50325 and `%USERPROFILE%\.queuepilot\secrets` not touched). `typecheck` + release build green; no TypeScript changed, so the test suite is unaffected.
+
+**Fixed along the way:**
+- The scheduled 3:44 am run had fired but with `cwd = D:\QueuePilot` (FAT32, npm can't install there) — it "succeeded" yet landed nothing. Deleted the dead task and did the work in the `jancy-j1` worktree.
+- A `prettier --write` reformatted the whole hand-maintained `app.js` (~2 000-line noise diff). Reverted. The dashboard is **not** prettier-clean at HEAD and is hand-formatted on purpose — these edits match the house style. (Heads-up: `npm run format:check` warns on the dashboard files; it always has.)
+
+**Couldn't do / parked (needs owner or engine input):**
+- **Userscripts / preloaders (J8)** — not finishable from the console/API side. They must run at document-start, and the CDP layer has **no** `Page.addScriptToEvaluateOnNewDocument` hook — only post-load `createIsolatedWorld` (autofill + site plugins). A document-start injection point is engine plumbing → owner/engine decision. Design intent stands: off by default, behind a fingerprint-claim check.
+- **Window title / tooltip / screenshot-name format strings (J7)** — needs backend apply points (where engine windows are titled and screenshots are named) first.
+- **`keybinds.txt` import** — small; needs the Jancy file format. Low value while the palette binds keys one at a time.
+
+**Found / corrected in the roadmap:**
+- Two items the old roadmap listed as leftovers are **already built — do not rebuild**: the **format/sort rule editor** (Settings → `ui`: `tabLabelFormat`, `tabSort`, applied in the console page) and **key binds** (command palette, Ctrl+Shift+Space → Shift+Enter, stored in `ui.keybinds`). Roadmap updated to say so.
+
+`jancy-j1` **pushed to the remote at the owner's request** (2026-11-20).
