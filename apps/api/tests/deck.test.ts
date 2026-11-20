@@ -87,4 +87,10 @@ describe("Profile Deck service", () => {
     expect(DECK_HOST_SCRIPT).not.toContain("`");
     expect(DECK_HOST_SCRIPT).not.toContain("${");
   });
+
+  it("force-shows the container: windowsHide leaves the first window hidden otherwise (found live 2026-11-20)", () => {
+    // $f.Show() alone is overridden by the SW_HIDE the API spawns with; the
+    // explicit ShowWindow(SW_SHOW) after it is what makes the deck visible.
+    expect(DECK_HOST_SCRIPT).toMatch(/\$f\.Show\(\)\s*\n(?:.*\n)*?\s*\[void\]\[W\]::ShowWindow\(\$f\.Handle, 5\)/);
+  });
 });

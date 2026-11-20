@@ -152,6 +152,12 @@ function Try-Adopt($m) {
 $f.Add_Resize({ if ($script:current -and $tabs.ContainsKey($script:current)) { Fit $tabs[$script:current].h } })
 $f.Add_FormClosing({ foreach ($t in @($tabs.Values)) { Release $t } })
 $f.Show()
+# The API spawns this host with windowsHide (STARTF_USESHOWWINDOW + SW_HIDE).
+# Windows applies that state to the process's FIRST top-level window, and
+# Form.Show() alone leaves the form hidden — the deck then "works" (adopt
+# events flow) while no container is ever visible on screen (found live
+# 2026-11-20). An explicit SW_SHOW overrides the inherited state.
+[void][W]::ShowWindow($f.Handle, 5)
 Emit @{ event = "ready" }
 
 $rd = [Console]::In.ReadLineAsync()
@@ -159,6 +165,9 @@ $lastCheck = [DateTime]::UtcNow
 while ($f.Visible) {
   [System.Windows.Forms.Application]::DoEvents()
   Start-Sleep -Milliseconds 40
+  # Self-heal: anything that hides the container (startup state, another
+  # tool) is undone on the next beat; Release() on close is unaffected.
+  if (-not [W]::IsWindowVisible($f.Handle)) { [void][W]::ShowWindow($f.Handle, 5) }
   if ($rd.IsCompleted) {
     $line = $rd.Result
     if ($null -eq $line) { $f.Close(); break }
