@@ -622,7 +622,15 @@ async function loadProfiles() {
   loadChecklist();
 }
 
+/* renderProfileTable is async (it awaits /profiles/batch-state between
+   clearing the tbody and appending rows). Two overlapping renders used to
+   interleave — both cleared, both awaited, both appended — and the table
+   showed every profile twice (2026-11-20). The seq guard makes a stale
+   render abort after its await instead of appending duplicate rows. */
+let profileRenderSeq = 0;
+
 async function renderProfileTable() {
+  const seq = ++profileRenderSeq;
   const tbody = $("#profiles-table tbody");
   tbody.innerHTML = "";
   const list = visibleProfiles();
@@ -648,6 +656,10 @@ async function renderProfileTable() {
       /* batch state is best-effort — badges just stay hidden */
     }
   }
+
+  /* A newer render started while we awaited batch-state: it has already
+     re-cleared the tbody, so appending here would duplicate every row. */
+  if (seq !== profileRenderSeq) return;
 
   rows.forEach((p, i) => {
     const tr = document.createElement("tr");
