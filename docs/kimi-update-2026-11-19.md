@@ -261,7 +261,7 @@ change is an owner decision, tracked as roadmap **SEC-2**.
     `bookmark-sets` EPERM on rename, and one server run cut short.
   - Logged in the roadmap.
 
-### 9. LIC, W2, J3a (`08f85292`, `5da03d91`, `b93f4400`, J3a commit)
+### 9. LIC, W2, J3a (`08f85292`, `5da03d91`, `b93f4400`, `78487ad1`)
 
 - **LIC (team server):**
   - Accounts own all content; bundles and leases are keyed
