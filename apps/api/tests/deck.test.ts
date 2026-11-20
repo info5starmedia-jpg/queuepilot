@@ -77,6 +77,43 @@ describe("Profile Deck service", () => {
     expect(t.killed()).toBe(1);
   });
 
+  it("retries a select the host never acked, and stops after the ack (issue 9)", async () => {
+    const t = setup();
+    await t.deck.adopt(ID);
+    t.deck.select(ID);
+    expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(1);
+    // Host never answered — force the entry old and run the label tick:
+    // the select is resent instead of silently no-op'ing.
+    const priv = t.deck as unknown as { refreshLabels(): void; pendingSelects: Map<string, number> };
+    priv.pendingSelects.set(ID, Date.now() - 10_000);
+    priv.refreshLabels();
+    expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(2);
+    // The host's `selected` event acks it; the next tick must NOT resend.
+    t.reply({ event: "selected", id: ID });
+    priv.refreshLabels();
+    expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(2);
+  });
+
+  it("a fresh select is not retried on the same tick", async () => {
+    const t = setup();
+    await t.deck.adopt(ID);
+    t.deck.select(ID);
+    const priv = t.deck as unknown as { refreshLabels(): void };
+    priv.refreshLabels();
+    expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(1);
+  });
+
+  it("removing the tab clears any pending select retry", async () => {
+    const t = setup();
+    await t.deck.adopt(ID);
+    t.deck.select(ID);
+    t.deck.remove(ID);
+    const priv = t.deck as unknown as { refreshLabels(): void; pendingSelects: Map<string, number> };
+    priv.pendingSelects.set(ID, Date.now() - 10_000);
+    priv.refreshLabels();
+    expect(t.sent.filter((s) => s.cmd === "select")).toHaveLength(1); // no resend after remove
+  });
+
   it("is Windows-only and refuses a profile that is not running", async () => {
     await expect(setup({ platform: "linux" }).deck.adopt(ID)).rejects.toThrow();
     await expect(setup().deck.adopt("22222222-2222-4222-8222-222222222222")).rejects.toThrow(/start the profile/);

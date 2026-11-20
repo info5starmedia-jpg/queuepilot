@@ -77,6 +77,11 @@ export class DeckService {
   private host: DeckHost | null = null;
   private ready = false;
   private readonly tabs = new Map<string, { label: string; adopted: boolean | null; since: number; pid: number }>();
+  /** Selects the host has not answered with a `selected` event yet — the
+   *  stdin pipe race that drops an adopt (found live 2026-11-20: 1 of 3
+   *  selects silently no-op'd) can drop a select too. Retried on the label
+   *  tick; Select-Tab is idempotent so a duplicate resend is harmless. */
+  private readonly pendingSelects = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: DeckDeps) {}
@@ -135,11 +140,14 @@ export class DeckService {
 
   remove(profileId: string): void {
     if (!this.tabs.delete(profileId)) return;
+    this.pendingSelects.delete(profileId);
     this.host?.send(JSON.stringify({ cmd: "remove", id: profileId }));
   }
 
   select(profileId: string): void {
-    if (this.tabs.has(profileId)) this.host?.send(JSON.stringify({ cmd: "select", id: profileId }));
+    if (!this.tabs.has(profileId)) return;
+    this.pendingSelects.set(profileId, Date.now());
+    this.host?.send(JSON.stringify({ cmd: "select", id: profileId }));
   }
 
   close(): void {
@@ -196,7 +204,8 @@ export class DeckService {
     else if (ev.event === "adopted") {
       const t = this.tabs.get(ev.id);
       if (t) t.adopted = ev.ok;
-    } else if (ev.event === "gone") this.tabs.delete(ev.id);
+    } else if (ev.event === "selected") this.pendingSelects.delete(ev.id);
+    else if (ev.event === "gone") this.tabs.delete(ev.id);
     else if (ev.event === "closed") this.reset();
   }
 
@@ -208,6 +217,19 @@ export class DeckService {
       if (t.adopted === null && Date.now() - t.since > 8000) {
         t.since = Date.now();
         this.host.send(JSON.stringify({ cmd: "adopt", id, pid: t.pid, label: t.label }));
+      }
+    }
+    // Select ACK+retry: a select the host never answered is resent once it is
+    // a tick old; the host's Select-Tab is idempotent, so a stray duplicate
+    // after an ack race just shows the same tab again.
+    for (const [id, since] of this.pendingSelects) {
+      if (!this.tabs.has(id)) {
+        this.pendingSelects.delete(id);
+        continue;
+      }
+      if (Date.now() - since > 2000) {
+        this.pendingSelects.set(id, Date.now());
+        this.host.send(JSON.stringify({ cmd: "select", id }));
       }
     }
     for (const l of this.deps.labels()) {
@@ -226,5 +248,6 @@ export class DeckService {
     this.host = null;
     this.ready = false;
     this.tabs.clear();
+    this.pendingSelects.clear();
   }
 }
