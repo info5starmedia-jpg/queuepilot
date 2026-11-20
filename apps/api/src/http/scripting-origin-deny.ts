@@ -44,6 +44,8 @@ const SENSITIVE_PATTERNS = [
   /^\/profiles\/[^/]+\/discord(\/|$)/,
   /^\/queue-positions$/,
   /^\/tools(\/|$)/,
+  // ADR-0008: the Deck re-parents real windows.
+  /^\/deck(\/|$)/,
   // Audit M2: the "sites" settings section flips Discord export and page clicks.
   /^\/settings(\/|$)/,
 ];

@@ -359,3 +359,11 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - **LOW:** ReDoS bounds, JSON-LD depth limit, per-tab try/catch, GCM tag/IV length check, `maskWebhook` no longer throws.
 - Not done (LOW, optional): an `ALLOWED_HOSTS` list for LAN-hostname installs; pinning the loopback Origin port; cookie-export sends still unencrypted when no password is given (operator's choice).
 - Gates: 785 API + 39 server tests, typecheck and build clean.
+
+### 10. DECK — Profile Deck (2026-11-20)
+
+- Spike passed (see ADR-0008): adopting a Fury window as `WS_CHILD` while keeping its frame style leaves outer/inner deltas (16/95), `screen.*`, focus and visibility identical to a free window. Removing the frame broke them (14/94), so the Deck does not.
+- Built as a PowerShell + WinForms host driven by the API over stdin/stdout JSON lines (no new dependency, no native binary).
+- Routes: `GET /deck`, `POST /deck/open`, `POST /deck/profiles/:id/adopt|select`, `DELETE /deck`, `POST /deck/group-taskbar`. Setting: Launch → `deckEnabled`.
+- Tab label = `email · #queuePosition` (owner Q13), refreshed every 5 s from tab state.
+- Windows only. Not done: console UI, popups under the profile's tab, DPI/multi-monitor checks.

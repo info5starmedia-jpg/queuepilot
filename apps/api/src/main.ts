@@ -48,6 +48,7 @@ import { EmailAccountService } from "./application/email/email-account.service.j
 import { TabStateService } from "./application/tabs/tab-state.service.js";
 import { SitePluginService } from "./application/siteplugins/site-plugin.service.js";
 import { DiscordService } from "./application/discord/discord.service.js";
+import { DeckService } from "./application/deck/deck.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
@@ -299,6 +300,13 @@ export async function main(): Promise<void> {
   });
   const discord = new DiscordService({ secrets: secretStore, settings: () => settingsService.get("sites"), profiles });
   lifecycle.events.on("lifecycle", (e) => discord.onEvent(e));
+  const deck = new DeckService({
+    lifecycle,
+    labels: () => tabState.view().map((r) => ({ profileId: r.profileId, label: r.label })),
+    settings: () => settingsService.get("launch"),
+    dataDir: config.dataDir,
+  });
+  deck.start();
   const app = buildApp({
     config,
     profiles,
@@ -323,6 +331,7 @@ export async function main(): Promise<void> {
     tabState,
     sites,
     discord,
+    deck,
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries

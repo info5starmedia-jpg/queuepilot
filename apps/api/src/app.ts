@@ -28,6 +28,8 @@ import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerTabStateRoutes } from "./http/tab-state.routes.js";
 import { registerSiteRoutes } from "./http/sites.routes.js";
+import { registerDeckRoutes } from "./http/deck.routes.js";
+import type { DeckService } from "./application/deck/deck.service.js";
 import type { SitePluginService } from "./application/siteplugins/site-plugin.service.js";
 import type { DiscordService } from "./application/discord/discord.service.js";
 import type { TabStateService } from "./application/tabs/tab-state.service.js";
@@ -86,6 +88,8 @@ export interface AppDeps {
   /** J6: site readers (queue position, cart timer…) and Discord. */
   sites?: SitePluginService;
   discord?: DiscordService;
+  /** ADR-0008 Profile Deck. */
+  deck?: DeckService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -203,6 +207,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     },
   });
+  if (deps.deck) {
+    registerDeckRoutes(app, {
+      deck: deps.deck,
+      running: () =>
+        deps.profiles
+          .list()
+          .filter((p) => p.status === "running")
+          .map((p) => ({ id: p.id, pid: deps.lifecycle.activeRun(p.id)?.pid ?? null })),
+    });
+  }
   registerGoogleRoutes(app, deps.google);
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);

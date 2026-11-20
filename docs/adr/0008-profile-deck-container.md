@@ -1,7 +1,6 @@
 # ADR-0008: Profile Deck, one window with a tab per running profile
 
-**Status:** proposed (2026-11-19). Gate: a spike must pass the claim suite
-before build.
+**Status:** accepted and built (2026-11-20) after the spike below passed. Owner GO 2026-11-19.
 
 ## Context
 
@@ -96,3 +95,20 @@ Jancy's Focus Delay problem.
 - Tab-state, format-string and queue-position work (J3/J6/J7) gets a real
   tab strip to render into. This replaces the "engine tab titles need an
   engine patch" 🖥 item in the parity report.
+
+## Spike result (2026-11-20) and what was built
+
+Option 1/2 were replaced by a **PowerShell + WinForms host** (`deck-host-script.ts`): plain user32 `SetParent`, no Electron, no koffi, no native binary.
+
+Fury 0.5.5-qp.4 profiles, probed over CDP before and after adoption:
+
+| Vector | Free window | Adopted (WS_CHILD, frame kept) |
+|---|---|---|
+| `outerWidth − innerWidth` / height | 16 / 95 | **16 / 95** |
+| `screen.availLeft/Top/Width/Height`, `screen.width/height` | persona's | unchanged |
+| `screenX/Y` | window position | container-relative position (plausible) |
+| `document.hasFocus()`, `visibilityState` of a hidden tab | true / visible | true / visible (no "Browsing Activity Paused") |
+
+- **Finding 1:** stripping the frame (the obvious way) changed the deltas to 14 / 94. Keeping `WS_OVERLAPPEDWINDOW` and only swapping `WS_POPUP` for `WS_CHILD` keeps 16 / 95. The invisible resize border is offset outside the container, never hidden.
+- **Finding 2:** the window-fit watcher shrank an adopted window that exceeded its profile's claimed screen (1536x864 persona), so the container is capped at 1280x714 client and cannot be maximised.
+- **Not covered:** the full Python claim suite was NOT run inside a container (it launches its own browser); 125 %+ DPI scaling, multi-monitor, and popups/new windows opened by a profile (they stay separate top-level windows for now).
