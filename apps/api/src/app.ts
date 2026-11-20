@@ -27,6 +27,7 @@ import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerWarmupRoutes, registerPersonaWarmupRoutes } from "./http/warmups.routes.js";
+import { TeamServerClient } from "./application/team/team-client.js";
 import { PersonaWarmupService, ipApiCountry, personaDirsFor } from "./application/warmups/persona-warmup.service.js";
 import { WarmupService } from "./application/warmups/warmup.service.js";
 import { registerCookieRoutes } from "./http/cookies.routes.js";
@@ -154,6 +155,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       siteSettingsFile: path.join(deps.config.dataDir, "persona-sites.json"),
     }),
   );
+  // LIC: which licence the configured team key belongs to, and days left.
+  // { configured: false } without a team server; server errors (expired,
+  // revoked, unreachable) come back as { configured: true, error }.
+  app.get("/team/licence", async () => {
+    const client = deps.settingsStore ? TeamServerClient.fromSettings(deps.settingsStore.get("team")) : null;
+    if (!client) return { configured: false };
+    try {
+      return { configured: true, licence: await client.licence() };
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      return { configured: true, error: { code: e.code ?? "HTTP_ERROR", message: e.message ?? String(err) } };
+    }
+  });
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.

@@ -29,10 +29,12 @@ function authed(token: string, init: RequestInit = {}): RequestInit {
 describe("team server", () => {
   let server: TeamServerApp;
   let base: string;
+  let OP: string;
 
   beforeEach(async () => {
     server = buildTeamServerApp(config());
     base = await listen(server.app);
+    OP = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
   });
 
   afterEach(async () => {
@@ -58,21 +60,21 @@ describe("team server", () => {
     const bytes = Buffer.from("sealed-bundle-bytes", "utf8");
     const put = await fetch(
       `${base}/bundles/prof-1`,
-      authed(ADMIN, { method: "PUT", body: bytes, headers: { "content-type": "application/octet-stream" } }),
+      authed(OP, { method: "PUT", body: bytes, headers: { "content-type": "application/octet-stream" } }),
     );
     expect(put.status).toBe(200);
     expect(await put.json()).toEqual({ profileId: "prof-1", revision: 1 });
 
-    const got = await fetch(`${base}/bundles/prof-1`, authed(ADMIN));
+    const got = await fetch(`${base}/bundles/prof-1`, authed(OP));
     expect(got.status).toBe(200);
     expect(Buffer.from(await got.arrayBuffer()).equals(bytes)).toBe(true);
     expect(got.headers.get("x-revision")).toBe("1");
-    expect(got.headers.get("x-updated-by")).toBe("env-admin");
+    expect(got.headers.get("x-updated-by")).toBe("test-machine");
   });
 
   it("optimistic concurrency: stale baseRevision is a 409 with current revision", async () => {
     const put = (rev?: number) =>
-      fetch(`${base}/bundles/prof-1${rev === undefined ? "" : `?baseRevision=${rev}`}`, authed(ADMIN, {
+      fetch(`${base}/bundles/prof-1${rev === undefined ? "" : `?baseRevision=${rev}`}`, authed(OP, {
         method: "PUT",
         body: Buffer.from("v"),
       }));
@@ -86,7 +88,7 @@ describe("team server", () => {
   });
 
   it("first push with a non-zero baseRevision is rejected (no create-under-race)", async () => {
-    const res = await fetch(`${base}/bundles/new-prof?baseRevision=5`, authed(ADMIN, {
+    const res = await fetch(`${base}/bundles/new-prof?baseRevision=5`, authed(OP, {
       method: "PUT",
       body: Buffer.from("v"),
     }));
@@ -134,30 +136,31 @@ describe("team server", () => {
   });
 
   it("validates profileId and body", async () => {
-    const bad = await fetch(`${base}/bundles/${encodeURIComponent("no spaces!")}`, authed(ADMIN, {
+    const bad = await fetch(`${base}/bundles/${encodeURIComponent("no spaces!")}`, authed(OP, {
       method: "PUT",
       body: Buffer.from("v"),
     }));
     expect(bad.status).toBe(400);
-    const empty = await fetch(`${base}/bundles/ok-id`, authed(ADMIN, { method: "PUT", body: Buffer.alloc(0) }));
+    const empty = await fetch(`${base}/bundles/ok-id`, authed(OP, { method: "PUT", body: Buffer.alloc(0) }));
     expect(empty.status).toBe(400);
   });
 
   it("list and delete", async () => {
-    await fetch(`${base}/bundles/b`, authed(ADMIN, { method: "PUT", body: Buffer.from("2") }));
-    await fetch(`${base}/bundles/a`, authed(ADMIN, { method: "PUT", body: Buffer.from("1") }));
-    const list = await fetch(`${base}/bundles`, authed(ADMIN));
+    await fetch(`${base}/bundles/b`, authed(OP, { method: "PUT", body: Buffer.from("2") }));
+    await fetch(`${base}/bundles/a`, authed(OP, { method: "PUT", body: Buffer.from("1") }));
+    const list = await fetch(`${base}/bundles`, authed(OP));
     const { bundles } = (await list.json()) as { bundles: { profileId: string; revision: number }[] };
     expect(bundles.map((b) => b.profileId)).toEqual(["a", "b"]);
 
-    await fetch(`${base}/bundles/a`, authed(ADMIN, { method: "DELETE" }));
-    expect((await fetch(`${base}/bundles/a`, authed(ADMIN))).status).toBe(404);
+    await fetch(`${base}/bundles/a`, authed(OP, { method: "DELETE" }));
+    expect((await fetch(`${base}/bundles/a`, authed(OP))).status).toBe(404);
   });
 
   it("viewer cannot mint tokens (403) and env admin is required when no bootstrap token is set", async () => {
     await server.close();
     server = buildTeamServerApp(config({ adminToken: null }));
     base = await listen(server.app);
+    OP = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
     // No bootstrap, empty DB: nobody is admin yet — minting is impossible
     // until an admin token exists in the DB (documented chicken-and-egg).
     const res = await fetch(`${base}/tokens`, {

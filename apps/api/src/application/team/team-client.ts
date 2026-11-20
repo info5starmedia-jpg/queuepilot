@@ -21,6 +21,13 @@ export class TeamServerError extends Error {
   }
 }
 
+export interface TeamLicence {
+  account: { id: string; name: string };
+  role: string;
+  expiresAt: string | null;
+  daysLeft: number | null;
+}
+
 export interface TeamBundleHead {
   profileId: string;
   revision: number;
@@ -37,6 +44,11 @@ export interface TeamPullResult {
 }
 
 export class TeamServerClient {
+  /** Builds a client from the `team` settings section, or null when unconfigured. */
+  static fromSettings(team: { serverUrl?: string | null; token?: string | null }): TeamServerClient | null {
+    return team.serverUrl && team.token ? new TeamServerClient(team.serverUrl, team.token) : null;
+  }
+
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
@@ -54,7 +66,8 @@ export class TeamServerClient {
     opts: { body?: Buffer; query?: Record<string, string | number>; asJson?: boolean } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token}` };
-    const init: RequestInit = { method, headers };
+    // redirect: "error": a hostile or moved server cannot bounce us to another host.
+    const init: RequestInit = { method, headers, redirect: "error" };
     if (opts.body) {
       headers["content-type"] = opts.asJson ? "application/json" : "application/octet-stream";
       init.body = opts.asJson ? opts.body.toString("utf8") : opts.body;
@@ -85,6 +98,19 @@ export class TeamServerClient {
     const res = await fetch(this.url("/health"));
     if (!res.ok) throw new TeamServerError(res.status, "HTTP_ERROR", "health check failed");
     return (await res.json()) as { ok: boolean; bundles?: number };
+  }
+
+  /** LIC: the licence this key belongs to (account, role, expiry). */
+  async licence(): Promise<TeamLicence> {
+    const res = await this.req("GET", "/licence");
+    const j = (await res.json()) as Partial<TeamLicence>;
+    // Pass on only the expected fields, whatever the server sent.
+    return {
+      account: { id: String(j.account?.id ?? ""), name: String(j.account?.name ?? "") },
+      role: String(j.role ?? ""),
+      expiresAt: typeof j.expiresAt === "string" ? j.expiresAt : null,
+      daysLeft: typeof j.daysLeft === "number" ? j.daysLeft : null,
+    };
   }
 
   async listBundles(): Promise<TeamBundleHead[]> {

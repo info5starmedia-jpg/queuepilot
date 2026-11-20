@@ -31,6 +31,8 @@ const COOKIES: BundleCookie[] = [
 describe("TeamSyncLoop", () => {
   let server: TeamServerApp;
   let base: string;
+  /** LIC: content needs a licence key; the bootstrap admin key has no content access. */
+  let KEY: string;
 
   beforeEach(async () => {
     server = buildTeamServerApp({
@@ -43,6 +45,7 @@ describe("TeamSyncLoop", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const { port } = server.app.server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
+    KEY = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
   });
 
   afterEach(async () => {
@@ -55,7 +58,7 @@ describe("TeamSyncLoop", () => {
       export: async () => COOKIES,
       import: async () => {},
     }, ctx.proxies);
-    const sync = new TeamSyncService(bundles, new TeamServerClient(base, "bootstrap-secret"));
+    const sync = new TeamSyncService(bundles, new TeamServerClient(base, KEY));
     /** Create + start + push + stop — exports need the live engine. */
     async function pushFresh(name: string): Promise<void> {
       const p = ctx.profiles.create({ name, generateFingerprint: true });
@@ -77,7 +80,7 @@ describe("TeamSyncLoop", () => {
     if (opts.configured) {
       ctx.settings.patch("team", {
         serverUrl: base,
-        token: "bootstrap-secret",
+        token: KEY,
         syncPassphrase: PASSPHRASE,
       });
     }
@@ -156,7 +159,7 @@ describe("TeamSyncLoop", () => {
     await a.pushFresh("loop-restart");
 
     const ctx = makeTestContext();
-    ctx.settings.patch("team", { serverUrl: base, token: "bootstrap-secret", syncPassphrase: PASSPHRASE });
+    ctx.settings.patch("team", { serverUrl: base, token: KEY, syncPassphrase: PASSPHRASE });
     const bundles = new BundleService(ctx.profiles, ctx.lifecycle, {
       export: async () => [],
       import: async () => {},

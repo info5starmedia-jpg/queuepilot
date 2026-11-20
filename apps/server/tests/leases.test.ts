@@ -24,7 +24,7 @@ describe("team server leases", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const { port } = server.app.server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
-    token = "bootstrap-secret";
+    token = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
   });
 
   afterEach(async () => {
@@ -136,7 +136,7 @@ describe("team server leases", () => {
 
   it("viewer tokens cannot acquire (403); unauthenticated is 401", async () => {
     const minted = (await (
-      await rpc("POST", "/tokens", { name: "looker", role: "viewer" })
+      await rpc("POST", "/tokens", { name: "looker", role: "viewer" }, "bootstrap-secret")
     ).json()) as { token: string };
     const denied = await rpc(
       "POST",
@@ -154,20 +154,20 @@ describe("team server leases", () => {
     expect(res.status).toBe(400);
   });
 
-  it("admin force-release evicts a stuck lease; operator/viewer cannot", async () => {
+  it("an operator of the same account force-releases a stuck lease; viewer and admin cannot (LIC)", async () => {
     await rpc("POST", "/leases/acquire", { profileId: "p8", holder: "A:1", ttlMs: 600_000 });
     // A stranger's release is a no-op; the lease survives.
     const noOp = await rpc("POST", "/leases/release", { profileId: "p8", holder: "B:2" });
     expect(((await noOp.json()) as { released: boolean }).released).toBe(false);
 
-    // Operator force-release is refused (admin only).
-    const op = (await (
-      await rpc("POST", "/tokens", { name: "worker", role: "operator" })
+    const viewer = (await (
+      await rpc("POST", "/tokens", { name: "looker", role: "viewer" }, "bootstrap-secret")
     ).json()) as { token: string };
-    const opDenied = await rpc("DELETE", "/leases/p8", undefined, op.token);
-    expect(opDenied.status).toBe(403);
+    expect((await rpc("DELETE", "/leases/p8", undefined, viewer.token)).status).toBe(403);
+    // Admin keys have no content access at all.
+    expect((await rpc("DELETE", "/leases/p8", undefined, "bootstrap-secret")).status).toBe(403);
 
-    // Admin evicts; the profile is immediately acquirable by someone else.
+    // Operator evicts; the profile is immediately acquirable by someone else.
     const evicted = await rpc("DELETE", "/leases/p8");
     expect(evicted.status).toBe(200);
     const gone = await rpc("GET", "/leases/p8");

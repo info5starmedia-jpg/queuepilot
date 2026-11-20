@@ -57,6 +57,8 @@ function machine(baseUrl: string, token: string): Machine {
 describe("team sync — two machines, one server", () => {
   let server: TeamServerApp;
   let base: string;
+  /** LIC: content needs a licence key; the bootstrap admin key has no content access. */
+  let KEY: string;
 
   beforeEach(async () => {
     server = buildTeamServerApp({
@@ -69,6 +71,7 @@ describe("team sync — two machines, one server", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const { port } = server.app.server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
+    KEY = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
   });
 
   afterEach(async () => {
@@ -76,8 +79,8 @@ describe("team sync — two machines, one server", () => {
   });
 
   it("push from A, pull on B: profile appears, cookies land in B's engine", async () => {
-    const a = machine(base, "bootstrap-secret");
-    const b = machine(base, "bootstrap-secret");
+    const a = machine(base, KEY);
+    const b = machine(base, KEY);
 
     const onA = a.profiles.create({ name: "checkout-1", generateFingerprint: true });
     await a.ctx.lifecycle.start(onA.id);
@@ -97,8 +100,8 @@ describe("team sync — two machines, one server", () => {
   });
 
   it("re-pull upserts by name instead of duplicating", async () => {
-    const a = machine(base, "bootstrap-secret");
-    const b = machine(base, "bootstrap-secret");
+    const a = machine(base, KEY);
+    const b = machine(base, KEY);
     const onA = a.profiles.create({ name: "twice", generateFingerprint: true });
     await a.ctx.lifecycle.start(onA.id);
     await a.sync.pushProfile(onA.id, PASSPHRASE);
@@ -113,7 +116,7 @@ describe("team sync — two machines, one server", () => {
   });
 
   it("stale baseRevision surfaces TEAM_REVISION_CONFLICT with the server's revision", async () => {
-    const a = machine(base, "bootstrap-secret");
+    const a = machine(base, KEY);
     const onA = a.profiles.create({ name: "racy", generateFingerprint: true });
     await a.ctx.lifecycle.start(onA.id);
     await a.sync.pushProfile(onA.id, PASSPHRASE); // revision 1
@@ -128,8 +131,8 @@ describe("team sync — two machines, one server", () => {
   });
 
   it("wrong passphrase on the pull side is BUNDLE_INVALID before anything is created", async () => {
-    const a = machine(base, "bootstrap-secret");
-    const b = machine(base, "bootstrap-secret");
+    const a = machine(base, KEY);
+    const b = machine(base, KEY);
     const onA = a.profiles.create({ name: "sealed", generateFingerprint: true });
     await a.ctx.lifecycle.start(onA.id);
     await a.sync.pushProfile(onA.id, PASSPHRASE);
@@ -141,7 +144,7 @@ describe("team sync — two machines, one server", () => {
   });
 
   it("bad token surfaces TEAM_UNAUTHORIZED; listRemote shows heads", async () => {
-    const a = machine(base, "bootstrap-secret");
+    const a = machine(base, KEY);
     const onA = a.profiles.create({ name: "listed", generateFingerprint: true });
     await a.ctx.lifecycle.start(onA.id);
     await a.sync.pushProfile(onA.id, PASSPHRASE);
@@ -151,7 +154,7 @@ describe("team sync — two machines, one server", () => {
       {
         profileId: onA.id,
         revision: 1,
-        updatedBy: "env-admin",
+        updatedBy: "test-machine",
         updatedAt: expect.any(String) as unknown as string,
       },
     ]);
