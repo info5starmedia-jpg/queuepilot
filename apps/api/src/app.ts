@@ -153,6 +153,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ipApiCountry(deps.lifecycle.egressDiagnostics(profileId)?.egress?.exitIp ?? null),
       personaDirs: personaDirsFor(deps.config.dataDir, path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")),
       siteSettingsFile: path.join(deps.config.dataDir, "persona-sites.json"),
+      // W2: with a team server configured, personas, site settings and plans
+      // come from it; the local planner is only the no-server fallback.
+      remote: () => (deps.settingsStore ? TeamServerClient.fromSettings(deps.settingsStore.get("team")) : null),
     }),
   );
   // LIC: which licence the configured team key belongs to, and days left.
