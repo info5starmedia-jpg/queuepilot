@@ -46,6 +46,8 @@ import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolv
 import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe.js";
 import { EmailAccountService } from "./application/email/email-account.service.js";
 import { TabStateService } from "./application/tabs/tab-state.service.js";
+import { SitePluginService } from "./application/siteplugins/site-plugin.service.js";
+import { DiscordService } from "./application/discord/discord.service.js";
 import { registerImapResolver } from "./application/resolvers/imap-resolver.js";
 import { registerGmailResolver } from "./application/resolvers/gmail-resolver.js";
 import { registerBuiltinParsers } from "./application/parsers/builtin-parsers.js";
@@ -279,6 +281,24 @@ export async function main(): Promise<void> {
     import: importCookiesViaCdp,
   }, proxies);
 
+  // J3a + J6: tab state, site readers (started after listen) and Discord.
+  const tabState = new TabStateService({ db, profiles, liveTabs: (id) => lifecycle.listTabs(id).tabs });
+  const sites = new SitePluginService({
+    profiles,
+    lifecycle,
+    tabState,
+    settings: () => settingsService.get("sites"),
+    dataDir: config.dataDir,
+    proxyName: (proxyId) => {
+      try {
+        return proxies.get(proxyId).name;
+      } catch {
+        return null;
+      }
+    },
+  });
+  const discord = new DiscordService({ secrets: secretStore, settings: () => settingsService.get("sites"), profiles });
+  lifecycle.events.on("lifecycle", (e) => discord.onEvent(e));
   const app = buildApp({
     config,
     profiles,
@@ -300,12 +320,15 @@ export async function main(): Promise<void> {
     settingsStore: settingsService,
     secrets: secretStore,
     emailAccounts,
-    tabState: new TabStateService({ db, profiles, liveTabs: (id) => lifecycle.listTabs(id).tabs }),
+    tabState,
+    sites,
+    discord,
   });
   await app.listen({ port: config.port, host: config.host });
   // P7.7c: background pull sync — enabled only when Settings → Team carries
   // serverUrl + token + syncPassphrase; otherwise every tick is a no-op.
   new TeamSyncLoop({ bundles, settings: settingsService, dataDir: config.dataDir }).start();
+  sites.start();
   console.log(
     `[queuepilot] API listening on http://${config.host}:${config.port} (runtime: ${runtime.kind})`,
   );

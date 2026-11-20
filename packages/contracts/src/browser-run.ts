@@ -44,6 +44,13 @@ export const LifecycleEventSchema = z.object({
     "tab.closed",
     /** A configured start page refused to open at launch (detail = url + error). */
     "startpage.failed",
+    /** J6 site plug-ins: detail is a short human line (position, timer, event). */
+    "queue.position",
+    "queue.passed",
+    "cart.timer",
+    /** 2FA code pipeline outcome (detail = field + site, never the code). */
+    "code.resolved",
+    "code.failed",
   ]),
   profileId: z.string().uuid(),
   runId: z.string().uuid().nullable(),

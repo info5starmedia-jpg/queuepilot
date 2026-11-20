@@ -39,6 +39,8 @@ import { JylRegistry } from "../src/application/jyl/jyl-registry.js";
 import { SettingsService } from "../src/application/settings/settings.service.js";
 import { EmailAccountService } from "../src/application/email/email-account.service.js";
 import { TabStateService } from "../src/application/tabs/tab-state.service.js";
+import { SitePluginService, type PageAccess } from "../src/application/siteplugins/site-plugin.service.js";
+import { DiscordService } from "../src/application/discord/discord.service.js";
 
 /** In-memory SheetReader: tests seed rows per sheetId, no network involved. */
 export class FakeSheets implements SheetReader {
@@ -83,6 +85,11 @@ export interface TestContext {
   emailAccounts: EmailAccountService;
   tabState: TabStateService;
   db: Db;
+  sites: SitePluginService;
+  discord: DiscordService;
+  /** J6 test doubles: pages per wsEndpoint, and every Discord POST. */
+  fakePages: { pages: { targetId: string; url: string; probe: unknown }[]; evaluated: string[] };
+  discordCalls: { url: string; init: RequestInit }[];
   dataDir: string;
 }
 
@@ -148,6 +155,34 @@ export function makeTestContext(
   const settings = new SettingsService(db);
   const emailAccounts = new EmailAccountService(db, secrets);
   const tabState = new TabStateService({ db, profiles, liveTabs: (id) => lifecycle.listTabs(id).tabs });
+  const fakePages: TestContext["fakePages"] = { pages: [], evaluated: [] };
+  const pageAccess: PageAccess = {
+    listPages: async () => fakePages.pages.map((p) => ({ targetId: p.targetId, url: p.url })),
+    evaluate: async (_ws, targetId, expr) => {
+      fakePages.evaluated.push(expr.slice(0, 40));
+      return fakePages.pages.find((p) => p.targetId === targetId)?.probe ?? null;
+    },
+  };
+  const sites = new SitePluginService({
+    profiles,
+    lifecycle,
+    tabState,
+    settings: () => settings.get("sites"),
+    dataDir,
+    pages: pageAccess,
+  });
+  const discordCalls: TestContext["discordCalls"] = [];
+  const discord = new DiscordService({
+    secrets,
+    settings: () => settings.get("sites"),
+    profiles,
+    sleep: async () => {},
+    fetch: (async (url: string, init: RequestInit) => {
+      discordCalls.push({ url: String(url), init });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch,
+  });
+  lifecycle.events.on("lifecycle", (e) => discord.onEvent(e));
   const config: AppConfig = {
     port: 0,
     host: "127.0.0.1",
@@ -179,6 +214,8 @@ export function makeTestContext(
     secrets,
     emailAccounts,
     tabState,
+    sites,
+    discord,
   });
   return {
     app,
@@ -200,6 +237,10 @@ export function makeTestContext(
     emailAccounts,
     tabState,
     db,
+    sites,
+    discord,
+    fakePages,
+    discordCalls,
     dataDir,
   };
 }

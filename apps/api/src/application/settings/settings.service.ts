@@ -65,6 +65,7 @@ export class SettingsService {
       team: this.merged("team"),
       integrations: this.merged("integrations"),
       automation: this.merged("automation"),
+      sites: this.merged("sites"),
     };
   }
 

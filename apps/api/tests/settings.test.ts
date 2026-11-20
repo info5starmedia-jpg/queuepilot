@@ -72,7 +72,7 @@ describe("settings HTTP routes", () => {
     const body = res.json();
     expect(body.general.theme).toBe("jancy");
     expect(Object.keys(body).sort()).toEqual(
-      ["automation", "engine", "general", "integrations", "launch", "team"],
+      ["automation", "engine", "general", "integrations", "launch", "sites", "team"],
     );
   });
 

@@ -32,6 +32,12 @@ export interface PluginDeps {
    * install with SPECTRA_API_TOKEN set — so every caller is authenticated.
    */
   hasApiToken: boolean;
+  /**
+   * J3a/J6: told about every resolved CODE (emailcode / smscode / othercode,
+   * never passwords) — records it in tab state and emits code.resolved /
+   * code.failed. Never given the value of a password.
+   */
+  onCode?: (profileId: string, field: "emailcode" | "smscode" | "othercode", value: string, isError: boolean, site: string | null) => void;
 }
 
 const RunResolverSchema = z.object({
@@ -112,6 +118,26 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
   // othercode from extra.fields) resolves instead: a literal passes through,
   // a `name:args` value whose name is a REGISTERED resolver gets resolved.
   app.post("/profiles/:id/resolve", async (req) => {
+    const out = await resolveRoute(req);
+    const field = (out as { field?: string }).field;
+    if (
+      deps.onCode &&
+      out.found &&
+      (field === "emailcode" || field === "smscode" || field === "othercode") &&
+      typeof (out as { value?: unknown }).value === "string"
+    ) {
+      const body = (req.body ?? {}) as { site?: unknown; url?: unknown };
+      const site = typeof body.site === "string" ? body.site : typeof body.url === "string" ? safeHost(body.url) : null;
+      try {
+        deps.onCode(out.profileId, field, String(out.value), Boolean((out as { isError?: boolean }).isError), site);
+      } catch {
+        /* reporting never fails the resolve */
+      }
+    }
+    return out;
+  });
+
+  async function resolveRoute(req: import("fastify").FastifyRequest): Promise<{ found: boolean; profileId: string } & Record<string, unknown>> {
     if (!deps.hasApiToken) {
       throw new DomainError(
         ErrorCodes.FORBIDDEN,
@@ -156,7 +182,15 @@ export function registerPluginRoutes(app: FastifyInstance, deps: PluginDeps): vo
       }
     }
     return { found: false, profileId: id };
-  });
+  }
+}
+
+function safeHost(u: string): string | null {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return null;
+  }
 }
 
 function resolverContext(

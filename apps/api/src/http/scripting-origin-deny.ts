@@ -38,6 +38,11 @@ const SENSITIVE_PATTERNS = [
   /^\/profiles\/[^/]+\/tab-state(\/|$)/,
   /^\/tab-state(\/|$)/,
   /^\/tab-view$/,
+  // J6: Discord webhook + cookie export, the queue-position log, tools.
+  /^\/integrations\/discord(\/|$)/,
+  /^\/profiles\/[^/]+\/discord(\/|$)/,
+  /^\/queue-positions$/,
+  /^\/tools(\/|$)/,
 ];
 
 function isScriptingUrl(url: string): boolean {

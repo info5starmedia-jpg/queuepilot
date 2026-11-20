@@ -27,6 +27,9 @@ import { registerProviderRoutes } from "./http/providers.routes.js";
 import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerTabStateRoutes } from "./http/tab-state.routes.js";
+import { registerSiteRoutes } from "./http/sites.routes.js";
+import type { SitePluginService } from "./application/siteplugins/site-plugin.service.js";
+import type { DiscordService } from "./application/discord/discord.service.js";
 import type { TabStateService } from "./application/tabs/tab-state.service.js";
 import { registerWarmupRoutes, registerPersonaWarmupRoutes } from "./http/warmups.routes.js";
 import { TeamServerClient } from "./application/team/team-client.js";
@@ -80,6 +83,9 @@ export interface AppDeps {
   emailAccounts?: EmailAccountService;
   /** J3a: tab state per profile + cross-run Tab View. */
   tabState?: TabStateService;
+  /** J6: site readers (queue position, cart timer…) and Discord. */
+  sites?: SitePluginService;
+  discord?: DiscordService;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -181,11 +187,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // token — that choice is the operator's opt-in to raw export.
     rawCookieExportAllowed: Boolean(deps.config.apiToken),
   });
+  registerSiteRoutes(app, {
+    ...(deps.sites ? { sites: deps.sites } : {}),
+    ...(deps.discord ? { discord: deps.discord } : {}),
+    lifecycle: deps.lifecycle,
+    rawCookieExportAllowed: Boolean(deps.config.apiToken),
+    profileName: (id) => deps.profiles.get(id).name,
+    proxyName: (id) => {
+      const proxyId = deps.profiles.get(id).proxyId;
+      if (!proxyId) return null;
+      try {
+        return deps.proxies.get(proxyId).name;
+      } catch {
+        return null;
+      }
+    },
+  });
   registerGoogleRoutes(app, deps.google);
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);
   if (deps.plugins && deps.resolvers && deps.parsers && deps.aliases) {
+    const tabState = deps.tabState;
     registerPluginRoutes(app, {
+      // J3a/J6: a resolved CODE is kept in tab state and announced (never its value).
+      onCode: (profileId, field, value, isError, site) => {
+        const kind = field === "emailcode" ? "emailCode" : field === "smscode" ? "smsCode" : "otherCode";
+        tabState?.recordCode(profileId, kind, { value, timestamp: new Date().toISOString(), isError });
+        deps.lifecycle.events.emit("lifecycle", {
+          type: isError ? "code.failed" : "code.resolved",
+          profileId,
+          runId: deps.lifecycle.activeRun(profileId)?.id ?? null,
+          at: new Date().toISOString(),
+          detail: `${field}${site ? ` · ${site}` : ""}`,
+        });
+      },
       plugins: deps.plugins,
       resolvers: deps.resolvers,
       parsers: deps.parsers,

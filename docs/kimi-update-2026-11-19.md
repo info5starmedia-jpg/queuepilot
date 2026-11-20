@@ -291,6 +291,15 @@ change is an owner decision, tracked as roadmap **SEC-2**.
 - **Gates:** 775 API + 39 server, tsc and build clean.
 - **Also fixed (J3a audit MEDIUM):** the browser-origin deny check now decodes the path the way the router does, so `/%74ab-view` or `/%6Ayl` can no longer slip past it (this also covered the older `/jyl`, `/plugins`… prefixes). Fastify 4xx errors (bad JSON, `__proto__`) are no longer reported as 500.
 
+### 10. J6 site plug-ins + Discord (built; audit pending)
+
+See roadmap J6. Readers in `apps/api/src/application/siteplugins`, Discord in
+`apps/api/src/application/discord`, routes in `http/sites.routes.ts`,
+settings section `sites`. Not live-verified (no live queue). Gates: 780 API
++ 39 server. **The in-house security audit of J6 has not run yet: do it
+first.** The owner's Discord webhook was not stored by the build; the owner
+pastes it into the live install.
+
 ## Next, in order (owner, 2026-11-19)
 
 1. J6 site plug-ins (Queue-it / TM extractors write `tab_state.data`)

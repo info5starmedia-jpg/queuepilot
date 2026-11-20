@@ -14,6 +14,7 @@ export const SETTINGS_SECTIONS = [
   "team",
   "integrations",
   "automation",
+  "sites",
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -98,6 +99,46 @@ export const AutomationSettingsSchema = z.object({
 });
 export type AutomationSettings = z.infer<typeof AutomationSettingsSchema>;
 
+/**
+ * J6 — site plug-ins (Queue-it / Ticketmaster / AXS / Etix readers, page
+ * actions, queue-position log) and Discord. Page actions click things, so
+ * they are OFF by default; the Discord cookie export is opt-in.
+ */
+export const DISCORD_EVENTS = [
+  "queue.passed",
+  "queue.position",
+  "cart.timer",
+  "code.resolved",
+  "code.failed",
+  "run.started",
+  "run.crashed",
+] as const;
+
+export const SitesSettingsSchema = z.object({
+  /** Read queue position / cart timer / event info from open tabs. */
+  extractorsEnabled: z.boolean().default(true),
+  extractorIntervalSec: z.number().int().min(2).max(60).default(5),
+  /** Ticketmaster page actions (element clicks; off by default). */
+  tmDismissOverlay: z.boolean().default(false),
+  tmAutoNoInsurance: z.boolean().default(false),
+  tmAutoTerms: z.boolean().default(false),
+  /** Phrase search on event pages: a match colours the tab. */
+  eventPhrases: z
+    .array(z.object({ phrase: z.string().min(1).max(100), colour: z.string().regex(/^#[0-9a-fA-F]{6}$/) }))
+    .max(50)
+    .default([]),
+  /** Append every new queue position to <dataDir>/queue-positions/<event>.csv. */
+  queuePositionCsv: z.boolean().default(true),
+  /** Discord webhook notifications (the URL itself lives in the secret store). */
+  discordEnabled: z.boolean().default(false),
+  discordEvents: z.array(z.enum(DISCORD_EVENTS)).max(DISCORD_EVENTS.length).default(["queue.passed", "cart.timer", "code.failed", "run.crashed"]),
+  /** Minimum minutes between queue-position posts per profile (0 = never post positions). */
+  discordPositionEveryMin: z.number().int().min(0).max(1440).default(0),
+  /** Opt-in: allow "send cookies + exit IP to Discord" for a profile. */
+  discordCookieExport: z.boolean().default(false),
+});
+export type SitesSettings = z.infer<typeof SitesSettingsSchema>;
+
 export const SettingsSchema = z.object({
   general: GeneralSettingsSchema.default({}),
   engine: EngineSettingsSchema.default({}),
@@ -105,6 +146,7 @@ export const SettingsSchema = z.object({
   team: TeamSettingsSchema.default({}),
   integrations: IntegrationsSettingsSchema.default({}),
   automation: AutomationSettingsSchema.default({}),
+  sites: SitesSettingsSchema.default({}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -116,4 +158,5 @@ export const SettingsPatchSchemas = {
   team: TeamSettingsSchema.partial(),
   integrations: IntegrationsSettingsSchema.partial(),
   automation: AutomationSettingsSchema.partial(),
+  sites: SitesSettingsSchema.partial(),
 } as const;
