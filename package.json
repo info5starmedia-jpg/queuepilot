@@ -22,6 +22,7 @@
     "build:release:tester": "node scripts/build-release.mjs --tester"
   },
   "devDependencies": {
+    "javascript-obfuscator": "^4.1.1",
     "prettier": "^3.4.2"
   }
 }

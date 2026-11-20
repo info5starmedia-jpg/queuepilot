@@ -16,12 +16,39 @@
 // install step provides with `npm ci --omit=dev` in dist-release/.
 
 import { build, transform } from "esbuild";
+import JsObfuscator from "javascript-obfuscator";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tester = process.argv.includes("--tester");
+// Strong obfuscation (owner, 2026-11-20): a javascript-obfuscator pass on top
+// of esbuild's minify+mangle. On by default; --no-obfuscate skips it for a
+// debuggable build. The server bundle is ESM + large (fastify, etc.), so the
+// transforms that most often break or bloat a big bundle — controlFlow
+// flattening and dead-code injection — are left OFF there; the console is
+// small and browser-only, so it takes the heavier pass.
+const obfuscate = !process.argv.includes("--no-obfuscate");
+
+/** Shared, correctness-safe obfuscator options. */
+const baseObf = {
+  compact: true,
+  identifierNamesGenerator: "hexadecimal",
+  numbersToExpressions: true,
+  simplify: true,
+  splitStrings: true,
+  splitStringsChunkLength: 8,
+  stringArray: true,
+  stringArrayEncoding: ["base64"],
+  stringArrayThreshold: 0.8,
+  transformObjectKeys: true,
+  selfDefending: true,
+  // The reserved names below MUST survive: Node globals and the external
+  // module ids esbuild emits as top-level imports/requires.
+  reservedStrings: ["better-sqlite3", "playwright-core", "node:.*"],
+};
 const out = path.join(root, "dist-release");
 const apiRoot = path.join(root, "apps", "api");
 
@@ -81,6 +108,27 @@ const result = await build({
 });
 fs.writeFileSync(path.join(out, "server", "queuepilot.mjs.meta.json"), JSON.stringify(result.metafile));
 
+// Strong pass over the server bundle. ESM: keep the module syntax, and leave
+// controlFlowFlattening / deadCodeInjection off (they break or bloat a bundle
+// this size). esbuild has already minified+mangled; this adds a string array
+// (base64), object-key transforms, self-defending and number expressions.
+const serverFile = path.join(out, "server", "queuepilot.mjs");
+if (obfuscate) {
+  const src = fs.readFileSync(serverFile, "utf8");
+  const res = JsObfuscator.obfuscate(src, {
+    ...baseObf,
+    target: "node",
+    controlFlowFlattening: false,
+    deadCodeInjection: false,
+    // The require shim in the banner uses import.meta — don't let the pass
+    // rename module-level bindings it needs.
+    renameGlobals: false,
+  });
+  fs.writeFileSync(serverFile, res.getObfuscatedCode());
+}
+// Fail loudly if the pass produced code Node can't even parse.
+execFileSync(process.execPath, ["--check", serverFile], { stdio: "pipe" });
+
 // Console: minify index.html's inline-free assets. app.js is minified with
 // terser; index.html and styles.css are copied (already small, and the HTML
 // references the asset by name). This is Kimi #7 (console JS ships minified).
@@ -91,7 +139,20 @@ for (const file of fs.readdirSync(dash)) {
   const from = path.join(dash, file);
   if (file.endsWith(".js")) {
     const min = await transform(fs.readFileSync(from, "utf8"), { loader: "js", minify: true, legalComments: "none" });
-    fs.writeFileSync(path.join(dashOut, file), min.code);
+    // The console is small and browser-only, so it takes the full pass,
+    // control-flow flattening included.
+    const code = obfuscate
+      ? JsObfuscator.obfuscate(min.code, {
+          ...baseObf,
+          target: "browser",
+          controlFlowFlattening: true,
+          controlFlowFlatteningThreshold: 0.5,
+          deadCodeInjection: true,
+          deadCodeInjectionThreshold: 0.2,
+          disableConsoleOutput: false,
+        }).getObfuscatedCode()
+      : min.code;
+    fs.writeFileSync(path.join(dashOut, file), code);
   } else {
     fs.copyFileSync(from, path.join(dashOut, file));
   }
@@ -125,4 +186,5 @@ fs.writeFileSync(path.join(out, "start-queuepilot.cmd"), "@echo off\r\nnode \"%~
 const bytes = fs.statSync(path.join(out, "server", "queuepilot.mjs")).size;
 console.log(`[release] ${tester ? "TESTER" : "internal"} build -> ${path.relative(root, out)}`);
 console.log(`[release] server/queuepilot.mjs  ${(bytes / 1024 / 1024).toFixed(2)} MB  (externals: ${keep.join(", ")})`);
+console.log(`[release] obfuscation: ${obfuscate ? "ON (esbuild mangle + javascript-obfuscator)" : "off (--no-obfuscate)"}`);
 console.log(`[release] local warmup planner: ${tester ? "EXCLUDED (team server required)" : "included"}`);

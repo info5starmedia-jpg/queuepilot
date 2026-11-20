@@ -43,8 +43,8 @@ export const LaunchSettingsSchema = z.object({
   maxConcurrent: z.number().int().min(0).max(500).default(0),
   /** Open the profile's configured start pages at launch. */
   openStartPages: z.boolean().default(true),
-  /** ADR-0008: put each launched profile into the Profile Deck (one window, a tab per profile). Windows only. */
-  deckEnabled: z.boolean().default(false),
+  /** ADR-0008: put each launched profile into the Profile Deck (one window, a tab per profile). Windows only; a no-op elsewhere. Default on (owner, 2026-11-20). */
+  deckEnabled: z.boolean().default(true),
 });
 export type LaunchSettings = z.infer<typeof LaunchSettingsSchema>;
 
