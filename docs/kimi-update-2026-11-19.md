@@ -374,3 +374,10 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - API: change URL (focus delay + delay), sequential/hard reload, reopen, export open tabs, log note. One bad tab never aborts the rest.
 - Console: Tab View screen (N) over `/tab-view`.
 - Not done: Sheet sink, ephemeral profiles, per-tab timezone, console buttons for the new commands.
+
+### 12. J4 autofill map + J5 cookie thinger file (2026-11-20)
+
+- **J4:** the documented `autofill.map` format is parsed and run against a live page (blocks, globs, include/any, human/machine, swap, regex/quoted/boolean/XPath rules, buttons, shadow DOM, JS format functions in the page). Live-checked on a real Fury page. `GET/PUT /autofill/map`, `POST /profiles/:id/autofill/map`, `POST /autofill/map/broadcast`.
+- **J5:** `cookie-thinger.txt` with 10 groups, del/delall/copy/copyall/dcopy/paste, lists 1–5 (memory) and $1–$5 (secret store), cookies-for-profiles CSV. Live-checked on a real profile.
+- Both are browser-origin denied; responses name fields/counts, never values.
+- Not done: console screens for either file; the grammar for J5 is QueuePilot's own (Owner question 1).

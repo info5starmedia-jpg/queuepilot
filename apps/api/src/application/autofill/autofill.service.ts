@@ -155,6 +155,12 @@ export class AutofillService {
     };
   }
 
+  /** J4: run one page expression on the profile's page (the map engine's entry point). */
+  async evaluate(profileId: string, expression: string, targetId?: string, timeoutMs?: number): Promise<unknown> {
+    this.requireRunning(profileId);
+    return (await this.evaluateOnPage(profileId, expression, targetId, timeoutMs)).value;
+  }
+
   private requireRunning(profileId: string): void {
     const run = this.lifecycle.activeRun(profileId);
     if (!run || run.status !== "running" || !run.wsEndpoint) {

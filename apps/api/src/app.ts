@@ -28,7 +28,13 @@ import { registerEngineRoutes } from "./http/engine.routes.js";
 import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerTabStateRoutes } from "./http/tab-state.routes.js";
 import { registerSiteRoutes } from "./http/sites.routes.js";
+import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { registerDeckRoutes } from "./http/deck.routes.js";
+import { registerCookieThingerRoutes, cdpCookieOps } from "./http/cookie-thinger.routes.js";
+import { CookieThinger } from "./application/cookies/cookie-thinger-file.js";
+import { registerAutofillMapRoutes } from "./http/autofill-map.routes.js";
+import { AutofillMapService } from "./application/autofill/autofill-map.service.js";
+import { AutofillService } from "./application/autofill/autofill.service.js";
 import { registerTabCommandRoutes } from "./http/tab-commands.routes.js";
 import { TabCommandService } from "./application/tabs/tab-commands.js";
 import type { DeckService } from "./application/deck/deck.service.js";
@@ -218,6 +224,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     },
     dataDir: deps.config.dataDir,
   });
+  if (deps.secrets) {
+    registerCookieThingerRoutes(app, {
+      thinger: new CookieThinger({ dataDir: deps.config.dataDir, secrets: deps.secrets }),
+      ops: (id) => {
+        const run = deps.lifecycle.activeRun(id);
+        if (!run || run.status !== "running" || !run.wsEndpoint) {
+          throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${id} is not running — start it before cookie surgery`);
+        }
+        return cdpCookieOps(run.wsEndpoint);
+      },
+      profiles: () => deps.profiles.list().map((p) => ({ id: p.id, name: p.name, group: p.group ?? null, email: p.email })),
+    });
+  }
+  if (deps.tabState) {
+    registerAutofillMapRoutes(
+      app,
+      new AutofillMapService({
+        profiles: deps.profiles,
+        pages: new AutofillService(deps.profiles, deps.lifecycle, deps.secrets),
+        tabState: deps.tabState,
+        secrets: deps.secrets,
+        dataDir: deps.config.dataDir,
+      }),
+    );
+  }
   if (deps.deck) {
     registerDeckRoutes(app, {
       deck: deps.deck,

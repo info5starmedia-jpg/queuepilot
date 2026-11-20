@@ -46,6 +46,12 @@ const SENSITIVE_PATTERNS = [
   /^\/tools(\/|$)/,
   // ADR-0008: the Deck re-parents real windows.
   /^\/deck(\/|$)/,
+  // J5: cookie lists hold session cookies.
+  /^\/cookie-thinger(\/|$)/,
+  /^\/profiles\/[^/]+\/cookie-thinger(\/|$)/,
+  // J4: autofill map fills move card numbers, codes and passcodes.
+  /^\/autofill(\/|$)/,
+  /^\/profiles\/[^/]+\/autofill\/map$/,
   // Audit M2: the "sites" settings section flips Discord export and page clicks.
   /^\/settings(\/|$)/,
 ];
