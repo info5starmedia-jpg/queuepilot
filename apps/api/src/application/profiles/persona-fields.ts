@@ -35,6 +35,7 @@ export function personaFieldsOf(
     favorite: bag.favorite,
     tabColor: bag.tabColor,
     windowBounds: bag.windowBounds,
+    storeOnCloud: bag.storeOnCloud,
   });
   if (parsed.success) return parsed.data;
   // Malformed bag: ship defaults rather than crash. The raw bag is preserved

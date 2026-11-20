@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ErrorCodes, type FingerprintIdentity, type Profile } from "@queuepilot/contracts";
 import {
+  ENGINE_FEATURE_SWITCHES,
   FuryCoreRuntime,
   personaConfig,
   resolveFuryBinary,
@@ -31,6 +32,14 @@ const identity: FingerprintIdentity = {
   locale: "en-US",
   createdAt: new Date().toISOString(),
 };
+
+describe("engine feature switches", () => {
+  it("turns off the Secure DNS auto-upgrade, in a single --disable-features", () => {
+    const disables = ENGINE_FEATURE_SWITCHES.filter((s) => s.startsWith("--disable-features="));
+    expect(disables).toHaveLength(1); // Chromium keeps only the last one
+    expect(disables[0]!.split("=")[1]!.split(",")).toContain("DnsOverHttpsUpgrade");
+  });
+});
 
 describe("personaConfig", () => {
   it("maps every identity field to the fury schema v1 keys", () => {

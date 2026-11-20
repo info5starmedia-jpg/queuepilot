@@ -143,7 +143,11 @@ describe("lease guard in the lifecycle (P7.7b)", () => {
     const p = ctx.profiles.create({ name: "lease-renew", generateFingerprint: true });
 
     await ctx.lifecycle.start(p.id);
-    await sleep(70);
+    // Wait for two heartbeats rather than assuming they fit in a fixed 70 ms:
+    // under a loaded suite a 20 ms timer fires late (A1: 2 of 4 forks runs
+    // saw only one renewal at 70 ms). The deadline still fails a dead timer.
+    const deadline = Date.now() + 3_000;
+    while (calls.filter((c) => c.startsWith("renew")).length < 2 && Date.now() < deadline) await sleep(10);
     const renewals = calls.filter((c) => c.startsWith("renew")).length;
     expect(renewals).toBeGreaterThanOrEqual(2); // heartbeat ran while live
 

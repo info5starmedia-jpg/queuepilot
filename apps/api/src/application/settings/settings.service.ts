@@ -67,6 +67,7 @@ export class SettingsService {
       automation: this.merged("automation"),
       sites: this.merged("sites"),
       ui: this.merged("ui"),
+      agent: this.merged("agent"),
     };
   }
 

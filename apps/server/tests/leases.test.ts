@@ -5,31 +5,17 @@ import { buildTeamServerApp, type TeamServerApp } from "@queuepilot/server";
 /**
  * P7.7b — launch leases on the team server: the cross-machine double-start
  * guard. Acquire/renew/release/TTL takeover, role gating, and the LEASE_HELD
- * contract a machine sees when another holder has the profile.
+ * contract a machine sees when another holder has the profile. Leases are
+ * account-scoped (owner decision 2026-11-20); these run on an operator device
+ * token, i.e. in the owner's account.
  */
+
+const ADMIN = "bootstrap-secret";
 
 describe("team server leases", () => {
   let server: TeamServerApp;
   let base: string;
   let token: string;
-
-  beforeEach(async () => {
-    server = buildTeamServerApp({
-      host: "127.0.0.1",
-      port: 0,
-      dbPath: ":memory:",
-      adminToken: "bootstrap-secret",
-      machineName: "test",
-    });
-    await server.app.listen({ host: "127.0.0.1", port: 0 });
-    const { port } = server.app.server.address() as AddressInfo;
-    base = `http://127.0.0.1:${port}`;
-    token = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
-  });
-
-  afterEach(async () => {
-    await server.close();
-  });
 
   async function rpc(
     method: string,
@@ -44,6 +30,28 @@ describe("team server leases", () => {
     if (body !== undefined) init.body = JSON.stringify(body);
     return fetch(`${base}${path}`, init);
   }
+
+  async function mint(name: string, role: "operator" | "viewer"): Promise<string> {
+    return ((await (await rpc("POST", "/tokens", { name, role }, ADMIN)).json()) as { token: string }).token;
+  }
+
+  beforeEach(async () => {
+    server = buildTeamServerApp({
+      host: "127.0.0.1",
+      port: 0,
+      dbPath: ":memory:",
+      adminToken: ADMIN,
+      machineName: "test",
+    });
+    await server.app.listen({ host: "127.0.0.1", port: 0 });
+    const { port } = server.app.server.address() as AddressInfo;
+    base = `http://127.0.0.1:${port}`;
+    token = await mint("machine", "operator");
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
 
   it("acquire → second holder gets 409 LEASE_HELD → release → acquire succeeds", async () => {
     const first = await rpc("POST", "/leases/acquire", {
@@ -135,15 +143,8 @@ describe("team server leases", () => {
   });
 
   it("viewer tokens cannot acquire (403); unauthenticated is 401", async () => {
-    const minted = (await (
-      await rpc("POST", "/tokens", { name: "looker", role: "viewer" }, "bootstrap-secret")
-    ).json()) as { token: string };
-    const denied = await rpc(
-      "POST",
-      "/leases/acquire",
-      { profileId: "p7", holder: "V:1" },
-      minted.token,
-    );
+    const viewer = await mint("looker", "viewer");
+    const denied = await rpc("POST", "/leases/acquire", { profileId: "p7", holder: "V:1" }, viewer);
     expect(denied.status).toBe(403);
     const anon = await rpc("POST", "/leases/acquire", { profileId: "p7", holder: "X:1" }, null);
     expect(anon.status).toBe(401);
@@ -154,20 +155,17 @@ describe("team server leases", () => {
     expect(res.status).toBe(400);
   });
 
-  it("an operator of the same account force-releases a stuck lease; viewer and admin cannot (LIC)", async () => {
+  it("force-release evicts a stuck lease in the caller's own account; viewer and admin keys cannot", async () => {
     await rpc("POST", "/leases/acquire", { profileId: "p8", holder: "A:1", ttlMs: 600_000 });
     // A stranger's release is a no-op; the lease survives.
     const noOp = await rpc("POST", "/leases/release", { profileId: "p8", holder: "B:2" });
     expect(((await noOp.json()) as { released: boolean }).released).toBe(false);
 
-    const viewer = (await (
-      await rpc("POST", "/tokens", { name: "looker", role: "viewer" }, "bootstrap-secret")
-    ).json()) as { token: string };
-    expect((await rpc("DELETE", "/leases/p8", undefined, viewer.token)).status).toBe(403);
-    // Admin keys have no content access at all.
-    expect((await rpc("DELETE", "/leases/p8", undefined, "bootstrap-secret")).status).toBe(403);
+    // Viewer (read-only) and the admin key (no account) are refused.
+    expect((await rpc("DELETE", "/leases/p8", undefined, await mint("ro", "viewer"))).status).toBe(403);
+    expect((await rpc("DELETE", "/leases/p8", undefined, ADMIN)).status).toBe(403);
 
-    // Operator evicts; the profile is immediately acquirable by someone else.
+    // An operator in the account evicts; the profile is immediately acquirable by someone else.
     const evicted = await rpc("DELETE", "/leases/p8");
     expect(evicted.status).toBe(200);
     const gone = await rpc("GET", "/leases/p8");

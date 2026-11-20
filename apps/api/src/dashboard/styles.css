@@ -486,3 +486,150 @@ table.grid td.wrap { white-space: normal; }
   #main { margin-left: 58px; }
   #batch-bar { left: 50%; }
 }
+
+/* ==== P9 agent side panel ================================================ */
+#agent-launcher {
+  position: fixed; right: 18px; bottom: 18px; z-index: 40;
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 14px; border-radius: 22px;
+  background: var(--panel-3); color: var(--text); border: 1px solid var(--border);
+  box-shadow: 0 4px 18px #0008; cursor: pointer; font: 600 12px var(--sans);
+}
+#agent-launcher:hover { border-color: var(--green); }
+#agent-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 45;
+  width: min(420px, 100vw); display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border); box-shadow: -8px 0 24px #0007;
+}
+#agent-panel[hidden] { display: none; }
+.agent-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
+.agent-head h3 { margin: 0; font-size: 12px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); flex: 1; }
+.agent-tabs { display: flex; gap: 4px; padding: 6px 12px 0; }
+.agent-tabs button { background: none; border: 1px solid transparent; color: var(--muted); padding: 4px 10px; border-radius: var(--radius); cursor: pointer; }
+.agent-tabs button.active { color: var(--text); border-color: var(--border); background: var(--panel-2); }
+#agent-status { font: 11px var(--mono); color: var(--faint); padding: 4px 12px 8px; border-bottom: 1px solid var(--border-soft); }
+#agent-messages, #agent-actions { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.agent-msg { padding: 8px 10px; border-radius: var(--radius); max-width: 92%; white-space: pre-wrap; word-break: break-word; }
+.agent-msg.user { align-self: flex-end; background: var(--green-dim); border: 1px solid #2ea04355; }
+.agent-msg.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border-soft); }
+.agent-chip { align-self: flex-start; font: 11px var(--mono); padding: 3px 8px; border-radius: 12px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
+.agent-chip.ok { color: var(--green); border-color: #2ea04366; }
+.agent-chip.fail { color: var(--red); border-color: #f8514966; }
+.agent-chip.run::before { content: "⟳ "; }
+.agent-confirm { border: 1px solid var(--amber); background: #d2992214; border-radius: var(--radius); padding: 10px; }
+.agent-confirm .actions { display: flex; gap: 8px; margin-top: 8px; }
+.agent-empty { color: var(--muted); }
+.agent-empty button { display: block; width: 100%; text-align: left; margin-top: 6px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: var(--radius); cursor: pointer; }
+.agent-empty button:hover { border-color: var(--green); }
+#agent-form { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
+#agent-input { flex: 1; resize: none; min-height: 38px; max-height: 120px; }
+.agent-action { font: 11px var(--mono); border-bottom: 1px solid var(--border-soft); padding: 4px 0; }
+.agent-action .o-ok, .agent-action .o-approved { color: var(--green); }
+.agent-action .o-error, .agent-action .o-refused, .agent-action .o-invalid, .agent-action .o-declined, .agent-action .o-stopped { color: var(--red); }
+.agent-action .o-awaiting_confirmation { color: var(--amber); }
+
+/* ===== hosted team tiers (2026-11-18) =====
+   body[data-tier] is set only for a signed-in team ACCOUNT. No server, a
+   device token, or offline = no attribute = nothing hidden. This is UI
+   gating only — the team server enforces the real rules. */
+.tier-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  margin-left: 10px;
+}
+body[data-tier="owner"] .tier-badge { color: var(--green); border-color: var(--green); }
+.team-code { font-family: var(--mono); font-size: 15px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: var(--radius); user-select: all; }
+.team-table { width: 100%; margin-top: 8px; }
+.team-table td, .team-table th { padding: 4px 6px; text-align: left; }
+
+/* L1 staff: run warmups/tasks only — no browsing, no edits, no add/delete,
+   no proxy credentials. */
+body[data-tier="L1"] #nav button[data-view="tabs"],
+body[data-tier="L1"] #nav button[data-view="cookies"],
+body[data-tier="L1"] #tb-new,
+body[data-tier="L1"] #tb-import,
+body[data-tier="L1"] #tb-start,
+body[data-tier="L1"] #tb-delete,
+body[data-tier="L1"] #profiles-table [data-act="start"],
+body[data-tier="L1"] #profiles-table button[data-act="edit"],
+body[data-tier="L1"] #profiles-table [data-act="clone"],
+body[data-tier="L1"] #profiles-table [data-act="regen"],
+body[data-tier="L1"] #profiles-table [data-act="delete"],
+body[data-tier="L1"] #profile-panel,
+body[data-tier="L1"] #proxy-add-open,
+body[data-tier="L1"] #proxies-move,
+body[data-tier="L1"] #proxies-move-group,
+body[data-tier="L1"] #proxies-delete-selected,
+body[data-tier="L1"] #proxies [data-act="delete"],
+body[data-tier="L1"] .proxy-cred,
+body[data-tier="L1"] #warmup-record,
+body[data-tier="L1"] #warmups-table [data-act="delete"] { display: none !important; }
+body[data-tier="L1"] #profiles-table [data-act="edit"],
+body[data-tier="L1"] #profiles-table [data-act="favorite"] { pointer-events: none; cursor: default !important; }
+
+/* L2 editor: edits allowed, no add/delete. */
+body[data-tier="L2"] #tb-new,
+body[data-tier="L2"] #tb-import,
+body[data-tier="L2"] #tb-delete,
+body[data-tier="L2"] #profiles-table [data-act="clone"],
+body[data-tier="L2"] #profiles-table [data-act="delete"],
+body[data-tier="L2"] #pf-delete,
+body[data-tier="L2"] #proxy-add-open,
+body[data-tier="L2"] #proxies-delete-selected,
+body[data-tier="L2"] #proxies [data-act="delete"],
+body[data-tier="L2"] #warmup-record,
+body[data-tier="L2"] #warmups-table [data-act="delete"] { display: none !important; }
+
+/* Row hover actions (📋 copy / ✏️ edit): the column keeps its width so rows
+   never jump; the buttons only fade in on hover/focus. Touch screens have no
+   hover, so there they are always shown. */
+th.hover-col, td.hover-col { width: 64px; padding-left: 0; padding-right: 4px; }
+.hover-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+tr:hover .hover-actions, tr:focus-within .hover-actions { opacity: 1; }
+@media (hover: none) { .hover-actions { opacity: 1; } }
+.hover-actions button {
+  background: transparent;
+  border: none;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+.hover-actions button:hover { background: var(--panel-3); }
+#copy-flash {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 1000;
+}
+#copy-flash.show { opacity: 1; }
+
+/* Proxy probe status line (profile form + proxy table). */
+.probe-line { font-size: 12px; color: var(--muted); white-space: normal; }
+.probe-line a { color: var(--blue); margin-left: 6px; }
+#pf-proxy-status { margin: -2px 0 8px; min-height: 16px; }
+
+/* Settings → Email (IMAP) */
+.email-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 10px; }
+.email-form label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+.email-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+@media (max-width: 600px) { .email-form { grid-template-columns: 1fr; } }
+.email-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+/* Reserved line under the buttons: a running test never shifts the row. */
+.email-test-out { display: block; min-height: 16px; margin-top: 3px; font-size: 11.5px; }

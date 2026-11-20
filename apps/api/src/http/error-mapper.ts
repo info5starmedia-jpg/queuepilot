@@ -41,7 +41,8 @@ export function toHttpError(err: unknown): {
       err.code === ErrorCodes.PROVIDER_NOT_FOUND ||
       err.code === ErrorCodes.TEAM_NOT_FOUND ||
       err.code === ErrorCodes.WARMUP_NOT_FOUND ||
-      err.code === ErrorCodes.EMAIL_ACCOUNT_NOT_FOUND
+      err.code === ErrorCodes.EMAIL_ACCOUNT_NOT_FOUND ||
+      err.code === ErrorCodes.AGENT_CHAT_NOT_FOUND
         ? 404
         : err.code === ErrorCodes.PROFILE_ALREADY_RUNNING ||
             err.code === ErrorCodes.PROFILE_NOT_RUNNING ||
@@ -55,7 +56,8 @@ export function toHttpError(err: unknown): {
             ? 503
             : err.code === ErrorCodes.TEAM_UNAUTHORIZED
               ? 401
-              : err.code === ErrorCodes.FORBIDDEN
+              : err.code === ErrorCodes.FORBIDDEN ||
+                  err.code === ErrorCodes.ENGINE_DOWNLOAD_REQUIRES_CONSENT
                 ? 403
               : err.code === ErrorCodes.TABS_UNSUPPORTED ||
                 err.code === ErrorCodes.ATTESTATION_UNSUPPORTED

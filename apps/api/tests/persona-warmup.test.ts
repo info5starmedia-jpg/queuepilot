@@ -117,7 +117,8 @@ describe("W2 — plans and site settings from the team server", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const base = `http://127.0.0.1:${(server.app.server.address() as { port: number }).port}`;
     try {
-      const acct = server.store.createAccount("tester-1", null);
+      // A member account (private island) and a device key into it.
+      const acct = await server.authStore.createAccount("tester-1@example.com", "member-password-1", "tester-1", "L1");
       const { token } = server.store.mintToken("pc", "operator", acct.id);
       const ctx = makeTestContext();
       ctx.settings.patch("team", { serverUrl: base, token });
@@ -183,10 +184,25 @@ describe("persona warmup stop", () => {
     const p = ctx.profiles.create({ name: "warm-stop", generateFingerprint: true });
     let release: (() => void) | null = null;
     const hang = new Promise<never>((_, reject) => (release = () => reject(new Error("driver disposed"))));
-    const driver = { ...fakeDriver([]), goto: () => hang, dispose: async () => release?.() } as Driver;
+    // Wait until the session is really INSIDE a navigation. (Waiting on
+    // `release` returned at once — it is set synchronously — so stop() used to
+    // land before the driver existed, goto never ran, and the dispose in run()'s
+    // finally rejected `hang` with nobody awaiting it: an unhandled rejection
+    // that leaked into later test files. Now the run awaits `hang`, so the
+    // rejection is handled by the code under test.)
+    let navigating = false;
+    const driver = {
+      ...fakeDriver([]),
+      goto: () => {
+        navigating = true;
+        return hang;
+      },
+      dispose: async () => release?.(),
+    } as Driver;
     const svc = new PersonaWarmupService({ lifecycle: ctx.lifecycle, personaDirs: [], driverFactory: async () => driver, sleep: async () => {} });
     svc.start(p.id, { sessions: 2 });
-    for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 500 && !navigating; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(navigating).toBe(true);
     expect((await svc.stop(p.id))?.state).toBe("running"); // returns the status it interrupted
     for (let i = 0; i < 200 && svc.statusOf(p.id)!.state === "running"; i++) await new Promise((r) => setTimeout(r, 10));
     expect(svc.statusOf(p.id)).toMatchObject({ state: "stopped", error: null });

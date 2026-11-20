@@ -22,7 +22,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * dangerous verbs all carry one of the fingerprints above.
  */
 
-const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases"];
+// "/engine/update" (C1) installs a browser binary; a page must not be able
+// to start one either.
+// "/agent" (P9): the local agent can start, change and (with confirmation)
+// delete things — a page inside a profile browser must never command it.
+const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases", "/engine/update", "/agent"];
 
 /**
  * Also browser-denied (security audits 2026-11-19): routes that drive a real

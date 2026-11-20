@@ -45,7 +45,7 @@ describe("TeamSyncLoop", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const { port } = server.app.server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
-    KEY = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
+    KEY = server.store.mintToken("test-machine", "operator", server.store.ownerAccountId()).token;
   });
 
   afterEach(async () => {
@@ -127,7 +127,7 @@ describe("TeamSyncLoop", () => {
 
     const b = loopMachine({ configured: false });
     const res = await b.loop.tick();
-    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, pending: 0, failed: 0 });
+    expect(res).toEqual({ enabled: false, checked: 0, imported: 0, pending: 0, failed: 0, skipped: 0 });
     expect(b.ctx.profiles.list()).toHaveLength(0);
   });
 

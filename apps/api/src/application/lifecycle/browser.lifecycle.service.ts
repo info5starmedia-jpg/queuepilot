@@ -35,7 +35,7 @@ import type {
   ProfileRepository,
   FingerprintIdentityRepository,
 } from "../profiles/profile.repository.js";
-import type { ProxyService } from "../proxies/proxy.service.js";
+import { isFreshProbe, type ProxyService } from "../proxies/proxy.service.js";
 import type { BrowserRunRepository } from "./browser-run.repository.js";
 import { ProfileOperationMutex } from "./profile-operation.mutex.js";
 import { proxyUrl } from "@queuepilot/contracts";
@@ -44,7 +44,7 @@ import type {
   BrowserSession,
 } from "../runtime/browser-runtime.js";
 import type { LaunchIdentityService } from "./launch-identity.service.js";
-import type { LaunchIdentitySnapshot } from "@queuepilot/contracts";
+import type { LaunchIdentitySnapshot, ProxyProbe } from "@queuepilot/contracts";
 import { TabRegistry } from "../tabs/tab-registry.js";
 
 /**
@@ -175,14 +175,25 @@ export class BrowserLifecycleService {
         port: number;
         username: string | null;
         password: string | null;
+        lastProbe?: ProxyProbe | null;
       };
     },
     /**
-     * Looks up the IANA timezone of a proxy's exit IP by making a request
-     * THROUGH that proxy (the same geo-IP echo the proxy Test uses). Absent =
-     * no lookup; the proxy's own timezone field and pins still apply.
+     * Looks up a proxy's exit IP — its IANA timezone and ISO country — by
+     * making a request THROUGH that proxy (the same geo-IP echo the proxy
+     * Test uses). One lookup serves both the launch timezone and the launch
+     * locale. Absent = no lookup; the proxy's own timezone field and pins
+     * still apply.
      */
-    private readonly proxyTimezoneLookup?: (proxy: LaunchProxyEndpoint) => Promise<string | null>,
+    private readonly proxyGeoLookup?: (proxy: LaunchProxyEndpoint) => Promise<ProxyExitGeo | null>,
+    /**
+     * The machine's own timezone, for direct (no-proxy) launches: a direct
+     * connection's IP is the machine's, so the coherent clock is the
+     * machine's — anything else (e.g. the identity's UTC default) is a
+     * contradiction checkers flag. Defaults to the real system zone;
+     * injectable so tests are machine-independent.
+     */
+    private readonly hostTimezone: () => string | null = systemHostTimezone,
   ) {
     this.events.setMaxListeners(0);
   }
@@ -347,17 +358,22 @@ export class BrowserLifecycleService {
               ? ("rotation" as const)
               : ("none" as const);
 
-      // The browser's clock follows the proxy's exit IP: a proxied profile
-      // on a UTC (or home) clock contradicts the IP's location — exactly what
-      // checkers flag. Pin > proxy's own timezone > exit-IP lookup > identity.
-      const { timezone: launchTimezone, source: timezoneSource } = await this.resolveLaunchTimezone(
-        identity,
-        launchProxy,
-        attached?.timezone ?? null,
-      );
+      // The browser's clock and locale follow the proxy's exit IP: a proxied
+      // profile on a UTC (or home) clock, or with en-US formatting behind a
+      // German exit, contradicts the IP's location — exactly what checkers
+      // flag. Timezone: pin > proxy's own timezone > exit-IP lookup >
+      // identity. Locale: pin > exit country > identity.
+      const { timezone: launchTimezone, source: timezoneSource, locale: launchLocale, localeSource } =
+        await this.resolveLaunchGeo(identity, launchProxy, attached?.timezone ?? null, attached ?? rotated);
       const launchIdentity =
-        identity && launchTimezone && launchTimezone !== identity.timezone
-          ? { ...identity, timezone: launchTimezone }
+        identity &&
+        ((launchTimezone && launchTimezone !== identity.timezone) ||
+          (launchLocale && launchLocale !== identity.locale))
+          ? {
+              ...identity,
+              ...(launchTimezone ? { timezone: launchTimezone } : {}),
+              ...(launchLocale ? { locale: launchLocale } : {}),
+            }
           : identity;
 
       const run: BrowserRun = {
@@ -433,6 +449,7 @@ export class BrowserLifecycleService {
         engineKind: this.runtime.kind,
         egress: session.egress ?? undefined,
         timezoneSource,
+        localeSource,
       });
       void session.exited.then(({ code, signal }) =>
         this.onEngineExit(profileId, live.id, code, signal),
@@ -570,26 +587,76 @@ export class BrowserLifecycleService {
   }
 
   /**
-   * The timezone this launch should present, and why. A profile pin always
-   * wins; then the proxy's own timezone field (the operator knows better than
-   * any database); then the exit IP's timezone looked up through the proxy;
-   * otherwise the identity default. A failed lookup is never a launch
-   * failure — the clock may not match, but nothing leaks.
+   * The timezone and locale this launch should present, and why.
+   *
+   * Timezone: a profile pin always wins; then the proxy's own timezone field
+   * (the operator knows better than any database); then the exit IP's
+   * timezone looked up through the proxy; with no proxy, the machine's own
+   * timezone (a direct connection's IP is the machine's — only the identity
+   * default would contradict it, as AliasMode's check flags "Browser UTC, IP
+   * America/Toronto"); otherwise the identity default.
+   *
+   * Locale (Intl date/number formatting): a profile pin wins; then the
+   * locale of the exit IP's country (DE → de-DE). iphey scored the same
+   * engine and persona "Unreliable" with en-US behind a German exit and
+   * "Trustworthy 100" with de-DE (measured 2026-11-19). With no proxy the
+   * identity's locale stays — the operator chose it for their own machine.
+   *
+   * One exit lookup serves both, made only when one of them needs it. A
+   * failed lookup is never a launch failure — the values may not match the
+   * IP, but nothing leaks.
+   *
+   * A saved proxy whose last probe succeeded within 24 h answers from that
+   * probe instead (no live lookup, no launch delay). A live lookup on a saved
+   * proxy is stored back on it so the next launch is instant.
    */
-  private async resolveLaunchTimezone(
+  private async resolveLaunchGeo(
     identity: FingerprintIdentityWithOverrides | null,
     proxy: LaunchProxyEndpoint | null,
     proxyTimezone: string | null,
-  ): Promise<{ timezone: string | null; source: "pinned" | "proxy" | "exit-ip" | "identity" }> {
-    if (!identity) return { timezone: null, source: "identity" };
-    if (identity.overrides?.timezone) return { timezone: identity.timezone, source: "pinned" };
-    if (!proxy) return { timezone: identity.timezone, source: "identity" };
-    if (proxyTimezone && isValidTimezone(proxyTimezone)) return { timezone: proxyTimezone, source: "proxy" };
-    if (this.proxyTimezoneLookup) {
-      const looked = await this.proxyTimezoneLookup(proxy).catch(() => null);
-      if (looked && isValidTimezone(looked)) return { timezone: looked, source: "exit-ip" };
+    saved: { id: string; lastProbe?: ProxyProbe | null } | null = null,
+  ): Promise<{
+    timezone: string | null;
+    source: "pinned" | "proxy" | "exit-ip" | "host" | "identity";
+    locale: string | null;
+    localeSource: "pinned" | "exit-ip" | "identity";
+  }> {
+    if (!identity) return { timezone: null, source: "identity", locale: null, localeSource: "identity" };
+    const stored = { locale: identity.locale, localeSource: "identity" as const };
+    const localePinned = Boolean(identity.overrides?.locale);
+    const locale = localePinned ? { locale: identity.locale, localeSource: "pinned" as const } : stored;
+    if (!proxy) {
+      if (identity.overrides?.timezone) return { timezone: identity.timezone, source: "pinned", ...locale };
+      const host = this.hostTimezone();
+      if (host && isValidTimezone(host)) return { timezone: host, source: "host", ...locale };
+      return { timezone: identity.timezone, source: "identity", ...locale };
     }
-    return { timezone: identity.timezone, source: "identity" };
+
+    const tzPinned = Boolean(identity.overrides?.timezone);
+    const tzFromProxyField = !tzPinned && Boolean(proxyTimezone && isValidTimezone(proxyTimezone));
+    const needLookup = (!tzPinned && !tzFromProxyField) || !localePinned;
+    const cached = needLookup && isFreshProbe(saved?.lastProbe) ? saved!.lastProbe! : null;
+    const looked: ProxyExitGeo | null = cached
+      ? { timezone: cached.timezone, countryCode: cached.countryCode }
+      : needLookup && this.proxyGeoLookup
+        ? await this.proxyGeoLookup(proxy).catch(() => null)
+        : null;
+    if (!cached && saved && looked?.probe) {
+      try {
+        this.proxyService.recordProbe(saved.id, looked.probe);
+      } catch {
+        /* best-effort cache write — never a launch failure */
+      }
+    }
+
+    let tz: { timezone: string | null; source: "pinned" | "proxy" | "exit-ip" | "identity" };
+    if (tzPinned) tz = { timezone: identity.timezone, source: "pinned" };
+    else if (tzFromProxyField) tz = { timezone: proxyTimezone, source: "proxy" };
+    else if (looked?.timezone && isValidTimezone(looked.timezone)) tz = { timezone: looked.timezone, source: "exit-ip" };
+    else tz = { timezone: identity.timezone, source: "identity" };
+
+    const exitLocale = localePinned ? null : localeForCountry(looked?.countryCode ?? null);
+    return { ...tz, ...(exitLocale ? { locale: exitLocale, localeSource: "exit-ip" as const } : locale) };
   }
 
   activeRun(profileId: string): BrowserRun | null {
@@ -979,6 +1046,9 @@ export class BrowserLifecycleService {
     /** The browser timezone this run launched with, and where it came from. */
     timezone: string | null;
     timezoneSource: LaunchIdentitySnapshot["timezoneSource"] | null;
+    /** The browser locale this run launched with, and where it came from. */
+    locale: string | null;
+    localeSource: LaunchIdentitySnapshot["localeSource"] | null;
     /**
      * Whether the measured egress still describes where traffic goes:
      * "live" = this API launched the engine and its relay is serving;
@@ -1009,6 +1079,8 @@ export class BrowserLifecycleService {
       egress: snapshot?.egress ?? null,
       timezone: snapshot?.identity?.timezone ?? null,
       timezoneSource: snapshot?.timezoneSource ?? null,
+      locale: snapshot?.identity?.locale ?? null,
+      localeSource: snapshot?.localeSource ?? null,
       relay,
       note,
     };
@@ -1328,6 +1400,31 @@ export interface LaunchProxyEndpoint {
   password: string | null;
 }
 
+/** What the exit lookup reports about a proxy's exit IP. */
+export interface ProxyExitGeo {
+  timezone: string | null;
+  /** ISO 3166-1 alpha-2, e.g. "DE". */
+  countryCode: string | null;
+  /** The full probe, when the lookup has one — stored back on a saved proxy. */
+  probe?: ProxyProbe;
+}
+
+/**
+ * The likely locale for a country (DE → de-DE, GB → en-GB, CH → de-CH), from
+ * CLDR likely-subtags via Intl.Locale#maximize — no table to maintain. Null
+ * for anything that is not a two-letter region the runtime recognises.
+ */
+export function localeForCountry(countryCode: string | null): string | null {
+  if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return null;
+  try {
+    const max = new Intl.Locale(`und-${countryCode.toUpperCase()}`).maximize();
+    if (!max.language || max.language === "und" || !max.region) return null;
+    return `${max.language}-${max.region}`;
+  } catch {
+    return null;
+  }
+}
+
 /** True for an IANA zone this runtime knows (rejects garbage from a geo service). */
 function isValidTimezone(tz: string): boolean {
   try {
@@ -1335,6 +1432,21 @@ function isValidTimezone(tz: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The machine's own IANA timezone (what a direct — no-proxy — connection
+ * presents). Node ships full ICU, so this resolves everywhere we run; a
+ * stripped runtime returns null and the caller falls back to the identity
+ * default. Injectable on the lifecycle (like proxyGeoLookup) so tests
+ * are machine-independent.
+ */
+export function systemHostTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+  } catch {
+    return null;
   }
 }
 

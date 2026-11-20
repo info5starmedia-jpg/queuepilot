@@ -31,7 +31,8 @@
         <div><span id="engine-dot" class="dot dot-off"></span><span id="engine">engine…</span></div>
         <div><span id="google-dot" class="dot dot-off"></span><span id="google">google …</span></div>
         <div><span id="sse-dot" class="dot dot-off"></span><span id="sse">offline</span></div>
-        <div class="plan">LOCAL · FAMILY USE</div>
+        <div class="plan" id="plan-line">LOCAL · TEAM USE</div>
+        <button id="signout" class="ghost" type="button" hidden title="forget the API token in this browser">Sign out</button>
       </div>
     </aside>
 
@@ -39,6 +40,7 @@
     <div id="main">
       <header id="topbar">
         <h2 id="view-title">Profiles</h2>
+        <span id="tier-badge" class="tier-badge" hidden title="your role on the team server"></span>
         <div id="view-stats"></div>
         <div id="topbar-actions"></div>
       </header>
@@ -67,6 +69,7 @@
                   <th>Group</th>
                   <th style="width:56px">Tabs</th>
                   <th style="width:190px">Actions</th>
+                  <th class="hover-col"></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -81,24 +84,29 @@
 
         <!-- ========================== proxies =========================== -->
         <section class="view" id="view-proxies" hidden>
-          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Add them here (one, or paste a list), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
+          <div class="view-hint">Proxies are assigned to profiles and injected at launch. Import them here (paste a list or choose a .txt file), via a <b>provider</b> (Providers view), or a CSV/xlsx profile import. Passwords are stored encrypted and never shown again.</div>
           <div class="toolbar">
-            <button id="proxy-add-open" class="primary">+ Add proxies</button>
+            <div id="proxy-tabs" class="filter-chips"></div>
+          </div>
+          <div class="toolbar">
+            <button id="proxy-add-open" class="primary">⇪ Import proxies</button>
             <div class="spacer"></div>
             <span id="proxies-selected" class="hint" style="color:var(--faint)"></span>
+            <select id="proxies-move-group" title="group to move the selected proxies into"></select>
+            <button id="proxies-move" title="move every selected proxy into the chosen group">Move to group</button>
             <button id="proxies-test-selected" title="test every selected proxy">Test selected</button>
             <button id="proxies-delete-selected" class="danger" title="delete every selected proxy">Delete selected</button>
           </div>
           <div class="table-wrap">
             <table class="grid" id="proxies">
               <thead>
-                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Liveness</th><th style="width:60px"></th></tr>
+                <tr><th style="width:28px"><input type="checkbox" id="proxies-select-all" title="select all proxies" /></th><th>Name</th><th>Group</th><th>Type</th><th>Endpoint</th><th>Timezone</th><th style="width:260px">Last test</th><th style="width:60px"></th><th class="hover-col"></th></tr>
               </thead>
               <tbody></tbody>
             </table>
             <div class="empty-state" id="proxies-empty" hidden>
               <div class="big">⇄</div>
-              No proxies configured — profiles will use your real IP. Click <b>+ Add proxies</b>.
+              No proxies configured — profiles will use your real IP. Click <b>⇪ Import proxies</b>.
             </div>
           </div>
         </section>
@@ -396,19 +404,48 @@
     <!-- add-proxies drawer -->
     <div id="proxy-add-modal" class="overlay" hidden>
       <div class="drawer" style="width:520px">
-        <div class="drawer-head"><h3>Add Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
+        <div class="drawer-head"><h3>Import Proxies</h3><button id="proxy-add-close" class="ghost">✕</button></div>
         <label>Type
           <select id="proxy-add-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
         </label>
-        <label>Paste one proxy per line
-          <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;name:host:port:username:password&#10;host:port"></textarea>
+        <label>Group
+          <input id="proxy-add-group" maxlength="120" placeholder="default — pick or type a new one" list="proxy-group-names" />
+          <datalist id="proxy-group-names"></datalist>
         </label>
-        <div class="hint">Lines without a name are named <code>host:port</code>. A <code>socks5://</code> or <code>http://</code> prefix on a line overrides the type above.</div>
+        <label>Paste one proxy per line
+          <textarea id="proxy-add-lines" rows="8" spellcheck="false" autocomplete="off" placeholder="host:port:username:password&#10;host:port:username:password:America/New_York&#10;host:port"></textarea>
+        </label>
+        <label>…or choose a .txt file
+          <input type="file" id="proxy-add-file" accept=".txt,text/plain" />
+        </label>
+        <div class="hint">One per line: <code>host:port</code>, <code>host:port:user:pass</code>, optional timezone as a 5th field. A <code>socks5://</code> or <code>http://</code> prefix overrides the type above; blank lines and <code>#</code> comments are ignored. Proxies already in the list (same host and port) are skipped.</div>
         <div class="actions">
-          <button id="proxy-add-go" class="primary">Add</button>
+          <button id="proxy-add-go" class="primary">Import</button>
           <span class="hint" id="proxy-add-status"></span>
         </div>
         <div id="proxy-add-result"></div>
+      </div>
+    </div>
+
+    <!-- proxy edit drawer (hover ✏️ on a proxy row) -->
+    <div id="proxy-edit-modal" class="overlay" hidden>
+      <div class="drawer" style="width:440px">
+        <div class="drawer-head"><h3>Edit Proxy</h3><button id="proxy-edit-close" class="ghost">✕</button></div>
+        <form id="proxy-edit-form" autocomplete="off">
+          <label>Name <input id="px-name" required maxlength="120" /></label>
+          <label>Type
+            <select id="px-type"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select>
+          </label>
+          <label>Host <input id="px-host" required maxlength="253" /></label>
+          <label>Port <input id="px-port" type="number" required min="1" max="65535" /></label>
+          <label>Username <input id="px-username" maxlength="200" placeholder="(none)" /></label>
+          <label>Password <input id="px-password" type="password" maxlength="200" autocomplete="new-password" placeholder="leave blank to keep the stored one" /></label>
+          <label>Group <input id="px-group" maxlength="120" list="proxy-group-names" /></label>
+          <div class="actions">
+            <button type="submit" class="primary">Save</button>
+            <span class="hint" id="proxy-edit-status"></span>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -470,6 +507,7 @@
           <label>launch proxy
             <select id="pf-proxy"><option value="">(none)</option></select>
           </label>
+          <div id="pf-proxy-status" class="probe-line"></div>
         </fieldset>
         <fieldset>
           <legend>Persona</legend>
@@ -480,11 +518,64 @@
           <label>start pages <textarea id="pf-starturls" rows="2" placeholder="one URL per line, opened at launch"></textarea></label>
           <label class="inline">tab color <input id="pf-tabcolor" type="color" /> <button type="button" id="pf-clearcolor" class="ghost">clear</button></label>
           <label class="check"><input id="pf-favorite" type="checkbox" /> favorite</label>
+          <label class="check" title="off = the team sync loop leaves this profile alone"><input id="pf-storeoncloud" type="checkbox" /> Store on cloud (team sync)</label>
         </fieldset>
         <div class="panel-actions">
           <button type="submit" class="primary">Save</button>
           <button type="button" id="pf-delete" class="danger">Delete profile</button>
           <span id="panel-status" class="hint"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- P9 local agent: launcher + side panel -->
+    <button id="agent-launcher" type="button" title="Ask the assistant">✦ Assistant</button>
+    <aside id="agent-panel" hidden aria-label="Assistant">
+      <div class="agent-head">
+        <h3>Assistant · local model</h3>
+        <button id="agent-new" class="ghost" type="button" title="start a new conversation">New chat</button>
+        <button id="agent-close" class="ghost" type="button" title="close">✕</button>
+      </div>
+      <div class="agent-tabs">
+        <button type="button" data-agent-tab="chat" class="active">Chat</button>
+        <button type="button" data-agent-tab="actions">Action log</button>
+      </div>
+      <div id="agent-status">checking the local model…</div>
+      <div id="agent-messages"></div>
+      <div id="agent-actions" hidden></div>
+      <form id="agent-form" autocomplete="off">
+        <textarea id="agent-input" rows="1" maxlength="4000" placeholder="Tell the assistant what to do…"></textarea>
+        <button type="submit" class="primary" id="agent-send">Send</button>
+      </form>
+    </aside>
+
+    <!-- token sign-in (shown only when the API answers 401) -->
+    <div id="signin" class="overlay" hidden>
+      <form id="signin-form" class="drawer" style="width:420px;margin:12vh auto 0;height:auto" autocomplete="off">
+        <div class="drawer-head"><h3>Sign in</h3></div>
+        <p class="hint">This QueuePilot runs with an API token (<code>SPECTRA_API_TOKEN</code>). Enter it to use the console.</p>
+        <label>API token <input id="signin-token" type="password" required maxlength="500" autocomplete="current-password" /></label>
+        <label class="check"><input id="signin-remember" type="checkbox" /> Remember on this computer</label>
+        <div class="hint">Kept only in this browser — for this tab unless you tick "Remember". Sent only to this QueuePilot.</div>
+        <div class="actions">
+          <button type="submit" class="primary">Sign in</button>
+          <span class="hint" id="signin-error" role="alert"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- hosted team sign-in (2026-11-18): email + password on the team server -->
+    <div id="team-signin" class="overlay" hidden>
+      <form id="team-signin-form" class="drawer" style="width:420px;margin:12vh auto 0;height:auto" autocomplete="on">
+        <div class="drawer-head"><h3>Sign in to your team</h3><button type="button" id="team-signin-close" class="ghost" title="work offline">✕</button></div>
+        <p class="hint" id="team-signin-server"></p>
+        <label>Email <input id="team-signin-email" type="email" required maxlength="320" autocomplete="username" /></label>
+        <label>Password <input id="team-signin-password" type="password" required maxlength="500" autocomplete="current-password" /></label>
+        <div class="hint">Your session is kept by this QueuePilot (Settings → Team) and sent only to your team server.</div>
+        <div class="actions">
+          <button type="submit" class="primary">Sign in</button>
+          <button type="button" id="team-signin-offline" class="ghost">Work offline</button>
+          <span class="hint" id="team-signin-error" role="alert"></span>
         </div>
       </form>
     </div>

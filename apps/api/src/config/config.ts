@@ -27,6 +27,8 @@ const ConfigSchema = z.object({
   /** Google Cloud OAuth client (Sheets API) for Google Sheets providers. */
   googleClientId: z.string().optional(),
   googleClientSecret: z.string().optional(),
+  /** Engine manifest for one-click updates (URL or file); default: the repo's raw manifest. */
+  engineManifest: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & { dbPath: string };
@@ -40,6 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     apiToken: env.SPECTRA_API_TOKEN,
     googleClientId: env.SPECTRA_GOOGLE_CLIENT_ID,
     googleClientSecret: env.SPECTRA_GOOGLE_CLIENT_SECRET,
+    engineManifest: env.SPECTRA_ENGINE_MANIFEST,
   });
   return { ...parsed, dbPath: path.join(parsed.dataDir, "queuepilot.db") };
 }

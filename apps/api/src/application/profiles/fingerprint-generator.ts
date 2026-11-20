@@ -74,13 +74,24 @@ export function generateIdentity(
   // can read it. A persona claiming less memory than the heap limit reveals
   // is a lie-with-a-truthful-witness — AliasMode's fingerprint check flags it
   // ("deviceMemory 4 · heap 4.09 GiB"), measured on our own build 2026-11-16.
-  // So when the caller knows the host's RAM, the claim must fit under it.
+  // Two clamps when the caller knows the host's RAM:
+  //   1. claim <= host RAM (never claim more than is installed), and
+  //   2. claim > V8's heap cap. On any host with >= 8 GB RAM, V8 caps the
+  //      JS heap near 4.09 GiB, so a 4 GB claim is UNDER the heap limit and
+  //      gets flagged. 8 is then the smallest coherent bucket; buckets above
+  //      the cap (8/16/32) are always safe, on any host size.
+  // This is what makes identities portable: every new identity automatically
+  // matches whatever machine it is generated on, with no per-profile work.
   // Default (no host info): the weighted market table, unchanged.
   const memPool = platform === "windows" ? MEMORY_WINDOWS : MEMORY;
   let memPoolFitting = memPool;
   if (hostMemGb !== null) {
     const fitting = memPool.filter((m) => m <= hostMemGb);
     memPoolFitting = fitting.length > 0 ? fitting : [4];
+    if (hostMemGb >= 8) {
+      // >= 8 GB host: 8 fits every pool, so this never empties the pool.
+      memPoolFitting = memPoolFitting.filter((m) => m > 4);
+    }
   }
   const mem = pick(memPoolFitting, seed, 0x85ebca6b);
   // Core counts that actually ship with each memory tier: a 4 GB machine

@@ -8,20 +8,74 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+/* ---- P9 Task 0: token sign-in ------------------------------------------
+   An install started with SPECTRA_API_TOKEN serves this page without the
+   token but refuses every API call without it. The operator's token lives
+   only in this browser: sessionStorage (closes with the tab) unless they
+   tick "Remember on this computer" (localStorage). It is sent as a Bearer
+   header to this same origin and nowhere else. No token configured on the
+   server = no prompt, nothing stored. */
+const TOKEN_KEY = "queuepilot.apiToken";
+function storedToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+function authHeaders(extra = {}) {
+  const t = storedToken();
+  return t ? { ...extra, authorization: `Bearer ${t}` } : extra;
+}
+
 async function api(path, opts = {}) {
   /* JSON content-type only when there IS a body: Fastify answers a body-less
      request that claims application/json with a 500, which broke every
      body-less DELETE/POST in the console (delete, stop, proxy test, …). */
   const res = await fetch(path, {
     ...opts,
-    headers: opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers },
+    headers: authHeaders(opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers }),
   });
+  if (res.status === 401) showSignIn(storedToken() ? "That token was refused — sign in again." : "");
   if (res.status === 204) return null;
   const body = await res.json();
   if (!res.ok) {
     throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
   }
   return body;
+}
+
+function showSignIn(message) {
+  const box = $("#signin");
+  if (!box) return;
+  box.hidden = false;
+  $("#signin-error").textContent = message;
+  $("#signin-token").focus();
+}
+
+async function signIn(token, remember) {
+  /* Probe with the candidate token before keeping it. */
+  const res = await fetch("/engine/health", { headers: { authorization: `Bearer ${token}` } });
+  if (res.status === 401) return false;
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
+  } catch {
+    /* storage blocked: the token cannot be kept — say so */
+    return false;
+  }
+  return true;
+}
+
+function signOut() {
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* nothing stored */
+  }
+  location.reload();
 }
 
 const esc = (s) =>
@@ -35,6 +89,98 @@ const esc = (s) =>
 
 function toast(detail, type = "info") {
   pushEvent({ type, detail, at: new Date().toISOString() });
+}
+
+/* Row hover actions: copy to clipboard with a short "Copied" flash. The
+   execCommand path covers plain-http origins where navigator.clipboard is
+   unavailable. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (!ok) {
+      toast("copy failed — your browser blocked clipboard access", "error");
+      return;
+    }
+  }
+  let flash = document.getElementById("copy-flash");
+  if (!flash) {
+    flash = document.createElement("div");
+    flash.id = "copy-flash";
+    flash.setAttribute("role", "status");
+    flash.textContent = "Copied";
+    document.body.appendChild(flash);
+  }
+  flash.classList.add("show");
+  clearTimeout(copyText.timer);
+  copyText.timer = setTimeout(() => flash.classList.remove("show"), 1500);
+}
+
+/** Hover-revealed 📋 / ✏️ cell; `edit` false = copy only. */
+function hoverActionsCell(edit = true) {
+  return `<td class="hover-col"><span class="hover-actions">
+    <button type="button" data-hover="copy" title="copy">📋</button>${edit ? `<button type="button" data-hover="edit" title="edit">✏️</button>` : ""}
+  </span></td>`;
+}
+
+/** Wire a row's hover buttons. */
+function wireHoverActions(tr, { copy, edit }) {
+  tr.querySelector('[data-hover="copy"]')?.addEventListener("click", (e) => { e.stopPropagation(); copyText(copy()); });
+  tr.querySelector('[data-hover="edit"]')?.addEventListener("click", (e) => { e.stopPropagation(); edit(); });
+}
+
+/* Proxy probe status line (profile form + proxy table): the stored result
+   of the last test through the proxy, with a Re-test / Test now link. */
+function flagEmoji(cc) {
+  if (!/^[A-Za-z]{2}$/.test(cc ?? "")) return "";
+  return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0)));
+}
+
+function probeLineHtml(probe) {
+  if (!probe) return `⚪ Not tested yet <a href="#" data-probe-test>Test now</a>`;
+  if (!probe.ok) return `🔴 Test failed: ${esc(probe.error ?? "unknown error")} <a href="#" data-probe-test>Re-test</a>`;
+  const parts = [probe.country, probe.city, probe.timezone, probe.latencyMs != null ? `${probe.latencyMs} ms` : null].filter(Boolean);
+  const flag = flagEmoji(probe.countryCode);
+  return `🟢 ${flag ? `${flag} ` : ""}${esc(parts.join(" · "))} <a href="#" data-probe-test>Re-test</a>`;
+}
+
+/** Render the line into `el` and wire its link to a synchronous re-test. */
+function renderProbeLine(el, proxyId) {
+  if (!el) return;
+  if (!proxyId) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = probeLineHtml(proxyById.get(proxyId)?.lastProbe ?? null);
+  el.querySelector("[data-probe-test]")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    retestProxy(proxyId, el);
+  });
+}
+
+async function retestProxy(proxyId, el) {
+  el.textContent = "⏳ Testing…";
+  try {
+    const r = await api(`/proxies/${proxyId}/test`, { method: "POST" });
+    const p = proxyById.get(proxyId);
+    if (p) p.lastProbe = r.lastProbe;
+    else proxyById.set(proxyId, { id: proxyId, lastProbe: r.lastProbe });
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  renderProbeLine(el, proxyId);
+}
+
+/** Passwords are write-only over the API, so the copied string never has one. */
+function proxyConnString(p) {
+  return `${p.type}://${p.username ? `${p.username}@` : ""}${p.host}:${p.port}`;
 }
 
 /* ============================ view switching ============================ */
@@ -136,6 +282,15 @@ async function loadChecklist() {
     });
   } catch {
     items.push({ ok: false, label: "engine health unreachable" });
+  }
+  try {
+    /* C1: the version check made when the API started (no network here). */
+    const { launchCheck: lc } = await api("/engine/update/launch");
+    if (lc?.status === "available") {
+      items.push({ ok: false, label: `engine update ${lc.latest.version} available — Settings → Engine to install` });
+    }
+  } catch {
+    /* older API without the route: no item */
   }
   try {
     const { proxies } = await api("/proxies");
@@ -416,11 +571,15 @@ function renderStats() {
 }
 
 async function loadProfiles() {
-  const [{ profiles }, groupData] = await Promise.all([
+  const [{ profiles }, groupData, proxyData] = await Promise.all([
     api("/profiles"),
     api("/profile-groups").catch(() => ({ groups: [] })),
+    api("/proxies").catch(() => null),
   ]);
   allProfiles = profiles;
+  /* The Proxy column and the row copy need proxy details before the
+     Proxies view has ever been opened. */
+  if (proxyData) proxyById = new Map(proxyData.proxies.map((p) => [p.id, p]));
   renderProfileTabs(groupData.groups ?? []);
   renderProfileTable();
   renderStats();
@@ -492,10 +651,15 @@ async function renderProfileTable() {
         <button class="act-clone" data-act="clone" title="duplicate with a fresh fingerprint">⎘</button>
         <button data-act="regen" title="regenerate fingerprint">↻</button>
         <button class="act-delete" data-act="delete" title="delete profile">🗑</button>
-      </span></td>`;
+      </span></td>
+      ${hoverActionsCell()}`;
     tr.querySelectorAll("[data-act]").forEach((b) =>
       b.addEventListener("click", () => onProfileAction(p.id, b.dataset.act, p)),
     );
+    wireHoverActions(tr, {
+      copy: () => [p.name, p.group ?? "default", p.email ?? "", proxy ? `${proxy.host}:${proxy.port}` : "", (p.tags ?? []).join(", ")].join(" | "),
+      edit: () => onProfileAction(p.id, "edit", p),
+    });
     tbody.appendChild(tr);
   });
 
@@ -677,6 +841,7 @@ async function openProfilePanel(id) {
     $("#pf-notes").value = p.notes ?? "";
 
     const proxies = proxyData.proxies ?? [];
+    for (const x of proxies) proxyById.set(x.id, x);
     const sel = $("#pf-proxy");
     sel.innerHTML =
       `<option value="">(none)</option>` +
@@ -687,6 +852,7 @@ async function openProfilePanel(id) {
         )
         .join("");
     sel.value = p.proxyId ?? "";
+    renderProbeLine($("#pf-proxy-status"), sel.value);
 
     $("#pf-phone").value = panelExtra.phone ?? "";
     $("#pf-dob").value = panelExtra.dob ?? "";
@@ -697,6 +863,7 @@ async function openProfilePanel(id) {
       .join("\n");
     $("#pf-starturls").value = (panelExtra.startUrls ?? []).join("\n");
     $("#pf-favorite").checked = panelExtra.favorite === true;
+    $("#pf-storeoncloud").checked = panelExtra.storeOnCloud !== false; /* default on */
     $("#pf-tabcolor").value = /^#[0-9a-fA-F]{6}$/.test(panelTabColor ?? "")
       ? panelTabColor
       : "#4a9eff";
@@ -715,6 +882,7 @@ function closeProfilePanel() {
 }
 
 $("#panel-close").addEventListener("click", closeProfilePanel);
+$("#pf-proxy").addEventListener("change", (e) => renderProbeLine($("#pf-proxy-status"), e.target.value));
 
 $("#pf-clearcolor").addEventListener("click", () => {
   panelTabColor = null;
@@ -752,6 +920,7 @@ $("#panel-form").addEventListener("submit", async (e) => {
       method: "PATCH",
       body: JSON.stringify({
         favorite: $("#pf-favorite").checked,
+        storeOnCloud: $("#pf-storeoncloud").checked,
         smsNumbers: sms,
         startUrls,
         phone: phone === "" ? null : phone,
@@ -812,31 +981,93 @@ $("#create-modal").addEventListener("click", (e) => { if (e.target.id === "creat
 
 /* ============================= proxies ================================ */
 
+/* Proxy groups (B2): the profile-groups model. "all" shows every proxy. */
+let activeProxyGroup = "all";
+
+function renderProxyTabs(groups) {
+  if (activeProxyGroup !== "all" && !groups.some((g) => g.group === activeProxyGroup)) activeProxyGroup = "all";
+  const total = groups.reduce((n, g) => n + g.total, 0);
+  const bar = $("#proxy-tabs");
+  bar.innerHTML = "";
+  for (const t of [{ group: "all", label: "All", total }, ...groups.map((g) => ({ ...g, label: g.group }))]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip-tab" + (t.group === activeProxyGroup ? " active" : "");
+    b.dataset.proxyGroup = t.group;
+    b.innerHTML = `${esc(t.label)}<span class="count">${t.total}${t.inUse ? ` · <span class="run">${t.inUse} in use</span>` : ""}</span>`;
+    b.addEventListener("click", () => {
+      activeProxyGroup = t.group;
+      loadProxies();
+    });
+    if (t.group !== "all") {
+      const edit = document.createElement("span");
+      edit.className = "rename";
+      edit.title = "rename group";
+      edit.textContent = "✎";
+      edit.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const to = window.prompt(`Rename proxy group "${t.label}" to:`, t.label);
+        if (!to || to.trim() === "" || to.trim() === t.label) return;
+        try {
+          await api("/proxy-groups/rename", { method: "POST", body: JSON.stringify({ from: t.label, to: to.trim() }) });
+          if (activeProxyGroup === t.label) activeProxyGroup = to.trim();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+        await loadProxies();
+      });
+      b.appendChild(edit);
+    }
+    bar.appendChild(b);
+  }
+  const names = groups.map((g) => g.group);
+  $("#proxy-group-names").innerHTML = names.map((g) => `<option value="${esc(g)}"></option>`).join("");
+  const sel = $("#proxies-move-group");
+  const keep = sel.value;
+  sel.innerHTML = names.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("") + `<option value="__new__">+ new group…</option>`;
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+/** Proxies shown under the active group tab (select-all acts on these). */
+function visibleProxyIds() {
+  return [...proxyById.values()].filter((p) => activeProxyGroup === "all" || p.group === activeProxyGroup).map((p) => p.id);
+}
+
 async function loadProxies() {
-  const { proxies } = await api("/proxies");
+  const [{ proxies }, { groups }] = await Promise.all([api("/proxies"), api("/proxy-groups").catch(() => ({ groups: [] }))]);
   proxyById = new Map(proxies.map((p) => [p.id, p]));
-  for (const id of [...proxySelection]) if (!proxyById.has(id)) proxySelection.delete(id);
+  renderProxyTabs(groups);
+  const visible = new Set(visibleProxyIds());
+  for (const id of [...proxySelection]) if (!visible.has(id)) proxySelection.delete(id);
   const tbody = $("#proxies tbody");
   tbody.innerHTML = "";
-  $("#proxies-empty").hidden = proxies.length !== 0;
+  const empty = $("#proxies-empty");
+  empty.hidden = visible.size !== 0;
+  empty.innerHTML = proxies.length === 0
+    ? `<div class="big">⇄</div>No proxies configured — profiles will use your real IP. Click <b>⇪ Import proxies</b>.`
+    : `<div class="big">⇄</div>No proxies in group <b>${esc(activeProxyGroup)}</b>.`;
   for (const p of proxies) {
+    if (!visible.has(p.id)) continue;
     const tr = document.createElement("tr");
     if (proxySelection.has(p.id)) tr.classList.add("selected");
     tr.innerHTML = `
       <td><input type="checkbox" data-proxy="${esc(p.id)}" ${proxySelection.has(p.id) ? "checked" : ""} /></td>
       <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
+      <td class="mono">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
       <td class="mono">${esc(p.timezone ?? "—")}</td>
-      <td><button class="ghost" data-act="test">test</button> <span class="mono" style="color:var(--faint)" data-out></span></td>
-      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>`;
+      <td><span class="probe-line" data-out></span></td>
+      <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>
+      ${hoverActionsCell()}`;
+    wireHoverActions(tr, { copy: () => proxyConnString(p), edit: () => openProxyEdit(p) });
     tr.querySelector("[data-proxy]").addEventListener("change", (ev) => {
       if (ev.target.checked) proxySelection.add(p.id);
       else proxySelection.delete(p.id);
       tr.classList.toggle("selected", ev.target.checked);
       updateProxySelection();
     });
-    tr.querySelector("[data-act='test']").addEventListener("click", () => testProxyRow(p, tr));
+    renderProbeLine(tr.querySelector("[data-out]"), p.id);
     tr.querySelector("[data-act='delete']").addEventListener("click", async () => {
       if (!window.confirm(`Delete proxy "${p.name}"?`)) return;
       try {
@@ -853,6 +1084,57 @@ async function loadProxies() {
   updateProxySelection();
 }
 
+/* Proxy edit drawer (row hover ✏️). A blank password keeps the stored one —
+   the API never sends it back, so the field cannot be prefilled. */
+let proxyEditId = null;
+
+function openProxyEdit(p) {
+  proxyEditId = p.id;
+  $("#px-name").value = p.name;
+  $("#px-type").value = p.type;
+  $("#px-host").value = p.host;
+  $("#px-port").value = p.port;
+  $("#px-username").value = p.username ?? "";
+  $("#px-password").value = "";
+  $("#px-group").value = p.group ?? "default";
+  $("#proxy-edit-status").textContent = "";
+  $("#proxy-edit-modal").hidden = false;
+  $("#px-name").focus();
+}
+
+function closeProxyEdit() {
+  proxyEditId = null;
+  $("#px-password").value = "";
+  $("#proxy-edit-modal").hidden = true;
+}
+
+$("#proxy-edit-close").addEventListener("click", closeProxyEdit);
+$("#proxy-edit-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-edit-modal") closeProxyEdit(); });
+$("#proxy-edit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!proxyEditId) return;
+  const username = $("#px-username").value.trim();
+  const password = $("#px-password").value;
+  const body = {
+    name: $("#px-name").value.trim(),
+    type: $("#px-type").value,
+    host: $("#px-host").value.trim(),
+    port: Number($("#px-port").value),
+    username: username === "" ? null : username,
+    group: $("#px-group").value.trim() || "default",
+    ...(password !== "" ? { password } : {}),
+  };
+  try {
+    await api(`/proxies/${proxyEditId}`, { method: "PATCH", body: JSON.stringify(body) });
+    toast(`proxy "${body.name}" saved`);
+    closeProxyEdit();
+  } catch (err) {
+    $("#proxy-edit-status").textContent = err.message;
+    return;
+  }
+  await loadProxies();
+});
+
 /* Proxies view: selection, bulk test/delete, add drawer */
 const proxySelection = new Set();
 
@@ -861,29 +1143,39 @@ function updateProxySelection() {
   $("#proxies-selected").textContent = n ? `${n} selected` : "";
   $("#proxies-delete-selected").disabled = n === 0;
   $("#proxies-test-selected").disabled = n === 0;
-  const all = [...proxyById.keys()];
+  $("#proxies-move").disabled = n === 0;
+  const all = visibleProxyIds();
   const box = $("#proxies-select-all");
   box.checked = all.length > 0 && all.every((id) => proxySelection.has(id));
   box.indeterminate = n > 0 && !box.checked;
 }
 
 async function testProxyRow(p, tr) {
-  const out = tr.querySelector("[data-out]");
-  out.textContent = "…";
-  out.style.color = "var(--faint)";
-  try {
-    const r = await api(`/proxies/${p.id}/test`, { method: "POST" });
-    const geo = r.geo ? ` · ${[r.geo.city, r.geo.region, r.geo.country].filter(Boolean).join(", ")}` : "";
-    out.textContent = r.ok ? `ok · ${r.latencyMs}ms${r.exitIp ? ` · ${r.exitIp}` : ""}${geo}` : `fail: ${r.error}`;
-    out.style.color = r.ok ? "var(--green)" : "var(--red)";
-  } catch (err) {
-    out.textContent = err.message;
-    out.style.color = "var(--red)";
-  }
+  await retestProxy(p.id, tr.querySelector("[data-out]"));
 }
 
+$("#proxies-move").addEventListener("click", async () => {
+  const ids = [...proxySelection];
+  if (ids.length === 0) return;
+  let group = $("#proxies-move-group").value;
+  if (group === "__new__" || !group) {
+    const name = window.prompt(`New group name for ${ids.length} selected prox${ids.length === 1 ? "y" : "ies"}:`, "");
+    if (!name || name.trim() === "") return;
+    group = name.trim();
+  }
+  try {
+    const r = await api("/proxies/batch-move", { method: "POST", body: JSON.stringify({ ids, group }) });
+    toast(`moved ${r.moved} prox${r.moved === 1 ? "y" : "ies"} to "${group}"`);
+    proxySelection.clear();
+    activeProxyGroup = group;
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  await loadProxies();
+});
+
 $("#proxies-select-all").addEventListener("change", (e) => {
-  for (const id of proxyById.keys()) {
+  for (const id of visibleProxyIds()) {
     if (e.target.checked) proxySelection.add(id);
     else proxySelection.delete(id);
   }
@@ -914,67 +1206,46 @@ $("#proxies-delete-selected").addEventListener("click", async () => {
   await loadProxies();
 });
 
-/* One pasted line -> proxy input. Accepts host:port, host:port:user:pass and
-   name:host:port:user:pass, with an optional scheme:// prefix. The password
-   is everything after the user (it may itself contain ':'). */
-function parseProxyLine(raw, defaultType) {
-  let line = raw.trim();
-  if (!line) return null;
-  let type = defaultType;
-  const scheme = /^(https?|socks5h?):\/\//i.exec(line);
-  if (scheme) {
-    type = scheme[1].toLowerCase().replace("socks5h", "socks5");
-    line = line.slice(scheme[0].length);
-  }
-  const parts = line.split(":");
-  let name = null;
-  if (parts.length >= 3 && !/^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) name = parts.shift();
-  const [host, port, username, ...rest] = parts;
-  if (!host || !/^\d+$/.test(port ?? "")) throw new Error("expected host:port[:user:pass]");
-  return {
-    name: name || `${host}:${port}`,
-    type,
-    host,
-    port: Number(port),
-    username: username || null,
-    password: rest.length ? rest.join(":") : null,
-  };
-}
-
 $("#proxy-add-open").addEventListener("click", () => {
   $("#proxy-add-result").innerHTML = "";
   $("#proxy-add-status").textContent = "";
+  $("#proxy-add-file").value = "";
+  $("#proxy-add-group").value = activeProxyGroup === "all" ? "" : activeProxyGroup;
   $("#proxy-add-modal").hidden = false;
   $("#proxy-add-lines").focus();
 });
 $("#proxy-add-close").addEventListener("click", () => { $("#proxy-add-modal").hidden = true; });
 $("#proxy-add-modal").addEventListener("click", (e) => { if (e.target.id === "proxy-add-modal") $("#proxy-add-modal").hidden = true; });
 
+/* Import: the server parses, dedupes (host+port) and reports per line. A
+   chosen .txt file wins over the textarea. Errors never echo the line back:
+   it may carry a password. */
 $("#proxy-add-go").addEventListener("click", async () => {
-  const lines = $("#proxy-add-lines").value.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length === 0) return;
-  const type = $("#proxy-add-type").value;
+  const file = $("#proxy-add-file").files[0];
+  const text = file ? await file.text() : $("#proxy-add-lines").value;
+  if (!text.trim()) return;
   const btn = $("#proxy-add-go");
   btn.disabled = true;
-  const rows = [];
-  let added = 0;
-  for (const [i, raw] of lines.entries()) {
-    let input = null;
-    try {
-      input = parseProxyLine(raw, type);
-      await api("/proxies", { method: "POST", body: JSON.stringify(input) });
-      added++;
-      rows.push(`<tr><td>line ${i + 1}</td><td>${esc(input.name)} added</td></tr>`);
-    } catch (err) {
-      /* never echo the line back: it may carry a password */
-      rows.push(`<tr class="import-err"><td>line ${i + 1}</td><td>${esc(input?.name ?? "")} ${esc(err.message)}</td></tr>`);
+  try {
+    const group = $("#proxy-add-group").value.trim();
+    const r = await api("/proxies/import", {
+      method: "POST",
+      body: JSON.stringify({ text, type: $("#proxy-add-type").value, ...(group ? { group } : {}) }),
+    });
+    $("#proxy-add-status").textContent = `${r.added} added · ${r.skipped} skipped (already listed) · ${r.errors.length} error${r.errors.length === 1 ? "" : "s"}`;
+    $("#proxy-add-result").innerHTML = r.errors.length
+      ? `<table class="import-table"><tbody>${r.errors.map((e) => `<tr class="import-err"><td>line ${e.line}</td><td>${esc(e.reason)}</td></tr>`).join("")}</tbody></table>`
+      : "";
+    if (r.errors.length === 0) {
+      $("#proxy-add-lines").value = "";
+      $("#proxy-add-file").value = "";
     }
+    toast(`${r.added} prox${r.added === 1 ? "y" : "ies"} imported`);
+  } catch (err) {
+    $("#proxy-add-status").textContent = err.message;
+  } finally {
+    btn.disabled = false;
   }
-  btn.disabled = false;
-  $("#proxy-add-status").textContent = `${added}/${lines.length} added`;
-  $("#proxy-add-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
-  if (added === lines.length) $("#proxy-add-lines").value = "";
-  toast(`${added} prox${added === 1 ? "y" : "ies"} added`);
   await loadProxies();
 });
 
@@ -1165,7 +1436,7 @@ async function onTabAction(profileId, tab, act, btn) {
       await api(`/profiles/${profileId}/tabs/${tab.id}/close`, { method: "POST" });
     } else if (act === "screenshot") {
       /* fetch, not a plain <img src>: the bearer-token hook applies to images too */
-      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`);
+      const res = await fetch(`/profiles/${profileId}/tabs/${tab.id}/screenshot`, { headers: authHeaders() });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
@@ -1389,7 +1660,7 @@ $("#cookies-export").addEventListener("click", async () => {
   if (!profileId) return;
   const format = $("#cookies-export-format").value;
   try {
-    const res = await fetch(`/profiles/${profileId}/cookies/export?format=${format}`);
+    const res = await fetch(`/profiles/${profileId}/cookies/export?format=${format}`, { headers: authHeaders() });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
@@ -1441,6 +1712,7 @@ const SETTINGS_FIELDS = {
   engine: [
     { key: "channel", label: "Engine update channel", type: "select", options: [["stable", "Stable"], ["beta", "Beta"]] },
     { key: "downloadConsent", label: "Allow engine binary downloads", type: "checkbox" },
+    { key: "updateUrl", label: "Update server URL (engine manifest; empty = default)", type: "text", placeholder: "https://your-server/engines.manifest.json" },
   ],
   launch: [
     { key: "batchStaggerMs", label: "Batch start delay (ms)", type: "number", min: 0, max: 60000 },
@@ -1479,8 +1751,16 @@ const SETTINGS_FIELDS = {
     { key: "enabledPlugins", label: "Enabled plugins (comma-separated)", type: "text", placeholder: "plugin file names" },
     { key: "enabledJyl", label: "Enabled JYL commands (comma-separated)", type: "text", placeholder: "command names" },
   ],
+  agent: [
+    { key: "providerUrl", label: "Model server URL (loopback only — Ollama's default is http://127.0.0.1:11434)", type: "text", placeholder: "http://127.0.0.1:11434" },
+    { key: "model", label: "Model name", type: "text", placeholder: "qwen2.5:7b-instruct" },
+  ],
 };
-const SETTINGS_SECTIONS = Object.keys(SETTINGS_FIELDS);
+/* Nav order groups related sections. "email" has no key/value fields — its
+   body is the custom email-accounts card (like the engine/team cards). */
+SETTINGS_FIELDS.email = [];
+const SETTINGS_SECTIONS = ["general", "engine", "launch", "email", "integrations", "automation", "agent", "team"];
+const SETTINGS_LABELS = { email: "Email (IMAP)" };
 let settingsData = null;
 let settingsSection = "general";
 
@@ -1526,7 +1806,8 @@ function renderSettingsNav() {
   for (const s of SETTINGS_SECTIONS) {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = s;
+    b.textContent = SETTINGS_LABELS[s] ?? s;
+    b.dataset.section = s;
     b.className = s === settingsSection ? "active" : "";
     b.addEventListener("click", () => {
       settingsSection = s;
@@ -1536,43 +1817,219 @@ function renderSettingsNav() {
   }
 }
 
-/* Integrations gets a read-only reference card for the email resolvers —
-   there is no writable IMAP settings endpoint; IMAP/Gmail are resolvers in
-   the scripting layer. This card documents the URL shapes. */
+/* Settings → Engine: one-click engine update (C1). Check is free; Install
+   needs the "Allow engine binary downloads" switch above it. The install
+   runs in the API's background; this card polls its status. */
+let engineUpdatePoll = null;
+
+async function renderEngineUpdateCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="engine-update-card">
+      <h4>Engine updates</h4>
+      <p>Checks the engine manifest for a newer verified engine. Installs are checksum-pinned and atomic; the current engine stays installed, so a bad update can be rolled back.</p>
+      <div id="engine-update-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="engine-update-check">Check again</button>
+        <button type="button" class="primary" id="engine-update-install" hidden>Install update</button>
+      </div>
+    </div>`;
+  $("#engine-update-check").addEventListener("click", () => refreshEngineUpdate());
+  $("#engine-update-install").addEventListener("click", async () => {
+    try {
+      const r = await api("/engine/update", { method: "POST" });
+      toast(r.started ? `installing engine ${r.version}…` : `engine ${r.version} is already current`);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    await refreshEngineUpdate();
+  });
+  await refreshEngineUpdate();
+}
+
+async function refreshEngineUpdate() {
+  const status = $("#engine-update-status");
+  const install = $("#engine-update-install");
+  if (!status) return;
+  clearTimeout(engineUpdatePoll);
+  try {
+    const u = await api("/engine/update");
+    const job = u.job;
+    const size = u.latest?.sizeBytes ? ` (${Math.round(u.latest.sizeBytes / 1048576)} MB)` : "";
+    let line =
+      u.status === "current" ? `Up to date — ${esc(u.latest.kind)} ${esc(u.latest.version)}.`
+      : u.status === "available" ? `Update available: ${esc(u.latest.kind)} ${esc(u.latest.version)}${size}.`
+      : `Cannot check: ${esc(u.error)}`;
+    if (job?.state === "running") line += ` Installing ${esc(job.version)}…`;
+    else if (job?.state === "installed") line += ` Installed ${esc(job.version)} — restart running profiles to use it.`;
+    else if (job?.state === "failed") line += ` Last install of ${esc(job.version)} failed: ${esc(job.error)}`;
+    if (u.status === "available" && !u.consent) line += ` Turn on "Allow engine binary downloads" below to install.`;
+    status.innerHTML = `${line}<br><span style="color:var(--faint)">Checked: ${esc(u.source)}</span>`;
+    install.hidden = !(u.status === "available" && u.consent && job?.state !== "running");
+    if (job?.state === "running") engineUpdatePoll = setTimeout(refreshEngineUpdate, 2000);
+  } catch (err) {
+    status.textContent = err.message;
+    install.hidden = true;
+  }
+}
+
+/* Settings → Automation: Plugins (B3b). Import needs the scripting switch
+   above AND a token-protected install (the API refuses otherwise and says
+   why). An imported plugin lands disabled; its code first runs when the
+   owner flips it on here. */
+async function renderPluginsCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="plugins-card">
+      <h4>Plugins</h4>
+      <p>Upload a script (<code>.mjs</code>/<code>.js</code>) or a zipped plugin folder. It is installed <b>switched off</b> — nothing runs until you turn it on below.</p>
+      <table class="import-table" id="plugins-table"><tbody></tbody></table>
+      <p id="plugins-empty" class="hint" hidden>No plugins installed.</p>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="primary" id="plugin-import">⇪ Import plugin</button>
+        <input type="file" id="plugin-file" accept=".mjs,.js,.zip" multiple hidden />
+      </div>
+      <div id="plugin-import-result"></div>
+    </div>`;
+  $("#plugin-import").addEventListener("click", () => $("#plugin-file").click());
+  $("#plugin-file").addEventListener("change", async (ev) => {
+    const files = [...ev.target.files];
+    ev.target.value = "";
+    const rows = [];
+    for (const f of files) {
+      try {
+        const res = await fetch(`/plugins/import?filename=${encodeURIComponent(f.name)}`, {
+          method: "POST",
+          headers: authHeaders({ "content-type": "application/octet-stream" }),
+          body: f,
+        });
+        const body = await res.json().catch(() => ({}));
+        for (const i of body.installed ?? []) rows.push(`<tr><td>${esc(i.file)}</td><td>installed as <b>${esc(i.id)}</b> — switched off</td></tr>`);
+        for (const r of body.rejected ?? []) rows.push(`<tr class="import-err"><td>${esc(r.file)}</td><td>rejected: ${esc(r.reason)}</td></tr>`);
+        if (!body.installed && !body.rejected) rows.push(`<tr class="import-err"><td>${esc(f.name)}</td><td>${esc(body.error?.message ?? `HTTP ${res.status}`)}</td></tr>`);
+      } catch (err) {
+        rows.push(`<tr class="import-err"><td>${esc(f.name)}</td><td>${esc(err.message)}</td></tr>`);
+      }
+    }
+    $("#plugin-import-result").innerHTML = `<table class="import-table"><tbody>${rows.join("")}</tbody></table>`;
+    await refreshPluginsTable();
+  });
+  await refreshPluginsTable();
+}
+
+async function refreshPluginsTable() {
+  const tbody = $("#plugins-table tbody");
+  if (!tbody) return;
+  let plugins = [];
+  try {
+    ({ plugins } = await api("/plugins"));
+  } catch (err) {
+    tbody.innerHTML = `<tr class="import-err"><td colspan="3">${esc(err.message)}</td></tr>`;
+    return;
+  }
+  $("#plugins-empty").hidden = plugins.length !== 0;
+  tbody.innerHTML = "";
+  for (const p of plugins) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><b>${esc(p.id)}</b> <span style="color:var(--faint)">${esc(p.version)}</span></td>
+      <td>${p.error ? `<span style="color:var(--red)">${esc(p.error)}</span>` : p.loaded ? "loaded" : "not loaded"}</td>
+      <td><label class="check"><input type="checkbox" ${p.enabled ? "checked" : ""} /> enabled</label></td>`;
+    tr.querySelector("input").addEventListener("change", async (e) => {
+      try {
+        await api(`/plugins/${encodeURIComponent(p.id)}/enable`, { method: "POST", body: JSON.stringify({ enabled: e.target.checked }) });
+        toast(`plugin ${p.id} ${e.target.checked ? "enabled" : "disabled"}`);
+      } catch (err) {
+        toast(err.message, "error");
+      }
+      await refreshPluginsTable();
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+/* The custom card above a settings section's key/value fields: engine
+   updates, team, plugins, agent, the email accounts (Email (IMAP)), and a
+   pointer from Integrations to that section. */
 function renderIntegrationsInfo() {
   const box = $("#integrations-info");
+  if (settingsSection === "engine") {
+    renderEngineUpdateCard(box);
+    return;
+  }
+  if (settingsSection === "team") {
+    renderTeamCard(box);
+    return;
+  }
+  if (settingsSection === "automation") {
+    renderPluginsCard(box);
+    return;
+  }
+  if (settingsSection === "agent") {
+    renderAgentCard(box);
+    return;
+  }
+  if (settingsSection === "general" && storedToken() !== null) {
+    /* The sidebar's Sign out is hidden on narrow windows; this one is not. */
+    box.innerHTML = `
+      <div class="info-card" id="session-card">
+        <h4>Signed in</h4>
+        <p>This browser holds the API token ${(() => { try { return localStorage.getItem(TOKEN_KEY) ? "on this computer (remembered)" : "for this tab only"; } catch { return ""; } })()}.</p>
+        <button type="button" id="signout-settings">Sign out</button>
+      </div>`;
+    $("#signout-settings").addEventListener("click", signOut);
+    return;
+  }
+  if (settingsSection === "email") {
+    renderEmailAccountsCard(box);
+    return;
+  }
   if (settingsSection !== "integrations") {
     box.innerHTML = "";
     return;
   }
   box.innerHTML = `
+    <div class="info-card">
+      <p>Email accounts live under <a href="#" id="goto-email-settings">Settings → Email (IMAP)</a>.</p>
+    </div>${integrationCardsHtml()}`;
+  $("#goto-email-settings").addEventListener("click", (e) => {
+    e.preventDefault();
+    settingsSection = "email";
+    renderSettings();
+  });
+  wireAycdCard();
+  wireDiscordCard();
+}
+
+/* Settings → Email (IMAP): mail accounts the imap: resolver reads one-time
+   codes from. App passwords are stored encrypted and never sent back. */
+function renderEmailAccountsCard(box) {
+  box.innerHTML = `
     <div class="info-card" id="email-accounts-card">
       <h4>Email accounts (Gmail / IMAP)</h4>
-      <p>Used to read one-time codes from mail. For Gmail, turn on 2-Step Verification and create an <b>app password</b> (Google Account → Security → App passwords). The app password is stored encrypted on this machine and never shown again.</p>
-      <table class="import-table" id="email-accounts-table"><tbody></tbody></table>
+      <p>Used to read one-time codes from mail. Use in a resolver: <code>imap:you@gmail.com</code> (optionally <code>?query=UNSEEN FROM "ticketmaster"</code>).</p>
+      <table class="import-table email-accounts" id="email-accounts-table">
+        <thead><tr><th>Email</th><th>Server</th><th>Password</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
       <p id="email-accounts-empty" class="hint" hidden>No email accounts yet.</p>
-      <form id="email-account-form" autocomplete="off" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;margin-top:10px">
+    </div>
+    <div class="info-card">
+      <h4>Add an account</h4>
+      <p class="hint">Gmail: turn on 2-Step Verification, then create an <b>app password</b> (Google Account → Security → App passwords) and paste it below. It is stored encrypted on this machine and never shown again.</p>
+      <form id="email-account-form" class="email-form" autocomplete="off">
         <label>Email <input id="email-account-email" type="email" required maxlength="254" placeholder="you@gmail.com" /></label>
         <label>App password <input id="email-account-password" type="password" required maxlength="200" autocomplete="new-password" placeholder="16-letter app password" /></label>
         <label>Server <input id="email-account-host" required maxlength="253" value="imap.gmail.com" /></label>
         <label>Port <input id="email-account-port" type="number" required min="1" max="65535" value="993" /></label>
-        <button type="submit" class="primary" id="email-account-add">+ Add</button>
+        <div class="email-form-actions"><button type="submit" class="primary" id="email-account-add">+ Add account</button> <span class="hint" id="email-account-status"></span></div>
       </form>
-      <p class="hint" id="email-account-status"></p>
       <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=imap:you@gmail.com:ticketmaster</code> returns the code (the parser picks the right email). Raw body for scripts: <code>imap:you@gmail.com</code>.</p>
-    </div>
-    <div class="info-card" id="team-redeem-card">
-      <h4>Redeem an invite</h4>
-      <p>Paste the server address and the one-time invite (<code>qpi_…</code>) the owner sent. The licence key is stored in Settings → Team and never shown.</p>
-      <p id="licence-state" class="hint">checking…</p>
-      <form id="redeem-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(220px,2fr) minmax(220px,2fr) minmax(120px,1fr) auto;gap:8px;align-items:end;margin-top:6px">
-        <label>Server <input id="redeem-server" maxlength="300" placeholder="https://…" /></label>
-        <label>Invite <input id="redeem-invite" type="password" maxlength="100" autocomplete="off" placeholder="qpi_…" /></label>
-        <label>Your name <input id="redeem-name" maxlength="80" placeholder="optional" /></label>
-        <button type="submit" class="primary">Redeem</button>
-      </form>
-      <p class="hint" id="redeem-status"></p>
-    </div>
+    </div>`;
+  $("#email-account-form").addEventListener("submit", addEmailAccount);
+  loadEmailAccounts();
+}
+
+/* Settings → Integrations: Discord notifications + AYCD Inbox (J6 / J1). */
+function integrationCardsHtml() {
+  return `
     <div class="info-card" id="discord-card">
       <h4>Discord notifications</h4>
       <p>Paste a Discord <b>webhook URL</b> (channel settings → Integrations → Webhooks). It is stored encrypted on this machine and only a masked form is ever shown. Choose what to send under Settings → sites.</p>
@@ -1598,11 +2055,6 @@ function renderIntegrationsInfo() {
       <p class="hint" id="aycd-status"></p>
       <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=aycd:@aycd</code>. Catch-all/forwarding accounts: <code>aycd:@aycd:ticketmaster:&lt;templateId&gt;</code>. Or use AYCD's <b>IMAP Server</b> (Inbox → Mail → IMAP Server): <code>emailcode=imap:127.0.0.1:&lt;port&gt;:&lt;account email&gt;:&lt;password&gt;:ticketmaster</code>.</p>
     </div>`;
-  $("#email-account-form").addEventListener("submit", addEmailAccount);
-  loadEmailAccounts();
-  wireAycdCard();
-  wireDiscordCard();
-  wireRedeemCard();
 }
 
 function wireDiscordCard() {
@@ -1652,41 +2104,6 @@ function wireDiscordCard() {
     try {
       await api("/integrations/discord", { method: "DELETE" });
       say("webhook removed", "var(--faint)");
-    } catch (err) {
-      say(err.message, "var(--red)");
-    }
-    refresh();
-  });
-  refresh();
-}
-
-function wireRedeemCard() {
-  const status = $("#redeem-status");
-  const say = (msg, color) => {
-    status.textContent = msg;
-    status.style.color = color;
-  };
-  const refresh = async () => {
-    const el = $("#licence-state");
-    try {
-      const r = await api("/team/licence");
-      if (!r.configured) el.textContent = "Not connected to a team server.";
-      else if (r.error) el.textContent = `Connected, but: ${r.error.message}`;
-      else el.textContent = `Licence: ${r.licence.account?.name ?? "?"}${r.licence.daysLeft != null ? ` · ${r.licence.daysLeft} days left` : ""}`;
-    } catch (err) {
-      el.textContent = err.message;
-    }
-  };
-  const server = $("#redeem-server");
-  api("/settings/sections/team").then((t) => { if (t.serverUrl) server.value = t.serverUrl; }).catch(() => {});
-  $("#redeem-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const invite = $("#redeem-invite").value.trim();
-    $("#redeem-invite").value = "";
-    if (!server.value.trim() || !invite) return say("enter the server and the invite", "var(--red)");
-    try {
-      await api("/team/redeem", { method: "POST", body: JSON.stringify({ serverUrl: server.value.trim(), invite, name: $("#redeem-name").value.trim() || undefined }) });
-      say("invite redeemed — you are connected", "var(--green)");
     } catch (err) {
       say(err.message, "var(--red)");
     }
@@ -1766,10 +2183,13 @@ async function loadEmailAccounts() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="font-weight:600">${esc(a.email)}</td>
-      <td class="mono">${esc(a.host)}:${esc(a.port)}${a.tls ? "" : " (no TLS)"}</td>
+      <td class="mono">${esc(a.host)}:${esc(a.port)} ${a.tls ? `<span class="tag">TLS</span>` : `<span class="tag" style="color:var(--red);border-color:var(--red)">no TLS</span>`}</td>
       <td>${a.hasPassword ? "app password stored" : `<span style="color:var(--red)">no password</span>`}</td>
-      <td><button type="button" class="ghost" data-act="test">Test</button> <span class="mono" data-out></span></td>
-      <td><button type="button" class="danger" data-act="remove">Remove</button></td>`;
+      <td>
+        <span class="email-actions"><button type="button" class="ghost" data-act="test">Test</button><button type="button" class="ghost" data-hover="copy" title="copy address">📋 Copy</button><button type="button" class="danger" data-act="remove">Remove</button></span>
+        <span class="mono email-test-out" data-out></span>
+      </td>`;
+    wireHoverActions(tr, { copy: () => a.email });
     tr.querySelector('[data-act="test"]').addEventListener("click", async (ev) => {
       const out = tr.querySelector("[data-out]");
       ev.target.disabled = true;
@@ -1862,6 +2282,9 @@ async function persistSetting(key, field) {
     settingsData[settingsSection] = updated;
     if (key === "density") applyDensity();
     $("#settings-status").textContent = `${settingsSection}.${key} saved`;
+    if (settingsSection === "engine" && (key === "downloadConsent" || key === "updateUrl")) refreshEngineUpdate();
+    if (settingsSection === "agent") refreshAgentCard();
+    if (settingsSection === "team" && (key === "serverUrl" || key === "token")) refreshTeamSession();
   } catch (err) {
     $("#settings-status").textContent = `save failed: ${err.message}`;
     renderSettings(); /* revert to last known-good values */
@@ -2251,19 +2674,44 @@ function pushEvent(e) {
   while (list.children.length > 50) list.lastChild.remove();
 }
 
-function connectEvents() {
-  const es = new EventSource("/events");
-  es.onopen = () => {
-    $("#sse").textContent = "live";
-    $("#sse-dot").className = "dot dot-on";
+/* SSE over fetch (P9 Task 0): EventSource cannot send an Authorization
+   header, so a token-protected install read the stream as 401 forever.
+   Same events, same handler; reconnects after 3 s like EventSource. */
+async function connectEvents() {
+  const setLive = (on) => {
+    $("#sse").textContent = on ? "live" : "offline";
+    $("#sse-dot").className = "dot " + (on ? "dot-on" : "dot-off");
   };
-  es.onerror = () => {
-    $("#sse").textContent = "offline";
-    $("#sse-dot").className = "dot dot-off";
-  };
-  es.onmessage = (msg) => {
+  try {
+    const res = await fetch("/events", { headers: authHeaders({ accept: "text/event-stream" }) });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    setLive(true);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let cut;
+      while ((cut = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        const data = frame.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+        if (data) onEventMessage(data);
+      }
+    }
+  } catch {
+    /* fall through to reconnect */
+  }
+  setLive(false);
+  /* While the sign-in is up there is nothing to reconnect with. */
+  if ($("#signin").hidden) setTimeout(connectEvents, 3000);
+}
+
+function onEventMessage(raw) {
+  {
     try {
-      const e = JSON.parse(msg.data);
+      const e = JSON.parse(raw);
       if (e.detail === "connected") return;
       pushEvent(e);
       /* run/tab transitions change the grids; reload lazily */
@@ -2277,7 +2725,464 @@ function connectEvents() {
     } catch {
       /* malformed event — ignore */
     }
+  }
+}
+
+
+/* ======================= P9 local assistant panel ======================== */
+/* The assistant runs on THIS machine's local model (Settings → Agent). It
+   acts only through the QueuePilot tool catalog; deletes and engine
+   installs stop and ask here (Approve / Decline) before anything happens. */
+
+let agentChatId = null;
+let agentBusy = false;
+
+const AGENT_EXAMPLES = [
+  "Which proxies are in the worst health?",
+  "Create a profile named Demo-1 in group demo",
+  "List my running profiles",
+];
+
+function agentEl(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  if (text !== undefined) d.textContent = text;
+  $("#agent-messages").appendChild(d);
+  $("#agent-messages").scrollTop = $("#agent-messages").scrollHeight;
+  return d;
+}
+
+function agentEmptyState() {
+  const box = $("#agent-messages");
+  box.innerHTML = "";
+  const e = document.createElement("div");
+  e.className = "agent-empty";
+  e.innerHTML = `<p>Ask in plain English. The assistant can list, create, start and stop profiles, check proxy health, run warmups and more. Deleting anything asks you first.</p>`;
+  for (const ex of AGENT_EXAMPLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = ex;
+    b.addEventListener("click", () => {
+      $("#agent-input").value = ex;
+      $("#agent-input").focus();
+    });
+    e.appendChild(b);
+  }
+  box.appendChild(e);
+}
+
+async function agentStatusLine() {
+  try {
+    const s = await api("/agent/status");
+    $("#agent-status").textContent = s.reachable
+      ? s.modelPresent
+        ? `${s.provider} ${s.version ?? ""} · ${s.model} · ready${/-cloud$|:cloud$/.test(s.model) ? " · CLOUD model (runs on ollama.com)" : ""}`
+        : `${s.provider} reachable · model ${s.model} not downloaded — Settings → Agent → Download model`
+      : `local model not reachable — ${s.error ?? "is Ollama running?"}`;
+    return s;
+  } catch (err) {
+    $("#agent-status").textContent = err.message;
+    return null;
+  }
+}
+
+/* POST that answers NDJSON: one AgentEvent per line, handled as it arrives. */
+async function agentStream(path, body) {
+  agentBusy = true;
+  $("#agent-send").disabled = true;
+  let bubble = null;
+  let lastText = null;
+  const chips = new Map();
+  try {
+    const res = await fetch(path, { method: "POST", headers: authHeaders({ "content-type": "application/json" }), body: JSON.stringify(body) });
+    if (!res.ok || !res.body) {
+      const j = await res.json().catch(() => ({}));
+      agentEl("agent-msg assistant", `⚠ ${j.error?.message ?? `HTTP ${res.status}`}`);
+      return;
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const e = JSON.parse(line);
+        if (e.type === "token") {
+          bubble ??= agentEl("agent-msg assistant", "");
+          bubble.textContent += e.text;
+        } else if (e.type === "message") {
+          if (!bubble) agentEl("agent-msg assistant", e.text);
+          else bubble.textContent = e.text;
+          bubble = null;
+          lastText = e.text;
+        } else if (e.type === "tool_call") {
+          bubble = null;
+          chips.set(e.id, agentEl("agent-chip run", e.summary));
+        } else if (e.type === "tool_result") {
+          const chip = chips.get(e.id) ?? agentEl("agent-chip", e.tool);
+          chip.className = "agent-chip " + (e.ok ? "ok" : "fail");
+          chip.textContent = `${e.ok ? "✓" : "✕"} ${e.summary}`;
+        } else if (e.type === "confirm") {
+          agentConfirm(e.pending);
+        } else if (e.type === "done" && e.outcome === "error" && e.reason && e.reason !== lastText) {
+          /* Only errors the loop did not already say as a message. */
+          agentEl("agent-msg assistant", `⚠ ${e.reason}`);
+        }
+      }
+    }
+  } catch (err) {
+    agentEl("agent-msg assistant", `⚠ ${err.message}`);
+  } finally {
+    agentBusy = false;
+    $("#agent-send").disabled = false;
+    if (!$("#agent-actions").hidden) agentLoadActions();
+  }
+}
+
+function agentConfirm(pending) {
+  const box = agentEl("agent-confirm");
+  box.innerHTML = `<b>Needs your approval:</b> ${esc(pending.summary)}<div class="hint">Nothing happens unless you approve.</div>
+    <div class="actions"><button type="button" class="danger" data-a="yes">Approve</button><button type="button" data-a="no">Decline</button></div>`;
+  for (const b of box.querySelectorAll("button")) {
+    b.addEventListener("click", async () => {
+      const approve = b.dataset.a === "yes";
+      box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      box.insertAdjacentHTML("beforeend", `<div class="hint">${approve ? "Approved." : "Declined — nothing was done."}</div>`);
+      await agentStream(`/agent/chats/${agentChatId}/confirm`, { pendingId: pending.id, approve });
+    });
+  }
+}
+
+async function agentLoadActions() {
+  const box = $("#agent-actions");
+  try {
+    const { actions } = await api("/agent/actions?limit=200");
+    box.innerHTML = actions.length
+      ? actions
+          .map(
+            (a) =>
+              `<div class="agent-action">${esc(a.at.slice(11, 19))} <span class="o-${esc(a.outcome)}">${esc(a.outcome)}</span> <b>${esc(a.tool)}</b> — ${esc(a.summary)}</div>`,
+          )
+          .join("")
+      : `<p class="hint">No actions yet.</p>`;
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
+async function agentOpen() {
+  $("#agent-panel").hidden = false;
+  $("#agent-launcher").hidden = true;
+  await agentStatusLine();
+  if (!agentChatId) agentEmptyState();
+  $("#agent-input").focus();
+}
+
+$("#agent-launcher").addEventListener("click", agentOpen);
+$("#agent-close").addEventListener("click", () => {
+  $("#agent-panel").hidden = true;
+  $("#agent-launcher").hidden = false;
+});
+$("#agent-new").addEventListener("click", () => {
+  agentChatId = null;
+  agentEmptyState();
+});
+for (const b of document.querySelectorAll("[data-agent-tab]")) {
+  b.addEventListener("click", () => {
+    const tab = b.dataset.agentTab;
+    document.querySelectorAll("[data-agent-tab]").forEach((x) => x.classList.toggle("active", x === b));
+    $("#agent-messages").hidden = tab !== "chat";
+    $("#agent-form").hidden = tab !== "chat";
+    $("#agent-actions").hidden = tab !== "actions";
+    if (tab === "actions") agentLoadActions();
+  });
+}
+$("#agent-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("#agent-form").requestSubmit();
+  }
+});
+$("#agent-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("#agent-input").value.trim();
+  if (!text || agentBusy) return;
+  if (!agentChatId) {
+    $("#agent-messages").innerHTML = "";
+    agentChatId = (await api("/agent/chats", { method: "POST" })).id;
+  }
+  $("#agent-input").value = "";
+  agentEl("agent-msg user", text);
+  await agentStream(`/agent/chats/${agentChatId}/messages`, { text });
+});
+
+/* Settings → Agent card: status, model download. */
+async function renderAgentCard(box) {
+  box.innerHTML = `
+    <div class="info-card" id="agent-card">
+      <h4>Local AI assistant</h4>
+      <p>The assistant talks only to the <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> app on this machine (the URL must be a loopback address). A local model keeps everything on this PC; a model whose name ends in <code>-cloud</code> is run by ollama.com, so your requests and the profile/proxy names in them leave the machine.</p>
+      <div id="agent-card-cloud" class="hint" style="color:var(--amber)" hidden></div>
+      <div id="agent-card-status" class="hint">Checking…</div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" id="agent-check">Check again</button>
+        <button type="button" class="primary" id="agent-pull" hidden>Download model</button>
+      </div>
+    </div>`;
+  $("#agent-check").addEventListener("click", () => refreshAgentCard());
+  $("#agent-pull").addEventListener("click", async () => {
+    try {
+      await api("/agent/pull", { method: "POST" });
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    refreshAgentCard();
+  });
+  await refreshAgentCard();
+}
+
+let agentCardPoll = null;
+async function refreshAgentCard() {
+  const line = $("#agent-card-status");
+  if (!line) return;
+  clearTimeout(agentCardPoll);
+  try {
+    const s = await api("/agent/status");
+    const pull = s.pull && !s.pull.done
+      ? ` Downloading ${esc(s.pull.model)}: ${esc(s.pull.status)}${s.pull.total ? ` ${Math.round((100 * (s.pull.completed ?? 0)) / s.pull.total)}%` : ""}…`
+      : s.pull?.error ? ` Last download failed: ${esc(s.pull.error)}` : "";
+    line.innerHTML = s.reachable
+      ? `Ollama ${esc(s.version ?? "")} reachable at ${esc(s.url)} · model <b>${esc(s.model)}</b> ${s.modelPresent ? "installed ✓" : "not downloaded"}.${pull}<br><span style="color:var(--faint)">Installed: ${esc(s.installedModels.join(", ") || "none")}</span>`
+      : `Not reachable: ${esc(s.error ?? "")}`;
+    $("#agent-pull").hidden = !(s.reachable && !s.modelPresent && !(s.pull && !s.pull.done));
+    const cloud = /-cloud$|:cloud$/.test(s.model);
+    $("#agent-card-cloud").hidden = !cloud;
+    $("#agent-card-cloud").textContent = cloud
+      ? `⚠ ${s.model} is an Ollama CLOUD model: conversations are processed on ollama.com, not on this PC (the Ollama app must be signed in).`
+      : "";
+    if (s.pull && !s.pull.done) agentCardPoll = setTimeout(refreshAgentCard, 2000);
+  } catch (err) {
+    line.textContent = err.message;
+  }
+}
+
+/* Sign-in overlay (P9 Task 0). Shown only when the API answers 401. */
+$("#signin-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const token = $("#signin-token").value.trim();
+  if (!token) return;
+  $("#signin-error").textContent = "Checking…";
+  if (await signIn(token, $("#signin-remember").checked)) {
+    location.reload();
+  } else {
+    $("#signin-error").textContent = "Sign-in failed: that token was refused (401). Check SPECTRA_API_TOKEN on the API and try again.";
+    $("#signin-token").select();
+  }
+});
+$("#signout").addEventListener("click", signOut);
+$("#signout").hidden = storedToken() === null;
+
+/* ===================== hosted team (2026-11-18) ========================
+   Sign-in, the owner's Team panel, and tier gating. Everything goes through
+   this API's /team/* routes, which relay to the team server — the browser
+   never talks to the team server and never holds the session token. With
+   no server configured, none of this shows and the console is unchanged. */
+
+const TIER_LABEL = { L1: "Staff", L2: "Editor", L3: "Manager", owner: "Owner" };
+let teamSession = null;
+let teamPromptDismissed = false;
+
+function teamTier() {
+  return teamSession?.account?.tier ?? null;
+}
+
+function applyTier() {
+  const tier = teamTier();
+  const badge = $("#tier-badge");
+  if (tier) {
+    document.body.dataset.tier = tier;
+    badge.textContent = TIER_LABEL[tier] ?? tier;
+    badge.hidden = false;
+  } else {
+    delete document.body.dataset.tier;
+    badge.hidden = true;
+  }
+  $("#plan-line").textContent = teamSession?.account
+    ? `TEAM · ${String(TIER_LABEL[tier] ?? tier ?? "").toUpperCase()}`
+    : teamSession?.source === "device"
+      ? "TEAM · DEVICE TOKEN"
+      : "LOCAL · TEAM USE";
+}
+
+async function refreshTeamSession() {
+  try {
+    teamSession = await api("/team/session");
+  } catch {
+    teamSession = null;
+  }
+  applyTier();
+  if (teamSession?.configured && teamSession.source === null && !teamPromptDismissed) openTeamSignIn(teamSession.message ?? "");
+  if (activeView === "settings" && settingsSection === "team") renderIntegrationsInfo();
+}
+
+function openTeamSignIn(message = "") {
+  $("#team-signin-server").textContent = `Team server: ${teamSession?.serverUrl ?? "?"}`;
+  $("#team-signin-error").textContent = message;
+  $("#team-signin").hidden = false;
+  $("#team-signin-email").focus();
+}
+
+function closeTeamSignIn() {
+  teamPromptDismissed = true;
+  $("#team-signin").hidden = true;
+}
+$("#team-signin-close").addEventListener("click", closeTeamSignIn);
+$("#team-signin-offline").addEventListener("click", closeTeamSignIn);
+$("#team-signin-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("#team-signin-error").textContent = "Signing in…";
+  try {
+    await api("/team/signin", {
+      method: "POST",
+      body: JSON.stringify({ email: $("#team-signin-email").value.trim(), password: $("#team-signin-password").value }),
+    });
+    $("#team-signin-password").value = "";
+    $("#team-signin").hidden = true;
+    await refreshTeamSession();
+    toast(`signed in as ${teamSession?.account?.email ?? "team member"}`);
+  } catch (err) {
+    /* plain text: "wrong email or password", "too many attempts…", unreachable */
+    $("#team-signin-error").textContent = err.message;
+    $("#team-signin-password").select();
+  }
+});
+
+function renderTeamCard(box) {
+  const s = teamSession;
+  if (!s?.configured) {
+    box.innerHTML = `<div class="info-card"><h4>Team server</h4><p>Not connected — QueuePilot runs fully offline. Enter your team server URL below to sign in.</p></div>`;
+    return;
+  }
+  if (!s.account) {
+    const how = s.source === "device" ? `<p>Connected with a device token${s.device?.role ? ` (role ${esc(s.device.role)})` : ""}.</p>` : "";
+    const reach = s.reachable === false ? `<p style="color:var(--red)">Server unreachable: ${esc(s.message ?? "")}</p>` : "";
+    box.innerHTML = `<div class="info-card" id="team-card"><h4>Team server</h4>${how}${reach}
+      <p>Sign in with the email and password your team owner set you up with.</p>
+      <button type="button" class="primary" id="team-card-signin">Sign in…</button></div>`;
+    $("#team-card-signin").addEventListener("click", () => openTeamSignIn());
+    return;
+  }
+  const a = s.account;
+  box.innerHTML = `<div class="info-card" id="team-card"><h4>Team server</h4>
+      <p>Signed in as <b>${esc(a.displayName)}</b> (${esc(a.email)}) — <span class="tier-badge">${esc(TIER_LABEL[a.tier] ?? a.tier)}</span></p>
+      <button type="button" id="team-signout">Sign out of team</button>
+    </div>${a.tier === "owner" ? `<div class="info-card" id="team-panel"><h4>Team</h4><div id="team-panel-body">loading…</div></div>` : ""}`;
+  $("#team-signout").addEventListener("click", async () => {
+    try {
+      await api("/team/signout", { method: "POST" });
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    teamPromptDismissed = true;
+    await refreshTeamSession();
+  });
+  if (a.tier === "owner") renderTeamPanel();
+}
+
+async function renderTeamPanel(notice = "") {
+  const body = $("#team-panel-body");
+  if (!body) return;
+  let members, invites;
+  try {
+    [members, invites] = await Promise.all([api("/team/members"), api("/team/invites")]);
+  } catch (err) {
+    body.innerHTML = `<p style="color:var(--red)">${esc(err.message)}</p>`;
+    return;
+  }
+  const tierSelect = (m) =>
+    `<select data-tm="role">${["L1", "L2", "L3"].map((t) => `<option value="${t}" ${m.tier === t ? "selected" : ""}>${t} · ${TIER_LABEL[t]}</option>`).join("")}</select>`;
+  const memberRows = members.members
+    .map((m) => `<tr data-id="${esc(m.id)}">
+        <td>${esc(m.email)}</td><td>${esc(m.displayName)}</td>
+        <td>${m.tier === "owner" ? "Owner" : tierSelect(m)}</td>
+        <td>${m.active ? "active" : `<span style="color:var(--faint)">deactivated</span>`}</td>
+        <td>${m.tier === "owner" ? "" : `<button type="button" data-tm="active">${m.active ? "Deactivate" : "Reactivate"}</button> <button type="button" class="danger" data-tm="remove">Remove</button>`}</td>
+      </tr>`)
+    .join("");
+  const now = Date.now();
+  const open = invites.invites.filter((i) => i.usedAt === null && Date.parse(i.expiresAt) > now);
+  const when = (iso) => esc(String(iso).slice(0, 16).replace("T", " "));
+  const inviteRows = open
+    .map((i) => `<tr data-id="${esc(i.id)}"><td>${esc(i.role)} · ${esc(TIER_LABEL[i.role] ?? "")}</td><td>${when(i.createdAt)}</td><td>${when(i.expiresAt)}</td><td><button type="button" class="danger" data-ti="revoke">Revoke</button></td></tr>`)
+    .join("");
+  body.innerHTML = `
+    <p class="hint">${members.members.length} of ${members.cap} members · ${open.length} outstanding invite${open.length === 1 ? "" : "s"}</p>
+    <table class="grid team-table"><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Status</th><th></th></tr></thead><tbody>${memberRows}</tbody></table>
+    <h4 style="margin-top:14px">Invite a team member</h4>
+    <div class="actions">
+      <select id="team-invite-role"><option value="L1">L1 · Staff (run warmups/tasks)</option><option value="L2">L2 · Editor (edit, no add/delete)</option><option value="L3">L3 · Manager (add/delete)</option></select>
+      <button type="button" class="primary" id="team-invite-go">Create invite</button>
+    </div>
+    <div id="team-invite-out"></div>
+    <div id="team-panel-notice" class="hint" role="alert">${esc(notice)}</div>
+    ${open.length ? `<h4 style="margin-top:14px">Outstanding invites</h4><table class="grid team-table"><thead><tr><th>Role</th><th>Created</th><th>Expires</th><th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ""}`;
+
+  const fail = (err) => {
+    $("#team-panel-notice").textContent = err.message; /* TEAM_FULL / OWNER_IMMUTABLE as plain text */
   };
+  body.querySelectorAll("tr[data-id] [data-tm]").forEach((el) => {
+    const id = el.closest("tr").dataset.id;
+    const m = members.members.find((x) => x.id === id);
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "click", async () => {
+      try {
+        if (el.dataset.tm === "role") await api(`/team/members/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ role: el.value }) });
+        if (el.dataset.tm === "active") await api(`/team/members/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ active: !m.active }) });
+        if (el.dataset.tm === "remove") {
+          if (!window.confirm(`Remove ${m.email} from the team? Their account is deleted.`)) return;
+          await api(`/team/members/${encodeURIComponent(id)}`, { method: "DELETE" });
+        }
+        await renderTeamPanel("saved");
+      } catch (err) {
+        fail(err);
+      }
+    });
+  });
+  body.querySelectorAll("[data-ti='revoke']").forEach((el) =>
+    el.addEventListener("click", async () => {
+      try {
+        await api(`/team/invites/${encodeURIComponent(el.closest("tr").dataset.id)}`, { method: "DELETE" });
+        await renderTeamPanel("invite revoked");
+      } catch (err) {
+        fail(err);
+      }
+    }),
+  );
+  $("#team-invite-go").addEventListener("click", async () => {
+    try {
+      const r = await api("/team/invites", { method: "POST", body: JSON.stringify({ role: $("#team-invite-role").value }) });
+      await renderTeamPanel();
+      /* The code is shown ONCE — the server keeps only its hash. */
+      $("#team-invite-out").innerHTML = `
+        <p>Invite code for a <b>${esc(TIER_LABEL[r.invite.role] ?? r.invite.role)}</b> (expires ${esc(String(r.invite.expiresAt).slice(0, 10))}):</p>
+        <div class="actions"><span class="team-code" id="team-invite-code">${esc(r.code)}</span> <button type="button" id="team-invite-copy">Copy</button></div>
+        <p class="hint">Shown only this once. Hand it over out of band (in person, by phone, in a private message) — never post it anywhere shared.</p>`;
+      $("#team-invite-copy").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(r.code);
+          toast("invite code copied");
+        } catch {
+          toast("copy failed — select the code and copy it by hand", "error");
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
 }
 
 /* ================================ boot ================================= */
@@ -2289,6 +3194,7 @@ loadProxies();
 loadProxyProviders();
 refreshTabsProfiles();
 loadSettings();
+refreshTeamSession();
 connectEvents();
 setInterval(refreshHealth, 30_000);
 

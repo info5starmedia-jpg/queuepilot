@@ -2,6 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import { EngineUpdateService, DEFAULT_MANIFEST_URL } from "./application/engine/engine-update.service.js";
+import { createProvider, type ModelProvider } from "./application/agent/provider.js";
+import { buildAgentTools } from "./application/agent/agent-tools.js";
+import { AgentService } from "./application/agent/agent.service.js";
+import { registerAgentRoutes } from "./http/agent.routes.js";
 import type { AppConfig } from "./config/config.js";
 import { createApiLogger } from "./http/logger.js";
 import { registerScriptingOriginDeny } from "./http/scripting-origin-deny.js";
@@ -31,7 +36,6 @@ import { registerSiteRoutes } from "./http/sites.routes.js";
 import { z } from "zod";
 import { DomainError, ErrorCodes } from "@queuepilot/contracts";
 import { registerDeckRoutes } from "./http/deck.routes.js";
-import { redeemInvite } from "./application/team/redeem.js";
 import { registerPowerRoutes } from "./http/power.routes.js";
 import { PresetStore } from "./application/power/power.js";
 import { NetworkLogger } from "./application/netlog/network-logger.js";
@@ -72,6 +76,7 @@ import type { SettingsService } from "./application/settings/settings.service.js
 import type { SecretStore } from "./application/secrets/secret-store.js";
 import { WindowTilingService } from "./application/windows/window-tiling.service.js";
 import { registerWindowRoutes } from "./http/windows.routes.js";
+import { registerTeamRoutes } from "./http/team.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -93,6 +98,10 @@ export interface AppDeps {
   extensions?: ExtensionRegistry;
   totp?: TotpService;
   settingsStore?: SettingsService;
+  /** C1 engine updates; built from config + settings when absent. */
+  engineUpdate?: EngineUpdateService;
+  /** P9: model provider override (tests inject a scripted fake). */
+  agentProvider?: () => ModelProvider;
   secrets?: SecretStore;
   /** Email accounts for the IMAP resolver (Settings → Integrations). */
   emailAccounts?: EmailAccountService;
@@ -103,6 +112,26 @@ export interface AppDeps {
   discord?: DiscordService;
   /** ADR-0008 Profile Deck. */
   deck?: DeckService;
+}
+
+/**
+ * C1 engine updates. Manifest source, resolved per check: Settings → Engine
+ * → Update server URL (the owner's server), else SPECTRA_ENGINE_MANIFEST,
+ * else the repo's raw manifest. Consent is the existing Settings → Engine
+ * switch; no settings store = no consent.
+ */
+export function engineUpdateServiceFor(config: AppConfig, settings?: SettingsService): EngineUpdateService {
+  return new EngineUpdateService({
+    enginesDir: path.join(config.dataDir, "engines"),
+    manifestRef: () => settings?.get("engine").updateUrl || config.engineManifest || DEFAULT_MANIFEST_URL,
+    consent: () => settings?.get("engine").downloadConsent === true,
+  });
+}
+
+/** `/` and `/dashboard/<flat file>` — exactly what dashboard.routes serves. */
+function isDashboardAsset(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  return path === "/" || /^\/dashboard\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(path);
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -136,6 +165,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const expected = Buffer.from(`Bearer ${token}`, "utf8");
     app.addHook("onRequest", async (req, reply) => {
       if (req.url === "/health") return;
+      // P9 Task 0: the dashboard's static files (HTML/JS/CSS, no data) load
+      // without the token so the page can show its sign-in; every API route
+      // the page then calls still requires the Bearer token below.
+      if (req.method === "GET" && isDashboardAsset(req.url)) return;
       // Constant-time compare (audit A-rec #1): a plain string !== leaks
       // the token byte-by-byte through response timing.
       const given = Buffer.from(req.headers.authorization ?? "", "utf8");
@@ -170,9 +203,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerAdsPowerRoutes(app, deps.lifecycle, deps.profiles);
   registerEventRoutes(app, deps.lifecycle);
   registerProviderRoutes(app, deps.profileProviders, deps.proxyProviders);
-  registerEngineRoutes(app, deps.engineHealth);
+  const engineUpdate = deps.engineUpdate ?? engineUpdateServiceFor(deps.config, deps.settingsStore);
+  registerEngineRoutes(app, deps.engineHealth, engineUpdate);
   registerTabRoutes(app, deps.lifecycle);
-  registerWarmupRoutes(app, new WarmupService(deps.lifecycle, deps.config.dataDir));
+  const warmups = new WarmupService(deps.lifecycle, deps.config.dataDir);
+  registerWarmupRoutes(app, warmups);
   registerPersonaWarmupRoutes(
     app,
     new PersonaWarmupService({
@@ -186,27 +221,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       remote: () => (deps.settingsStore ? TeamServerClient.fromSettings(deps.settingsStore.get("team")) : null),
     }),
   );
-  // LIC: which licence the configured team key belongs to, and days left.
-  // { configured: false } without a team server; server errors (expired,
-  // revoked, unreachable) come back as { configured: true, error }.
-  app.get("/team/licence", async () => {
-    const client = deps.settingsStore ? TeamServerClient.fromSettings(deps.settingsStore.get("team")) : null;
-    if (!client) return { configured: false };
-    try {
-      return { configured: true, licence: await client.licence() };
-    } catch (err) {
-      const e = err as { code?: string; message?: string };
-      return { configured: true, error: { code: e.code ?? "HTTP_ERROR", message: e.message ?? String(err) } };
-    }
-  });
-  // LIC follow-up: redeem the owner's one-time invite; the key lands in Settings -> Team, never in the response.
-  app.post("/team/redeem", async (req) => {
-    if (!deps.settingsStore) throw new DomainError(ErrorCodes.VALIDATION_FAILED, "settings are not available");
-    const b = z.object({ serverUrl: z.string().max(300), invite: z.string().max(100), name: z.string().max(80).optional() }).strict().parse(req.body ?? {});
-    const got = await redeemInvite(b.serverUrl.trim(), b.invite.trim(), b.name?.trim() || undefined);
-    deps.settingsStore.patch("team", { serverUrl: got.serverUrl, token: got.token });
-    return { redeemed: true, serverUrl: got.serverUrl };
-  });
+  // (LIC's /team/licence + /team/redeem are gone: account isolation, owner
+  // decision 2026-11-20 — sign-in is main's /team/signin + team panel.)
+  if (deps.plugins) {
+    // P9 local agent: tools call these same services in-process.
+    const providerFor =
+      deps.agentProvider ??
+      (() => {
+        const s = deps.settingsStore?.get("agent");
+        return createProvider({ kind: "ollama", url: s?.providerUrl ?? "http://127.0.0.1:11434", model: s?.model ?? "qwen2.5:7b-instruct" });
+      });
+    const tools = buildAgentTools({
+      profiles: deps.profiles,
+      proxies: deps.proxies,
+      lifecycle: deps.lifecycle,
+      warmups,
+      plugins: deps.plugins,
+      engineUpdate,
+      assertScriptingEnabled: scriptingGate(deps.settingsStore, { hasApiToken: Boolean(deps.config.apiToken) }),
+    });
+    registerAgentRoutes(app, new AgentService(deps.config.dataDir, tools, providerFor), providerFor);
+  }
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.
@@ -339,6 +374,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store: deps.settingsStore,
       hasApiToken: Boolean(deps.config.apiToken),
     });
+    registerTeamRoutes(app, { settings: deps.settingsStore });
   }
 
   return app;

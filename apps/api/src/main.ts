@@ -6,7 +6,7 @@ import {
 } from "./application/profiles/profile.repository.js";
 import { ProfileService } from "./application/profiles/profile.service.js";
 import { ProxyHealthRepository, ProxyRepository } from "./application/proxies/proxy.repository.js";
-import { ProxyService } from "./application/proxies/proxy.service.js";
+import { ProxyService, toProxyProbe } from "./application/proxies/proxy.service.js";
 import { createSecretStore } from "./application/secrets/secret-store.js";
 import { BundleService } from "./application/bundles/bundle.service.js";
 import {
@@ -41,7 +41,7 @@ import {
   resolveFuryBinary,
 } from "./application/runtime/fury-core.runtime.js";
 import type { BrowserRuntime } from "./application/runtime/browser-runtime.js";
-import { buildApp } from "./app.js";
+import { buildApp, engineUpdateServiceFor } from "./app.js";
 import { ResolverRegistry, registerBuiltinResolvers } from "./application/resolvers/resolver-registry.js";
 import { probeProxy, DEFAULT_PROBE_URL } from "./application/proxies/proxy-probe.js";
 import { EmailAccountService } from "./application/email/email-account.service.js";
@@ -59,7 +59,7 @@ import { JylRegistry } from "./application/jyl/jyl-registry.js";
 import { ExtensionRegistry } from "./application/extensions/extension-registry.js";
 import { SettingsService } from "./application/settings/settings.service.js";
 import { TeamLeaseGuard } from "./application/team/team-lease-guard.js";
-import { TeamSyncLoop } from "./application/team/team-sync-loop.js";
+import { TeamSyncLoop, storeOnCloudOff } from "./application/team/team-sync-loop.js";
 import { TotpService } from "./application/profiles/totp.service.js";
 import { ParserRegistry } from "./application/parsers/parser-registry.js";
 import { PluginRegistry } from "./application/plugins/plugin-registry.js";
@@ -107,7 +107,11 @@ export async function main(): Promise<void> {
   const runRepo = new BrowserRunRepository(db);
 
   const secretStore = createSecretStore();
-  const proxies = new ProxyService(proxyRepo, secretStore, new ProxyHealthRepository(db));
+  // Every proxy create / endpoint edit auto-tests in the background, so a
+  // launch can reuse the stored exit geo instead of an 8 s live lookup.
+  const proxies = new ProxyService(proxyRepo, secretStore, new ProxyHealthRepository(db), {
+    log: (line) => console.log(`[queuepilot] ${line}`),
+  });
   const profiles = new ProfileService(profileRepo, identityRepo, proxyRepo, secretStore);
   // v0.15.0 (audit rec #4): lift any pre-v0.15 full PANs out of the profile
   // rows into the SecretStore; CVVs sitting in SQLite are purged.
@@ -252,11 +256,15 @@ export async function main(): Promise<void> {
     undefined, // leaseRenewIntervalMs default
     // D-003: rotation links resolve launch proxies from provider pools.
     proxyProviders,
-    // Browser timezone follows the proxy: look up the exit IP's timezone
-    // through the proxy itself at launch (same geo echo as the proxy Test).
+    // Browser timezone and locale follow the proxy: look up the exit IP's
+    // timezone and country through the proxy itself at launch (same geo echo
+    // as the proxy Test).
     async (proxy) => {
+      const started = Date.now();
       const r = await probeProxy(proxy, DEFAULT_PROBE_URL, 8_000);
-      return r.ok ? (r.geo?.timezone ?? null) : null;
+      return r.ok && r.geo
+        ? { timezone: r.geo.timezone, countryCode: r.geo.countryCode, probe: toProxyProbe(r, Date.now() - started) }
+        : null;
     },
   );
 
@@ -307,7 +315,9 @@ export async function main(): Promise<void> {
     dataDir: config.dataDir,
   });
   deck.start();
+  const engineUpdate = engineUpdateServiceFor(config, settingsService);
   const app = buildApp({
+    engineUpdate,
     config,
     profiles,
     proxies,
@@ -334,9 +344,19 @@ export async function main(): Promise<void> {
     deck,
   });
   await app.listen({ port: config.port, host: config.host });
+  // C1: version check at launch (never downloads; install is a consent-gated
+  // click). Off the startup path — a slow or unreachable server never delays boot.
+  void engineUpdate.checkAtLaunch((line) => console.log(`[queuepilot] ${line}`)).catch(() => {});
   // P7.7c: background pull sync — enabled only when Settings → Team carries
-  // serverUrl + token + syncPassphrase; otherwise every tick is a no-op.
-  new TeamSyncLoop({ bundles, settings: settingsService, dataDir: config.dataDir }).start();
+  // serverUrl + a credential (session or device token) + syncPassphrase;
+  // otherwise every tick is a no-op. Profiles with "Store on cloud" off are
+  // skipped.
+  new TeamSyncLoop({
+    bundles,
+    settings: settingsService,
+    dataDir: config.dataDir,
+    skip: (id) => storeOnCloudOff(profiles, id),
+  }).start();
   sites.start();
   console.log(
     `[queuepilot] API listening on http://${config.host}:${config.port} (runtime: ${runtime.kind})`,

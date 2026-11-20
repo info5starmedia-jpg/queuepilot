@@ -1,30 +1,41 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { MAX_BUNDLE_BYTES, type TeamRole, type TeamServerConfig } from "./config.js";
+import Database from "better-sqlite3";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { TeamServerStore } from "./store.js";
+import { MAX_BUNDLE_BYTES, type TeamRole, type TeamServerConfig } from "./config.js";
+import { PENDING_OWNER_ID, TeamServerStore } from "./store.js";
+import { AuthStore, TEAM_MEMBER_CAP, accountUsable, type AccountRecord, type AccountTier } from "./auth-store.js";
 import { WarmupPlanner } from "./warmup/service.js";
 
 /**
- * Team server HTTP surface. Design rules:
- * - The server is a durable mailbox for SEALED bundles: payloads are opaque
+ * Team server HTTP surface (P7.7a + hosted team deployment 2026-11-17).
+ * Design rules:
+ * - The server is a durable mailbox for SEALED bundles — payloads are opaque
  *   bytes end to end; there is no decrypt path on this box at all.
- * - Every route except /health requires a bearer key (SHA-256 verified).
- * - LIC (2026-11-19): content (bundles, leases, and W2's warmup plans) is
- *   scoped by ACCOUNT. A licence key belongs to one account and sees only
- *   that account's rows; another account's profile id answers 404, never
- *   403, so ids don't leak. Admin keys belong to no account: they create,
- *   extend, revoke and delete accounts, and every content route refuses
- *   them. An admin never holds a key INTO an account: a new account comes
- *   with a one-time invite, and the tester redeems it (/redeem) for a key
- *   only they see. Expired or revoked accounts authenticate as nobody.
- * - Within an account: viewer reads, operator reads and writes.
+ * - Every route except /health and the public auth routes requires a bearer
+ *   credential: a minted device token (machines) or a session token (humans).
+ * - ACCOUNT ISOLATION (owner decision 2026-11-20, supersedes the L1/L2/L3
+ *   tier model): every account is a private island. Bundles, leases and
+ *   warmup settings are keyed by the caller's account; another account's
+ *   profile id answers 404, never 403, so ids don't leak.
+ * - A credential resolves to exactly one account: a `qps_` sign-in session
+ *   to its own account; an operator/viewer device token to the owner's
+ *   account (device tokens are the owner's machines). Admin credentials
+ *   (the env admin token, admin device tokens) belong to no account: they
+ *   manage accounts and are refused on every content route.
+ * - The owner is the admin: invites (10-member cap), revoke, extend/expire,
+ *   delete (which deletes that account's content). The owner reads only his
+ *   own account's content, never another account's.
+ * - Viewer device tokens are read-only; sessions and operator tokens read
+ *   and write within their account.
  */
 
 interface Auth {
-  role: TeamRole;
+  /** Device-token role (null for session auth). Historical axis. */
+  role: TeamRole | null;
+  /** Session-account tier (null for device auth). New axis. */
+  tier: AccountTier | null;
   name: string;
-  /** null for admin keys: they manage accounts and keys, never content. */
   accountId: string | null;
 }
 
@@ -37,14 +48,21 @@ declare module "fastify" {
 export interface TeamServerApp {
   app: FastifyInstance;
   store: TeamServerStore;
+  authStore: AuthStore;
   close: () => Promise<void>;
 }
 
-const PROFILE_ID = /^[\w.-]{1,128}$/;
-const MAX_LICENCE_DAYS = 3650;
+/** Bundle listing metadata is client-opaque; cap it defensively. */
+const MAX_META_BYTES = 4 * 1024;
 
 export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
-  const store = new TeamServerStore(config.dbPath);
+  // One shared connection: TeamServerStore and AuthStore must see the SAME
+  // database — with ":memory:" (tests) two connections would be two DBs.
+  const db = new Database(config.dbPath);
+  db.pragma("journal_mode = WAL");
+  // AuthStore first: the store's isolation migration needs the owner account.
+  const authStore = new AuthStore(db);
+  const store = new TeamServerStore(db);
   const planner = new WarmupPlanner(
     store,
     config.personaDir === undefined ? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../personas") : config.personaDir,
@@ -60,87 +78,297 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     done(null, body);
   });
 
-  function authenticate(req: FastifyRequest): Auth | { denied: "unknown" | "expired" | "revoked" } {
-    const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) return { denied: "unknown" };
-    const token = header.slice("Bearer ".length).trim();
-    if (!token) return { denied: "unknown" };
-    if (config.adminToken && timingSafeStringEqual(token, config.adminToken)) {
-      return { role: "admin", name: "env-admin", accountId: null };
+  // Never echo internal error text (SQLite messages etc.) to a client (audit
+  // L1). Fastify's own 4xx errors (bad JSON, body too large) keep their status.
+  app.setErrorHandler((err: { statusCode?: number; code?: string; message: string }, _req, reply) => {
+    const status = err.statusCode ?? 500;
+    if (status < 500) {
+      return reply.code(status).send({ error: { code: err.code ?? "BAD_REQUEST", message: err.message } });
     }
-    const r = store.authenticate(token);
-    return r.ok ? { role: r.role, name: r.name, accountId: r.accountId } : { denied: r.reason };
+    console.error(`[team-server] ${err.message}`);
+    return reply.code(500).send({ error: { code: "INTERNAL", message: "internal error" } });
+  });
+
+  // ---- tiny in-memory rate limiter for the public auth routes ----
+  const rateHits = new Map<string, { count: number; resetAt: number }>();
+  function rateLimited(key: string, limit: number, windowMs: number): boolean {
+    const now = Date.now();
+    const hit = rateHits.get(key);
+    if (!hit || hit.resetAt <= now) {
+      rateHits.set(key, { count: 1, resetAt: now + windowMs });
+      // opportunistic sweep so the map can't grow without bound
+      if (rateHits.size > 5000) {
+        for (const [k, v] of rateHits) if (v.resetAt <= now) rateHits.delete(k);
+      }
+      return false;
+    }
+    hit.count += 1;
+    return hit.count > limit;
   }
 
-  /**
-   * Liveness probe. Unauthenticated callers get ONLY `{ ok: true }`.
-   * An account key sees its own bundle count; an admin key the account count.
-   */
-  app.get("/health", async (req) => {
-    const auth = authenticate(req);
-    if ("denied" in auth) return { ok: true };
-    if (auth.accountId === null) {
-      return { ok: true, name: "queuepilot-team-server", role: auth.role, accounts: store.listAccounts().length };
+  function authenticate(req: FastifyRequest): Auth | null {
+    const header = req.headers.authorization;
+    if (!header?.startsWith("Bearer ")) return null;
+    const token = header.slice("Bearer ".length).trim();
+    if (!token) return null;
+    if (config.adminToken && timingSafeStringEqual(token, config.adminToken)) {
+      return { role: "admin", tier: "owner", name: "env-admin", accountId: null };
     }
-    return { ok: true, name: "queuepilot-team-server", role: auth.role, bundles: store.listBundles(auth.accountId).length };
-  });
-
-  // onRequest (not preHandler): an unauthenticated caller is refused before
-  // Fastify reads any body, so nobody can make the server buffer 25 MB uploads
-  // without a key (security audit 2026-11-19). /redeem is the one open route
-  // with a body; it has its own 4 KB limit.
-  app.addHook("onRequest", async (req, reply) => {
-    const p = req.url.split("?")[0];
-    if (p === "/health" || p === "/health/" || p === "/redeem") return;
-    const auth = authenticate(req);
-    if ("denied" in auth) {
-      const code = auth.denied === "expired" ? "LICENCE_EXPIRED" : auth.denied === "revoked" ? "LICENCE_REVOKED" : "UNAUTHORIZED";
-      const message =
-        auth.denied === "expired"
-          ? "this licence key has expired"
-          : auth.denied === "revoked"
-            ? "this licence key has been revoked"
-            : "missing or invalid bearer token";
-      return reply.code(401).send({ error: { code, message } });
+    const device = store.authenticate(token);
+    if (device) {
+      if (device.accountId === null) return { role: device.role, tier: null, name: device.name, accountId: null };
+      // A device token is only as good as its account (parked pre-owner content excepted).
+      if (device.accountId !== PENDING_OWNER_ID) {
+        const acct = authStore.getAccount(device.accountId);
+        if (!acct || !accountUsable(acct)) return null;
+      }
+      return { role: device.role, tier: null, name: device.name, accountId: device.accountId };
     }
-    req.teamAuth = auth;
-  });
+    if (token.startsWith("qps_")) {
+      const account = authStore.authenticateSession(token); // rejects inactive/expired accounts
+      if (account) {
+        return { role: null, tier: account.tier, name: account.displayName, accountId: account.id };
+      }
+    }
+    return null;
+  }
 
-  function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
-    if (req.teamAuth.role === "admin") return true;
-    reply.code(403).send({ error: { code: "FORBIDDEN", message: "requires an admin key" } });
-    return false;
+  // ---- permission resolution ----
+
+  /** Owner-only surface: account (team) management + device tokens. */
+  function isOwner(auth: Auth): boolean {
+    return auth.role === "admin" || auth.tier === "owner";
   }
 
   /**
    * The caller's account for a content route, or null after replying 403.
-   * Admin keys have no account and therefore no content access at all.
+   * Admin credentials have no account and therefore no content access at
+   * all; viewer device tokens are read-only.
    */
   function contentAccount(req: FastifyRequest, reply: FastifyReply, write: boolean): string | null {
     const { accountId, role } = req.teamAuth;
     if (accountId === null) {
-      reply.code(403).send({
-        error: { code: "FORBIDDEN", message: "admin keys manage accounts and keys only; use a licence key for content" },
-      });
+      forbidden(reply, "an account (admin credentials manage accounts and never read content)");
       return null;
     }
-    if (write && role !== "operator") {
-      reply.code(403).send({ error: { code: "FORBIDDEN", message: "requires an operator licence key" } });
+    if (write && role === "viewer") {
+      forbidden(reply, "write access (viewer device keys are read-only)");
       return null;
     }
     return accountId;
   }
 
-  const bad = (reply: FastifyReply, message: string) =>
-    reply.code(400).send({ error: { code: "VALIDATION_FAILED", message } });
+  /**
+   * Liveness probe. Audit GPT-5.4 finding 4b: unauthenticated callers get
+   * ONLY `{ ok: true }` — server identity and bundle counts are metadata a
+   * port-scanner shouldn't harvest. Anything carrying a valid bearer token
+   * (admin, operator, or viewer) gets the full detail.
+   */
+  app.get("/health", async (req) => {
+    const auth = authenticate(req);
+    if (!auth) return { ok: true };
+    // Counts are per account; an admin credential sees only the account count.
+    if (auth.accountId === null) {
+      return { ok: true, name: "queuepilot-team-server", accounts: authStore.listAccounts().length, role: auth.role ?? auth.tier };
+    }
+    return {
+      ok: true,
+      name: "queuepilot-team-server",
+      bundles: store.listBundles(auth.accountId).length,
+      role: auth.role ?? auth.tier,
+    };
+  });
+
+  /** Public routes (bootstrap/signin/redeem) skip the bearer gate. */
+  const PUBLIC_ROUTES = new Set(["/auth/bootstrap", "/auth/signin", "/auth/redeem"]);
+
+  app.addHook("preHandler", async (req, reply) => {
+    if (req.url === "/health" || req.url === "/health/") return;
+    const pathOnly = req.url.split("?")[0]!;
+    if (PUBLIC_ROUTES.has(pathOnly) && req.method === "POST") return;
+    const auth = authenticate(req);
+    if (!auth) {
+      return reply
+        .code(401)
+        .send({ error: { code: "UNAUTHORIZED", message: "missing or invalid bearer token" } });
+    }
+    req.teamAuth = auth;
+  });
+
+  function forbidden(reply: FastifyReply, need: string): boolean {
+    reply.code(403).send({ error: { code: "FORBIDDEN", message: `requires ${need}` } });
+    return false;
+  }
+
+  function requireOwner(req: FastifyRequest, reply: FastifyReply): boolean {
+    return isOwner(req.teamAuth) || forbidden(reply, "owner");
+  }
+
   const notFound = (reply: FastifyReply, message: string) =>
     reply.code(404).send({ error: { code: "NOT_FOUND", message } });
 
+  // ---- public auth routes (rate-limited) ----
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  /**
+   * The caller's IP for rate limiting. `X-Real-IP` is honoured ONLY when the
+   * TCP peer is loopback or a private address — i.e. the request came through
+   * the deploy's nginx (host loopback → the container's Docker bridge), which
+   * overwrites that header with the real client address. A client reaching
+   * the port directly cannot pick its own rate-limit key (audit M1).
+   */
+  function clientIp(req: FastifyRequest): string {
+    const forwarded = req.headers["x-real-ip"];
+    const peer = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+    const trustedPeer =
+      peer === "::1" ||
+      /^127\./.test(peer) ||
+      /^10\./.test(peer) ||
+      /^192\.168\./.test(peer) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(peer) ||
+      /^f[cd][0-9a-f]{2}:/i.test(peer);
+    return trustedPeer && typeof forwarded === "string" && forwarded.trim() ? forwarded.trim() : req.ip;
+  }
+
+  /**
+   * One-time owner bootstrap: works ONLY while no owner account exists and
+   * only with the env bootstrap code. After the owner exists this route is
+   * dead — there is no second path to owner.
+   */
+  app.post("/auth/bootstrap", async (req, reply) => {
+    const ip = clientIp(req);
+    if (rateLimited(`bootstrap:${ip}`, 5, 60_000)) {
+      return reply.code(429).send({ error: { code: "RATE_LIMITED", message: "too many attempts, wait a minute" } });
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const code = typeof body.code === "string" ? body.code : null;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === "string" ? body.password : null;
+    const displayName = typeof body.displayName === "string" && body.displayName.trim() ? body.displayName.trim() : null;
+    if (!code || !config.bootstrapCode || !timingSafeStringEqual(code, config.bootstrapCode)) {
+      return reply.code(403).send({ error: { code: "FORBIDDEN", message: "invalid bootstrap code" } });
+    }
+    if (authStore.hasOwner()) {
+      return reply.code(409).send({ error: { code: "OWNER_EXISTS", message: "an owner account already exists — sign in instead" } });
+    }
+    if (!email || !EMAIL_RE.test(email) || !password || password.length < 10 || !displayName) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {code, email, password (min 10 chars), displayName}" },
+      });
+    }
+    let account: AccountRecord;
+    try {
+      account = await authStore.createAccount(email, password, displayName, "owner");
+    } catch {
+      // Lost a concurrent bootstrap race: the one-owner index refused the second owner (audit M2).
+      return reply.code(409).send({ error: { code: "OWNER_EXISTS", message: "an owner account already exists — sign in instead" } });
+    }
+    // Content from a pre-hosted server (parked at migration) becomes the owner's.
+    store.adoptPendingContent(account.id);
+    const { token, expiresAt } = authStore.createSession(account.id);
+    return reply.code(201).send({ token, expiresAt, account: publicAccount(account) });
+  });
+
+  app.post("/auth/signin", async (req, reply) => {
+    const ip = clientIp(req);
+    if (rateLimited(`signin:${ip}`, 5, 60_000)) {
+      return reply.code(429).send({ error: { code: "RATE_LIMITED", message: "too many attempts, wait a minute" } });
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === "string" ? body.password : null;
+    if (!email || !password || email.length > 254) {
+      return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: "body must be {email, password}" } });
+    }
+    // Per-email too, so one account can't be ground at from many addresses (audit M1).
+    if (rateLimited(`signin-email:${email}`, 10, 60_000)) {
+      return reply.code(429).send({ error: { code: "RATE_LIMITED", message: "too many attempts, wait a minute" } });
+    }
+    const account = await authStore.verifyPassword(email, password);
+    if (!account) {
+      // Uniform message — never leak which half was wrong.
+      return reply.code(401).send({ error: { code: "INVALID_CREDENTIALS", message: "invalid email or password" } });
+    }
+    const { token, expiresAt } = authStore.createSession(account.id);
+    return { token, expiresAt, account: publicAccount(account) };
+  });
+
+  /** Invite redemption → a fresh account at the invite's tier. */
+  app.post("/auth/redeem", async (req, reply) => {
+    const ip = clientIp(req);
+    if (rateLimited(`redeem:${ip}`, 20, 60_000)) {
+      return reply.code(429).send({ error: { code: "RATE_LIMITED", message: "too many attempts, wait a minute" } });
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const code = typeof body.code === "string" ? body.code : null;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === "string" ? body.password : null;
+    const displayName = typeof body.displayName === "string" && body.displayName.trim() ? body.displayName.trim() : null;
+    if (!code || !email || !EMAIL_RE.test(email) || !password || password.length < 10 || !displayName) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {code, email, password (min 10 chars), displayName}" },
+      });
+    }
+    // The invite first: without a valid code, nothing else is answered (no email enumeration — audit L4).
+    if (!authStore.inviteValid(code)) {
+      return reply.code(400).send({ error: { code: "INVALID_INVITE", message: "invite code is invalid, expired, or already used" } });
+    }
+    if (authStore.getAccountByEmail(email)) {
+      return reply.code(409).send({ error: { code: "EMAIL_TAKEN", message: "an account with this email already exists" } });
+    }
+    if (authStore.memberCount() >= TEAM_MEMBER_CAP) {
+      return reply.code(409).send({ error: { code: "TEAM_FULL", message: `team is capped at ${TEAM_MEMBER_CAP} members` } });
+    }
+    const redeemed = authStore.redeemInvite(code, email);
+    if (!redeemed) {
+      return reply.code(400).send({ error: { code: "INVALID_INVITE", message: "invite code is invalid, expired, or already used" } });
+    }
+    let account: AccountRecord;
+    try {
+      account = await authStore.createAccount(email, password, displayName, redeemed.role);
+    } catch {
+      // A concurrent redeem took this email first: give the invite back, answer plainly (audit L1).
+      authStore.refundInvite(code);
+      return reply.code(409).send({ error: { code: "EMAIL_TAKEN", message: "an account with this email already exists" } });
+    }
+    const { token, expiresAt } = authStore.createSession(account.id);
+    return reply.code(201).send({ token, expiresAt, account: publicAccount(account) });
+  });
+
+  app.post("/auth/signout", async (req) => {
+    const header = req.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
+    return { signedOut: token ? authStore.deleteSession(token) : false };
+  });
+
+  app.get("/auth/me", async (req) => {
+    const auth = req.teamAuth;
+    if (auth.role === null && auth.accountId) {
+      const account = authStore.getAccount(auth.accountId);
+      return { account: account ? publicAccount(account) : null };
+    }
+    return { device: { role: auth.role, name: auth.name } };
+  });
+
+  function publicAccount(a: AccountRecord) {
+    return {
+      id: a.id,
+      email: a.email,
+      displayName: a.displayName,
+      tier: a.tier,
+      active: a.active,
+      createdAt: a.createdAt,
+      expiresAt: a.expiresAt,
+    };
+  }
+
   /** `{days: n}` or `{expiresAt: ISO|null}` → ISO / null; undefined = not given; Error = invalid. */
+  const MAX_EXPIRY_DAYS = 3650;
   function parseExpiry(body: { expiresAt?: unknown; days?: unknown }): string | null | undefined | Error {
     if (body.days !== undefined) {
-      if (typeof body.days !== "number" || !Number.isInteger(body.days) || body.days < 1 || body.days > MAX_LICENCE_DAYS) {
-        return new Error(`days must be a whole number 1-${MAX_LICENCE_DAYS}`);
+      if (typeof body.days !== "number" || !Number.isInteger(body.days) || body.days < 1 || body.days > MAX_EXPIRY_DAYS) {
+        return new Error(`days must be a whole number 1-${MAX_EXPIRY_DAYS}`);
       }
       return new Date(Date.now() + body.days * 86_400_000).toISOString();
     }
@@ -152,176 +380,133 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return new Date(Date.parse(body.expiresAt)).toISOString();
   }
 
-  function cleanName(v: unknown): string | null {
-    return typeof v === "string" && v.trim() && v.trim().length <= 120 ? v.trim() : null;
-  }
+  // ---- team management (owner only) ----
 
-  // ---- the caller's own licence and keys (account keys) ----
-
-  app.get("/licence", async (req, reply) => {
-    const accountId = contentAccount(req, reply, false);
-    if (!accountId) return;
-    const acct = store.getAccount(accountId);
-    if (!acct) return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "account no longer exists" } });
-    const msLeft = acct.expiresAt ? Date.parse(acct.expiresAt) - Date.now() : null;
-    return {
-      account: { id: acct.id, name: acct.name },
-      role: req.teamAuth.role,
-      expiresAt: acct.expiresAt,
-      daysLeft: msLeft === null ? null : Math.max(0, Math.floor(msLeft / 86_400_000)),
-    };
+  app.get("/team/members", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    return { members: authStore.listAccounts().map(publicAccount), cap: TEAM_MEMBER_CAP };
   });
 
-  app.get("/licence/keys", async (req, reply) => {
-    const accountId = contentAccount(req, reply, false);
-    if (!accountId) return;
-    return { keys: store.listTokens(accountId) };
-  });
-
-  /** An operator adds a key for another of their own machines. Shown once, to them only. */
-  app.post("/licence/keys", async (req, reply) => {
-    const accountId = contentAccount(req, reply, true);
-    if (!accountId) return;
-    const body = (req.body ?? {}) as { name?: unknown; role?: unknown };
-    const name = cleanName(body.name);
-    const role = body.role === undefined ? "operator" : body.role === "operator" || body.role === "viewer" ? body.role : null;
-    if (!name || !role) return bad(reply, 'body must be {name: string, role?: "operator"|"viewer"}');
-    const { record, token } = store.mintToken(name, role, accountId);
-    return reply.code(201).send({ token, ...record });
-  });
-
-  app.delete<{ Params: { id: string } }>("/licence/keys/:id", async (req, reply) => {
-    const accountId = contentAccount(req, reply, true);
-    if (!accountId) return;
-    const r = store.deleteAccountToken(accountId, req.params.id);
-    if (r === "not-found") return notFound(reply, "key not found");
-    if (r === "last-operator") {
-      return reply.code(409).send({ error: { code: "LAST_OPERATOR_KEY", message: "this is the account's last operator key; add another first" } });
+  app.post("/team/invites", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    // Tiers no longer gate anything (account isolation); `role` is still
+    // accepted for older clients and stored, and defaults to a plain member.
+    const body = (req.body ?? {}) as { role?: unknown };
+    const role: AccountTier | null =
+      body.role === undefined ? "L1" : body.role === "L1" || body.role === "L2" || body.role === "L3" ? (body.role as AccountTier) : null;
+    if (!role) {
+      return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: 'role, when given, must be "L1"|"L2"|"L3"' } });
     }
+    const activeMembers = authStore.memberCount();
+    const outstanding = authStore.listInvites().filter((i) => i.usedAt === null && Date.parse(i.expiresAt) > Date.now()).length;
+    if (activeMembers + outstanding >= TEAM_MEMBER_CAP) {
+      return reply.code(409).send({ error: { code: "TEAM_FULL", message: `team is capped at ${TEAM_MEMBER_CAP} members (active + outstanding invites)` } });
+    }
+    const { record, code } = authStore.createInvite(role, req.teamAuth.name);
+    return reply.code(201).send({ code, invite: record });
+  });
+
+  app.get("/team/invites", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    return { invites: authStore.listInvites() };
+  });
+
+  app.delete<{ Params: { id: string } }>("/team/invites/:id", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    if (!authStore.revokeInvite(req.params.id)) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "invite not found" } });
+    }
+    return { revoked: req.params.id };
+  });
+
+  app.patch<{ Params: { id: string } }>("/team/members/:id", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    const body = (req.body ?? {}) as { role?: unknown; active?: unknown; expiresAt?: unknown; days?: unknown };
+    const target = authStore.getAccount(req.params.id);
+    if (!target) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "member not found" } });
+    }
+    if (target.tier === "owner") {
+      return reply.code(409).send({ error: { code: "OWNER_IMMUTABLE", message: "the owner account cannot be edited here" } });
+    }
+    const expiry = parseExpiry(body);
+    if (expiry instanceof Error) {
+      return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: expiry.message } });
+    }
+    // An account that was unusable (deactivated, or lapsed on its own) must not
+    // get its old sessions back when it is revived (audit L3 residual).
+    if (!accountUsable(target)) authStore.deleteSessionsFor(target.id);
+    let changed = false;
+    if (expiry !== undefined) changed = authStore.setAccountExpiry(target.id, expiry) || changed;
+    if (body.role !== undefined) {
+      const role = body.role === "L1" || body.role === "L2" || body.role === "L3" ? (body.role as AccountTier) : null;
+      if (!role) {
+        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: 'role must be "L1"|"L2"|"L3"' } });
+      }
+      changed = authStore.setAccountTier(target.id, role) || changed;
+    }
+    if (body.active !== undefined) {
+      // Reactivation counts against the cap like a new member (audit L3).
+      if (body.active === true && !target.active && authStore.memberCount() >= TEAM_MEMBER_CAP) {
+        return reply.code(409).send({ error: { code: "TEAM_FULL", message: `team is capped at ${TEAM_MEMBER_CAP} members` } });
+      }
+      changed = authStore.setAccountActive(target.id, body.active === true) || changed;
+    }
+    const updated = authStore.getAccount(target.id)!;
+    // Deactivated or expired: sign it out everywhere, so reviving it later
+    // doesn't resurrect old sessions (audit L3).
+    if (!accountUsable(updated)) authStore.deleteSessionsFor(updated.id);
+    return { account: publicAccount(updated), changed };
+  });
+
+  app.delete<{ Params: { id: string } }>("/team/members/:id", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    const target = authStore.getAccount(req.params.id);
+    if (!target) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "member not found" } });
+    }
+    if (target.tier === "owner") {
+      return reply.code(409).send({ error: { code: "OWNER_IMMUTABLE", message: "the owner account cannot be deleted" } });
+    }
+    authStore.deleteAccount(req.params.id);
+    // The account's island goes with it — the owner never inherits a member's content.
+    store.deleteAccountContent(req.params.id);
     return { deleted: req.params.id };
   });
 
-  /**
-   * Redeem a one-time invite (no bearer needed): returns the account's first
-   * licence key to the tester. The admin who created the invite never sees it.
-   */
-  app.post("/redeem", { bodyLimit: 4096 }, async (req, reply) => {
-    const body = (req.body ?? {}) as { invite?: unknown; name?: unknown };
-    const name = cleanName(body.name) ?? "first machine";
-    if (typeof body.invite !== "string" || !/^qpi_[\w-]{20,64}$/.test(body.invite)) {
-      return bad(reply, "body must be {invite: \"qpi_…\", name?: string}");
-    }
-    const minted = store.redeemInvite(body.invite, name);
-    if (!minted) {
-      return reply.code(401).send({ error: { code: "INVITE_INVALID", message: "invite is unknown, used, expired, or the account is not active" } });
-    }
-    return reply.code(201).send({ token: minted.token, ...minted.record });
-  });
-
-  // ---- accounts (admin only; never any content, never a key into an account) ----
-
-  app.get("/accounts", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    return { accounts: store.listAccounts() };
-  });
-
-  /** Creates an account and its one-time invite code (hand it to the tester). */
-  app.post("/accounts", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    const body = (req.body ?? {}) as { name?: unknown; expiresAt?: unknown; days?: unknown };
-    const name = cleanName(body.name);
-    if (!name) return bad(reply, "name must be 1-120 characters");
-    const expiry = parseExpiry(body);
-    if (expiry instanceof Error) return bad(reply, expiry.message);
-    const account = store.createAccount(name, expiry ?? null);
-    const invite = store.createInvite(account.id) as { code: string; expiresAt: string };
-    return reply.code(201).send({ ...account, invite: invite.code, inviteExpiresAt: invite.expiresAt });
-  });
-
-  /**
-   * A fresh invite for an account with no keys (the tester lost theirs and
-   * the admin deleted the old keys, which stops them working). Refused while
-   * the account has any key.
-   */
-  app.post<{ Params: { id: string } }>("/accounts/:id/invite", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    const r = store.createInvite(req.params.id);
-    if ("error" in r) {
-      return r.error === "unknown"
-        ? notFound(reply, "account not found")
-        : reply.code(409).send({ error: { code: "ACCOUNT_HAS_KEYS", message: "the account already has keys; delete them first (this stops them working)" } });
-    }
-    return reply.code(201).send({ invite: r.code, inviteExpiresAt: r.expiresAt });
-  });
-
-  app.patch<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    const body = (req.body ?? {}) as { name?: unknown; expiresAt?: unknown; days?: unknown; revoked?: unknown };
-    const patch: { name?: string; expiresAt?: string | null; revoked?: boolean } = {};
-    if (body.name !== undefined) {
-      const name = cleanName(body.name);
-      if (!name) return bad(reply, "name must be 1-120 characters");
-      patch.name = name;
-    }
-    const expiry = parseExpiry(body);
-    if (expiry instanceof Error) return bad(reply, expiry.message);
-    if (expiry !== undefined) patch.expiresAt = expiry;
-    if (body.revoked !== undefined) {
-      if (typeof body.revoked !== "boolean") return bad(reply, "revoked must be true or false");
-      patch.revoked = body.revoked;
-    }
-    const updated = store.updateAccount(req.params.id, patch);
-    return updated ?? notFound(reply, "account not found");
-  });
-
-  app.delete<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    if (!store.deleteAccount(req.params.id)) return notFound(reply, "account not found");
-    return { deleted: req.params.id };
-  });
-
-  /** Key metadata (names, last used) — never key material. */
-  app.get<{ Params: { id: string } }>("/accounts/:id/keys", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    if (!store.getAccount(req.params.id)) return notFound(reply, "account not found");
-    return { keys: store.listTokens(req.params.id) };
-  });
-
-  // ---- admin keys + the pre-licence team account ----
+  // ---- device tokens (owner only; plaintext shown exactly once) ----
+  //
+  // Device tokens are the owner's machines: an operator/viewer token belongs
+  // to the owner's account, an admin token to no account.
 
   app.get("/tokens", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
+    if (!requireOwner(req, reply)) return;
     return { tokens: store.listTokens() };
   });
 
-  /**
-   * Mint an admin key, or an operator/viewer key in the pre-licence `team`
-   * account (the owner's own data from before licences). Keys for licensed
-   * accounts are never minted by an admin: testers get theirs via /redeem.
-   */
   app.post("/tokens", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    const body = (req.body ?? {}) as { name?: unknown; role?: unknown; accountId?: unknown };
-    const name = cleanName(body.name);
+    if (!requireOwner(req, reply)) return;
+    const body = (req.body ?? {}) as { name?: unknown; role?: unknown };
+    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
     const role = body.role === "operator" || body.role === "viewer" || body.role === "admin" ? body.role : null;
     if (!name || !role) {
-      return bad(reply, 'body must be {name: string, role: "admin"|"operator"|"viewer"}');
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: 'body must be {name: string, role: "admin"|"operator"|"viewer"}' },
+      });
     }
-    if (body.accountId !== undefined) {
-      return bad(reply, "admins cannot mint keys into accounts; create the account and give the tester its invite");
-    }
-    const accountId = role === "admin" ? null : store.ensureLegacyAccount();
-    const { record, token } = store.mintToken(name, role, accountId);
+    const { record, token } = store.mintToken(name, role, role === "admin" ? null : store.ownerAccountId());
     return reply.code(201).send({ token, ...record });
   });
 
   app.delete<{ Params: { id: string } }>("/tokens/:id", async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
-    if (!store.deleteToken(req.params.id)) return notFound(reply, "token not found");
+    if (!requireOwner(req, reply)) return;
+    if (!store.deleteToken(req.params.id)) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "token not found" } });
+    }
     return { deleted: req.params.id };
   });
 
-  // ---- bundle mailbox (account-scoped: viewer reads, operator writes) ----
+  // ---- bundle mailbox (account-scoped; viewer device keys read-only) ----
 
   app.get("/bundles", async (req, reply) => {
     const accountId = contentAccount(req, reply, false);
@@ -341,27 +526,43 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return reply.send(found.payload);
   });
 
-  app.put<{ Params: { profileId: string }; Querystring: { baseRevision?: string } }>(
+  app.put<{ Params: { profileId: string }; Querystring: { baseRevision?: string; meta?: string } }>(
     "/bundles/:profileId",
     async (req, reply) => {
       const accountId = contentAccount(req, reply, true);
       if (!accountId) return;
       const profileId = req.params.profileId;
-      if (!PROFILE_ID.test(profileId)) return bad(reply, "profileId must be 1-128 of [A-Za-z0-9_.-]");
+      if (!/^[\w.-]{1,128}$/.test(profileId)) {
+        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: "profileId must be 1-128 of [A-Za-z0-9_.-]" } });
+      }
       const body = req.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
-        return bad(reply, "body must be the sealed bundle bytes (application/octet-stream)");
+        return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: "body must be the sealed bundle bytes (application/octet-stream)" } });
       }
       if (body.length > MAX_BUNDLE_BYTES) {
         return reply.code(413).send({ error: { code: "PAYLOAD_TOO_LARGE", message: `bundle exceeds ${MAX_BUNDLE_BYTES} bytes` } });
       }
+      let meta: string | undefined;
+      if (req.query.meta !== undefined) {
+        try {
+          JSON.parse(req.query.meta); // validity check only — the server never interprets it
+        } catch {
+          return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: "meta must be URL-encoded JSON" } });
+        }
+        if (req.query.meta.length > MAX_META_BYTES) {
+          return reply.code(413).send({ error: { code: "PAYLOAD_TOO_LARGE", message: `meta exceeds ${MAX_META_BYTES} bytes` } });
+        }
+        meta = req.query.meta;
+      }
       let baseRevision: number | undefined;
       if (req.query.baseRevision !== undefined) {
         const n = Number(req.query.baseRevision);
-        if (!Number.isInteger(n) || n < 0) return bad(reply, "baseRevision must be a non-negative integer");
+        if (!Number.isInteger(n) || n < 0) {
+          return reply.code(400).send({ error: { code: "VALIDATION_FAILED", message: "baseRevision must be a non-negative integer" } });
+        }
         baseRevision = n;
       }
-      const result = store.pushBundle(accountId, profileId, body, req.teamAuth.name, baseRevision);
+      const result = store.pushBundle(accountId, profileId, body, req.teamAuth.name, baseRevision, meta);
       if ("conflict" in result) {
         return reply.code(409).send({
           error: {
@@ -382,7 +583,7 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return { deleted: req.params.profileId };
   });
 
-  // ---- per-profile launch leases (account-scoped double-start guard) ----
+  // ---- per-profile launch leases (P7.7b): the cross-machine double-start guard ----
 
   app.get("/leases", async (req, reply) => {
     const accountId = contentAccount(req, reply, false);
@@ -394,11 +595,9 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     const accountId = contentAccount(req, reply, false);
     if (!accountId) return;
     const lease = store.getLease(accountId, req.params.profileId);
-    return lease ?? notFound(reply, "no live lease for this profile");
+    if (!lease) return notFound(reply, "no live lease for this profile");
+    return lease;
   });
-
-  const ttlOf = (v: unknown) =>
-    typeof v === "number" && Number.isInteger(v) ? Math.min(Math.max(v, 5_000), 3_600_000) : 60_000;
 
   app.post("/leases/acquire", async (req, reply) => {
     const accountId = contentAccount(req, reply, true);
@@ -407,10 +606,16 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     const profileId = typeof body.profileId === "string" ? body.profileId : null;
     const holder = typeof body.holder === "string" ? body.holder : null;
     const machine = typeof body.machine === "string" && body.machine ? body.machine : "unknown";
-    if (!profileId || !PROFILE_ID.test(profileId) || !holder) {
-      return bad(reply, "body must be {profileId, holder, machine?, ttlMs?}");
+    const ttlMs = typeof body.ttlMs === "number" && Number.isInteger(body.ttlMs)
+      ? Math.min(Math.max(body.ttlMs, 5_000), 3_600_000)
+      : 60_000;
+    // Stored strings are capped: a member cannot bloat the shared DB through lease fields (audit M3).
+    if (!profileId || !/^[\w.-]{1,128}$/.test(profileId) || !holder || holder.length > 256 || machine.length > 256) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder (≤256), machine? (≤256), ttlMs?}" },
+      });
     }
-    const result = store.acquireLease(accountId, profileId, holder, machine, ttlOf(body.ttlMs));
+    const result = store.acquireLease(accountId, profileId, holder, machine, ttlMs);
     if (!result.acquired) {
       return reply.code(409).send({
         error: {
@@ -428,12 +633,19 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     const accountId = contentAccount(req, reply, true);
     if (!accountId) return;
     const body = (req.body ?? {}) as { profileId?: unknown; holder?: unknown; ttlMs?: unknown };
-    if (typeof body.profileId !== "string" || typeof body.holder !== "string") {
-      return bad(reply, "body must be {profileId, holder, ttlMs?}");
+    if (typeof body.profileId !== "string" || !/^[\w.-]{1,128}$/.test(body.profileId) || typeof body.holder !== "string" || body.holder.length > 256) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder, ttlMs?}" },
+      });
     }
-    const expiresAt = store.renewLease(accountId, body.profileId, body.holder, ttlOf(body.ttlMs));
+    const ttlMs = typeof body.ttlMs === "number" && Number.isInteger(body.ttlMs)
+      ? Math.min(Math.max(body.ttlMs, 5_000), 3_600_000)
+      : 60_000;
+    const expiresAt = store.renewLease(accountId, body.profileId, body.holder, ttlMs);
     if (!expiresAt) {
-      return reply.code(409).send({ error: { code: "LEASE_LOST", message: "lease is gone or held by someone else" } });
+      return reply.code(409).send({
+        error: { code: "LEASE_LOST", message: "lease is gone or held by someone else" },
+      });
     }
     return { profileId: body.profileId, holder: body.holder, expiresAt };
   });
@@ -442,14 +654,15 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     const accountId = contentAccount(req, reply, true);
     if (!accountId) return;
     const body = (req.body ?? {}) as { profileId?: unknown; holder?: unknown };
-    if (typeof body.profileId !== "string" || typeof body.holder !== "string") {
-      return bad(reply, "body must be {profileId, holder}");
+    if (typeof body.profileId !== "string" || !/^[\w.-]{1,128}$/.test(body.profileId) || typeof body.holder !== "string" || body.holder.length > 256) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {profileId, holder}" },
+      });
     }
     return { released: store.releaseLease(accountId, body.profileId, body.holder) };
   });
 
-  // Force-release: evict a stuck lease in your own account without being
-  // the holder (a machine died badly). Operator keys only.
+  // Force-release within the caller's own account: evict a stuck lease without being the holder.
   app.delete<{ Params: { profileId: string } }>("/leases/:profileId", async (req, reply) => {
     const accountId = contentAccount(req, reply, true);
     if (!accountId) return;
@@ -458,6 +671,9 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
   });
 
   // ---- W2: warmup personas, site settings and plans (account-scoped) ----
+
+  const badRequest = (reply: FastifyReply, message: string) =>
+    reply.code(400).send({ error: { code: "VALIDATION_FAILED", message } });
 
   app.get("/warmup/personas", async (req, reply) => {
     const accountId = contentAccount(req, reply, false);
@@ -476,7 +692,7 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     if (!accountId) return;
     const r = planner.setSites(accountId, req.params.id, req.body);
     if (r === null) return notFound(reply, "unknown persona");
-    if ("error" in r) return bad(reply, r.error);
+    if ("error" in r) return badRequest(reply, r.error);
     return r;
   });
 
@@ -491,7 +707,15 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return r;
   });
 
-  return { app, store, close: () => app.close() };
+  return {
+    app,
+    store,
+    authStore,
+    close: async () => {
+      await app.close();
+      db.close();
+    },
+  };
 }
 
 /** Constant-time string compare for the env bootstrap token. */

@@ -1,4 +1,20 @@
-# Roadmap
+### Owner answers (2026-11-17) — design inputs settled
+
+- **Team size: max 10 members.** Small-team scale: plain account rows +
+  hashed credentials on the server suffice; no org/tenant machinery.
+- **Server OS: Ubuntu.** The sync/team server (Node/Fastify) runs on it
+  under systemd behind a reverse proxy. Clients stay Windows (the engine
+  is windows-x64); the server never runs browsers.
+- **L1 = run tasks/warmups only** (refined above).
+
+### Still open
+
+- Exposure: LAN-only or internet-reachable? Team sign-in from outside the
+  house implies internet → TLS + domain (Caddy/Let's Encrypt) before any
+  member account exists. Confirm the server has a public IP or domain.
+- Always-on assumption (needed for sync + update distribution).
+
+ Roadmap
 
 ## P1 — Engine distribution & launch identity (DONE v0.2.0, health/CLI v0.4.0)
 
@@ -1509,6 +1525,748 @@ app once this branch is deployed.
 
 Gates: 667/667 API, 20/20 server, tsc and build clean, e2e GREEN.
 
+## v0.16.5 — deviceMemory heap-cap coherence (2026-11-17, `134b8d9`)
+
+AliasMode's full check flagged the proxied LeakTest profile:
+"deviceMemory 4 · heap 4.09 GiB". V8 caps its JS heap near 4.09 GiB on any
+host with >= 8 GB RAM and page JS can read that limit, so a 4 GB claim is
+UNDER what the heap reveals — self-contradicting on every big-RAM machine,
+independent of how many browsers run (deviceMemory is a reported value, not
+an allocation; browser count is unaffected).
+
+- [x] **Never claim 4 GB on >= 8 GB hosts** (`134b8d9`) — the existing
+  host-memory clamp only ruled out claiming MORE than host RAM; extended
+  with the heap-cap rule: when host RAM is known and >= 8 GB, drop the 4 GB
+  bucket (8 is the smallest Chrome bucket above the cap; 8/16/32 are always
+  coherent). Sub-8 GB hosts keep claiming 4, where V8 derives a smaller
+  heap. Every new identity now automatically matches whatever machine it
+  is generated on — portable across the owner's machines, zero per-profile
+  work.
+- [x] **Tests** (`134b8d9`) — 8 generator tests, incl. 8/16/32 GB hosts
+  never drawing 4. Gates: 667/667 API, tsc, build clean.
+
+**Live verify (scratch API on 50326, fury qp.4, throwaway profile, real
+window):** aliasmode.com/check/ read `deviceMemory 8`, heap 4.09 GiB,
+hwConcurrency 8 — coherent; the memory finding did not appear. 22 checks,
+2 unrelated items below. Throwaway cleaned up.
+
+## Findings from the live leak battery (2026-11-17, recorded, not yet shipped)
+
+Measured on the owner's real setup (fury 0.5.5-qp.4, stock Windows host,
+7 ISP proxies added to the live app):
+
+- [ ] **DNS leak through the HTTP proxy (the one "problem" on the proxied
+  run)** — page DNS resolved via Cloudflare US resolvers while the proxy
+  exits in CA. **Diagnosed 2026-11-17: not the browser — the proxy's own
+  resolver plus its bad geo record.** Evidence:
+  - `curl.exe -x <69.33.225.30 proxy> http://edns.ip-api.com/json` (no
+    browser, no DoH) → `United States - Cloudflare, Inc.` `162.158.152.43`
+    (3/3 runs, Cloudflare each time); direct → `Canada - Rogers` `99.212.12.4`.
+  - Scratch API (50477, fury qp.4, branch `engine-dns-voices`), throwaway
+    proxied through the same proxy, `--disable-features=DnsOverHttpsUpgrade`
+    confirmed on the engine command line: aliasmode still "DNS leak: lookups
+    go to another country", resolvers `162.158.152.43 · Cloudflare, Inc. (US);
+    104.22.99.43 …; 172.71.221.198 …` — the same resolver curl hit. iphey:
+    IP 69.33.225.30, Brampton CA, "Location … (light)".
+  - The host's resolvers (64.71.255.204/.198) are not in Chromium's DoH
+    upgrade table (`net/dns/public/doh_provider_entry.cc`), so the upgrade
+    could never fire here. The German residential proxies resolve via
+    Telekom/Vodafone (2026-11-17), i.e. through each proxy's own ISP.
+  - With an HTTP proxy Chromium sends hostnames to the proxy; the proxy
+    resolves. The "CA" half is the ARIN/Brampton record (see above); the
+    exit is physically Ashburn, so a US resolver is actually consistent.
+  Fix is provider-side: correct the ARIN record / PTR / geofeed (makes
+  "US resolver, US IP" agree), or resolve via an ISP-local resolver. No
+  engine patch (a 0072 would not change this) and no rebuild.
+  `8bbe8cc` keeps the switch as hardening only (inert on this host; it only
+  matters on hosts whose resolver is 1.1.1.1/8.8.8.8 etc.). Note it makes
+  such a host differ from stock Chrome, which upgrades — owner's call
+  whether to keep it.
+- [ ] **Speech voices: only online Google voices, no Microsoft voice** —
+  **Not reproducible 2026-11-17; no engine change needed.** Stock Windows
+  TTS (`content/browser/speech/tts_win.cc`, SAPI `ISpVoice`) is compiled
+  into every Windows build unconditionally; no patch touches it; 0041 is
+  inactive without `speech.voices`/mobile config; 0042 only adds the Google
+  extension. Measured on this machine (SAPI tokens: David, Zira; OneCore:
+  David, Mark, Zira):
+  - App-launched throwaways on the scratch API (proxied and direct):
+    `total 22`, local `Microsoft David - English (United States) (default)`,
+    `Microsoft Mark …`, `Microsoft Zira …`, remote 19.
+  - Field-by-field diff (name, voiceURI, lang, localService, default, order)
+    app-launched qp.4 vs stock Chrome 157.0.8103.51: 22 vs 22, zero
+    differences.
+  - Cold first page right after launch: Microsoft voices arrive in 30–34 ms
+    on qp.4, 46–73 ms on stock. `getVoices()` returns 0 on the very first
+    call in both (normal async load). A reading taken in a different state
+    (other machine, mobile persona) is the likely origin; re-open with
+    the profile id + page if it recurs.
+- [ ] **iphey "whale" — watch item, not a finding** — on scratch
+  throwaways it was intermittent with and without the DNS switch:
+  2 fresh profiles 4/4 Trustworthy (switch on); one flagless profile
+  Trustworthy then whale on its second visit; whale on later visits of
+  longer-used instances. Stock Chrome, one sample: Trustworthy. Matches the
+  earlier note (long-lived sessions, clean replica passes). Not caused by
+  the voice list (identical to stock).
+- [x] **No-proxy profiles default to UTC** — FIXED 2026-11-17 (code in this
+  commit). aliasmode flagged "Browser runs at UTC+0 but the IP is at UTC-5"
+  for any profile without a proxy and no pinned timezone. The launch
+  timezone chain now reads: profile pin > proxy's timezone field > exit-IP
+  lookup > **host's own timezone when no proxy** (source `host`) > identity
+  default. A direct connection's IP is the machine's, so the machine's zone
+  is the only coherent answer; fallback to the identity default only when
+  the host zone is unreadable. Two new tests; gates 668/668 API, 20/20
+  server, tsc, build clean.
+- [ ] **One-off zero-outer-geometry window** — one scratch-instance launch
+  reported `outerWidth/outerHeight = 0` (aliasmode reads that as headless)
+  while a second launch on the same instance and two on the live instance
+  were all correct. Not reproducible on retry; watch item — if it recurs,
+  capture the launch args + persona config of the affected profile.
+
+Everything else in the battery passed: TLS/JA3 byte-identical to stock
+Chrome, H2 clean, WebRTC shows only the proxy IP, UA/CH/language coherent,
+automation clean, canvas/audio/fonts/screen agree.
+
+## Hosted team deployment (owner-directed 2026-11-17) — the "server" track
+
+Owner's direction: the main deployment is hosted on the owner's server.
+Clients (team members' PCs) download the app, sign in, and connect.
+Profiles/proxies live on the server; invited team members see and work
+with them under role-based permissions. Terminology: invitees are **team
+members**, not "family and friends". This track supersedes the local-first
+framing for deployments; it builds ON the existing P5 team server rather
+than replacing it. Priority: AHEAD of the AI agent (P9) — it is the
+foundation the agent and family rollout sit on.
+
+### Permission tiers (owner-specified, three levels + owner)
+
+- **L1 — staff (automation operator)**: see profiles/proxies, RUN WARMUPS
+  and TASKS (scripts/plugins) — and nothing else: no interactive profile
+  launches, no edits. (Owner refinement 2026-11-17: level-one staff operate
+  the farm, they don't browse it. Warmup/task runs mutate run state only,
+  never profile data.)
+- **L2 — editor ("co-worker")**: edit names, notes, tags, fields,
+  fingerprints; may NOT delete profiles/proxies, may NOT add new ones.
+- **L3 — manager ("team lead")**: everything L2, plus add and delete
+  profiles/proxies, manage warmups/plugins.
+- **Owner**: invites/revokes team members, mints tokens, server admin.
+- Delta from today's roles: the team server ships viewer/operator/admin;
+  the L2 no-delete / L3 add-delete split needs a permissions matrix (one
+  decision to record in the server, enforced server-side — the client is
+  untrusted).
+
+### What already exists (P5, v0.16.0)
+
+- Self-hosted sync server: encrypted profile bundles end-to-end
+  (server stores opaque bytes, no decrypt path), SHA-256-hashed bearer
+  tokens, three roles, optimistic concurrency (409 on stale revision).
+- Multi-user launch leases with TTL/renew/takeover, force-release.
+- Client: pull+rebase+retry, background sync loop, lease guard on start.
+
+### New work, in order
+
+1. **Account + sign-in layer** — today there are no accounts, only
+   per-machine tokens. Need: owner-created team-member accounts on the
+   server (invite by email/username, owner mints credentials), sign-in
+   from the client, session tokens. All identity stays on the owner's
+   server — no third party, no phone-home. Owner decision: email+password
+   (server-side Argon2id, Fury's recovery-key design from 0.5.5 as
+   reference) vs invite-link-only.
+2. **Permissions matrix** — replace the three flat roles with the L1/L2/L3
+   + owner matrix above; enforce server-side on every mutating route
+   (profile create/update/delete, proxy create/update/delete, warmup/
+   plugin management, member management). Launch allowed at L1+.
+3. **Server as source of truth** — "store on cloud" per profile at creation
+   (the owner's ask): cloud profiles live server-side and sync to whatever
+   machine launches them (encrypted bundle hand-off, lease still guards
+   double-launch). Local-only profiles stay possible for solo use.
+4. **Update distribution on the server** — the server hosts app releases
+   and engine core dists; the client checks version at launch, downloads,
+   verifies checksum (the engine installer already checksum-pins), and
+   restarts. Owner publishes; team members are pure consumers. This is the
+   auto-update-on-reopen requirement.
+5. **Compiled, minified client** — ship the client runtime as a compiled
+   single executable (not readable source) to raise the cost of copying.
+   HONEST LIMIT, recorded so the expectation stays right: any code that
+   runs on someone else's machine can eventually be reverse-engineered.
+   What the server model genuinely protects: profiles, proxies, cookies,
+   credentials, plugins, and all data (they never live client-side beyond
+   an encrypted launch), plus the engine patch series stays ours in the
+   build tree. The Chromium engine itself is BSD-licensed open source by
+   design (that IS our legal foundation) — it was never the secret; the
+   workflow, data, and infrastructure are.
+6. **Rename** — all "family/friends" copy → "team member" (docs, start
+   script strings, README).
+
+### Owner answers (2026-11-17 evening) + status after this build
+
+- Server: Ubuntu 24.04 shared box at `107.172.193.23` (also runs
+  taskpilot/codes-bot/sol-auto-trader/linktrack — deploy must not disturb
+  them). Domain: `queuepilot.taskpilot.tech` (A record → the box, certbot
+  TLS via the existing shared nginx). Always-on: yes, docker
+  `restart: unless-stopped`. Team cap: **10 members**. Invitees called
+  **team members**.
+- **DONE (server-side, this build, commit pending):**
+  1. Accounts + sign-in — `apps/server/src/auth-store.ts`: Argon2id
+     passwords, one-time owner bootstrap (`POST /auth/bootstrap`, env
+     bootstrap code, dead after the owner exists), email+password signin,
+     30-day sliding sessions stored as SHA-256 hashes (`qps_` tokens),
+     rate-limited public auth routes. Device tokens (`qpt_`) unchanged.
+  2. Permissions matrix — enforced server-side: L1 = read listings + run
+     leases (task/warmup execution); L2 = + push/rebase bundles (edit);
+     L3 = + create/delete bundles; owner = + team/token management.
+     Team routes: `GET /team/members`, `POST/GET/DELETE /team/invites`,
+     `PATCH/DELETE /team/members/:id`; cap of 10 enforced at mint AND
+     redeem; owner account immutable. Bundle `meta` (name/tags) rides
+     listings so profiles can be listed by name without decrypting.
+     HONEST LIMIT: the server cannot distinguish a warmup/task run from
+     an interactive launch (both pull the bundle + lease) — the "L1
+     doesn't browse" rule is enforced client-side in the app UI; the
+     server enforces everything it can actually see.
+  3. Cloud profile storage — server already IS the source of truth for
+     synced profiles (sealed bundles + revision concurrency); meta + tier
+     rules close the gap. "Store on cloud" toggle per profile is a
+     client-side setting (sync on/off), not server work.
+  4. Update distribution — the shipped client contract is an
+     `engines.manifest.json` + tarballs, so the server hosts them as
+     static files behind nginx (`deploy/publish-engine.mjs` uploads a
+     build, verifies sha256, rewrites manifest URLs). Settings → Engine →
+     Update server URL already ships client-side.
+  5. Deploy artifacts — `deploy/`: Dockerfile.server (node:24-slim,
+     dist-only runtime, non-root, healthcheck), docker-compose.yml
+     (loopback-only port 3010, `/root/queuepilot-server/data` volume),
+     nginx-queuepilot.conf (static /updates + proxy, 512m body, certbot),
+     README.md runbook (ship → build → TLS → owner bootstrap → invites →
+     publish engine → backup/ops).
+- **STILL OPEN (next, in order):**
+  1. ~~DNS A record~~ **DONE 2026-11-17 22:15** — `queuepilot.taskpilot.tech`
+     live with a Let's Encrypt cert (auto-renewing, valid to 2026-02-16);
+     public `https://queuepilot.taskpilot.tech/health` verified from outside;
+     shared-nginx neighbors (taskpilot/codes-bot/sol-auto-trader) confirmed
+     undisturbed.
+  2. ~~Live deploy + certbot~~ **DONE 2026-11-17 22:20** — container live
+     behind nginx; loopback port 3010, static `/updates` + manifest served
+     from `/opt/queuepilot-server/data/updates`.
+  3. ~~Owner bootstrap~~ **DONE 2026-11-17 22:25** — owner account created;
+     sign-in + `/auth/me` + `/team/members` verified against the live URL;
+     bootstrap code confirmed dead (409); env var removed from the
+     container on recreate. 9 remaining member slots.
+  4. ~~Client-side sign-in UI (app connects with email+password → `qps_`
+     session instead of device token; Team panel for owner)~~ **DONE
+     2026-11-18 (Track B, commit 38be560)**: Settings → Team sign-in,
+     owner team panel (invites/tiers/revoke), tier badge + UI gating,
+     store-on-cloud per-profile toggle, rename sweep. Gates re-run by
+     Kimi: 747/747 api, 29/29 server, tsc×2, build, e2e GREEN.
+  5. ~~L1 client enforcement~~ — included in Track B (`data-tier` CSS
+     gating; server enforces the real rules).
+  6. ~~Per-profile "store on cloud" toggle~~ — included in Track B
+     (pull-side filter; push-side filter still open when sync gains push).
+  7. Compiled/minified client packaging (honest limit already recorded).
+  8. ~~Rename family/friends copy → "team member" sweep~~ — done in Track B.
+
+### Engine 0.5.6-qp.2 — SHIPPED 2026-11-19 (Chromium 159, official config)
+
+Overnight run 2026-11-18/19 (Claude, report
+`claude-report-engine159.md`; evidence-verified and gated by Kimi):
+- **Pinned `159.0.8154.13`** — in Google's live win64 Stable serving
+  list (0.5% rollout) and current Beta, i.e. a build real users run
+  (hard rule 1 applied; verified against versionhistory + chromiumdash
+  + chrome-for-testing before fetching). ⚠ Small population today —
+  re-pin check at the next cycle once rollout widens.
+- 44/44 patches rebased 158→159; first-attempt **official build
+  (LTO+PGO) in 9 h 33 min, 0 retries**; preflight sweep caught 3
+  upstream API-removal compile breaks before they could burn the build.
+- Battery (Norton verified off, German residential proxy, qp.4 + stock
+  CfT-159 side by side): aliasmode **0/0/23**, BrowserScan **100%**,
+  CreepJS clean, Cloudflare challenge + anti-bot bypassed, BotD/Castle/
+  Pixelscan/sannysoft/whoer clean, "Google Chrome" brand confirmed live
+  (0011), WebRTC shows only the exit IP, timezone + DNS follow the exit
+  country. TLS JA4 matches default Stable Chrome (the CfT delta is
+  CfT's field-trial config, documented in the report).
+- **Published to the hosted update server**: manifest +
+  tarball live at `https://queuepilot.taskpilot.tech/` (both qp.2 and
+  qp.4 hosted). Clients pick it up via Settings → Engine → Update
+  server URL; downloads stay consent-gated. SSH key auth now set up
+  for the publish script.
+- Two 0131 call-site hunks deliberately NOT re-applied (159 sends
+  effective screen infos to remote frames natively; aliasmode's
+  frames/workers checks guard it).
+
+### Locale follows the proxy's exit country (API fix, SHIPPED cbfb53d)
+
+Root cause of iphey's "Unreliable / whale" on proxied profiles was the
+**Intl locale** disagreeing with the exit country (en-US formats behind
+a German IP), not the engine. `resolveLaunchGeo` now returns the exit
+`countryCode` too; locale resolves pin > exit-ip > identity via CLDR
+maximize (DE→de-DE, GB→en-GB…). Live-verified: Unreliable 90 →
+**Trustworthy MX 100**, aliasmode 0/0/23. `navigator.languages` /
+Accept-Language intentionally unchanged (owner wants English for
+reading; the battery proved the locale is what iphey scores). Known
+side effect: pinned-timezone proxied launches now make the exit lookup
+too (**up to +8 s**) unless locale is also pinned — both pinned skips
+it entirely.
+
+### Engine 158 rebase — outcome and the shipping decision (2026-11-18)
+
+Overnight run (Claude, report `claude-report-engine158.md`): all **44/44
+patches rebased onto 158.0.8127.66** (6 needed real work; 0071 needed a
+semantic fix for upstream's new `PortParametersRef.callbacks` or WebRTC
+would have silently produced zero candidates). Build succeeded (~15 h
+with one diagnosed retry), tarball `0.5.6-qp.1` packed and installed
+through the client installer.
+
+**Decision: NOT shipped.** Two reasons, both fingerprint-level:
+1. `158.0.8127.66` was the newest 158 tag but **never shipped on any
+   channel** (Windows Stable 158 was .18/.36/.37). High-entropy client
+   hints expose the full build number — a site comparing against
+   Chrome's release history sees a build no real user runs.
+2. The build used the non-official config (no LTO/PGO), unlike qp.4.
+
+The work is preserved on branch **`engine-158`** (refreshed patches +
+CHROMIUM_VERSION + manifest entry), so the next cycle starts from it.
+
+**Battery results that matter:** round 2 (Norton Web Shield off) —
+CreepJS 0% headless/0% stealth, iphey Trustworthy MX 100, Cloudflare
+challenge + anti-bot bypassed with no interaction, TLS JA4 **byte-
+identical to stock Chrome**, aliasmode 23 passed, no regressions vs
+qp.4. **BrowserScan −5% canvas tampering** — the per-profile canvas
+noise is visible to detectors. Owner decision (agreed 2026-11-18):
+**keep the noise** (profiles stay unlinkable); the real fix is
+per-persona real-device canvas — a roadmap feature, not a patch tweak.
+
+**Also discovered (must ship in the next engine):** patch 0011 brand
+fix — Chromium-branded builds omit `"Google Chrome"` from the client
+hint brand list while every persona says Chrome in the UA; adding the
+brand (same string/shuffle as a branded build) **cleared iphey's
+"whale / inconsistent fingerprint" flag**. It is in the engine-158
+branch and must be in the 159 build (consider a 157 hotfix only if
+whale sightings matter before then).
+
+**Next engine cycle (needs an overnight window + owner go):**
+- Target a **shipped Windows Stable 159** build (not the newest tag —
+  verify against chromiumdash / chrome-for-testing stable channel
+  FIRST), official config (LTO/PGO, ~12.5 h on this box).
+- Carry the engine-158 branch forward (rebase 159 onto it).
+- Run the full two-round battery again, this time with the German
+  proxies imported into a scratch API and Norton off from hour zero.
+- Roadmap features to schedule: real-device canvas per persona.
+
+### Also running overnight (Track A): — DONE, see above
+- Housekeeping on the box done 2026-11-17: removed the unused
+  buddy-browser containers/volumes/`/opt/buddy-browser` at the owner's
+  direction (freed port 8443 + its ufw rule). Nothing else touched.
+
+## P9 — Local AI agent (owner-directed build 2026-11-17, IN PROGRESS via Claude)
+
+Reprioritized by the owner 2026-17 evening: built NOW, in parallel with the
+hosted deployment track (server answers still pending). Brief:
+claude-p9-agent-brief.md. Original scope below stands:
+
+Trigger: AliasMode materially advanced their hosted agent (beta.75,
+scan 2026-11-17). Owner decisions recorded:
+- **Brain: LOCAL model** (owner directive 2026-11-17) — runs on the
+  operator's hardware (Ollama-class, ~14B class model in 32 GB RAM),
+  free, nothing leaves the machine. Provider interface stays pluggable
+  (cloud key slot exists for later, owner-provided, off for family).
+- **Body**: agent loop over our own local API + JYL + plugins — the tools
+  already exist; no wallet, no accounts, no credits, no phone-home.
+- **Guardrails non-negotiable**: tool-allowlist, confirm-before-destructive,
+  secrets never in the prompt surface (proxy passwords stay behind the
+  relay/DPAPI), full action log.
+- Priority: AFTER the hosted team deployment track (it is the foundation
+  family rollout and the agent's audience both sit on).
+
+### P9 build (2026-11-18, branch `p9-agent`)
+
+- [x] **Task 0 — Dashboard sign-in + plugin import UI (completes B3b)**
+  (`94c86f3`, Settings sign-out card in `3968a22`) — the static console
+  (`/`, `/dashboard/<file>`, code only) loads without the token; every API
+  route incl. `/events` still needs it. One-field sign-in shown on a 401
+  (probe before keep; sessionStorage, localStorage only on "Remember");
+  sign-out clears both; tokenless installs never prompt. `/events` moved to
+  a fetch-based SSE reader (EventSource cannot send headers). Settings →
+  Automation → Plugins card: list, enable toggle, "Import plugin".
+  `POST /plugins/:id/enable` now behind the scripting gate (enabling is
+  where an imported plugin's code first runs). Threat model in the commit.
+  Live (scratch 50477, token mode): `GET /` 200, `GET /profiles` 401;
+  wrong token → "Sign-in failed: that token was refused (401)…"; right
+  token → token in sessionStorage only, SSE "live"; UI import of
+  `ui-greeter.mjs` → "installed as ui-greeter — switched off" and
+  `evil.zip` → "rejected: path traversal rejected: ../../escape.mjs";
+  resolver `#NO RESOLVER` before the checkbox, `hi from the UI import`
+  after; Sign out → both stores null, sign-in shown.
+- [x] **Tasks 1–3 — provider layer, agent core, guardrails** (`3968a22`,
+  `04b9307`, `5a56038`) — `ModelProvider` with one Ollama implementation
+  (cloud kind reserved, refused); Settings → Agent (loopback-only URL by
+  schema + provider check; default model `qwen2.5:7b-instruct`);
+  `GET /agent/status`, `POST /agent/pull`. 20 in-process tools (read /
+  mutate / destructive), name-addressed, zod-validated; loop capped at 12
+  steps / 120 s with plain "I stopped because…"; action log
+  `<dataDir>/agent/actions.jsonl`; chats capped at 200; NDJSON streaming.
+  Guardrails in code: destructive → pending + human Approve/Decline (both
+  logged); tool results built from public fields + `scrubSecrets()`;
+  unknown tools refused; resolvers deliberately excluded (one-time codes /
+  alias secrets); plugin toggles keep the scripting gate; `/agent` on the
+  browser-origin deny list. 19 tests. Live without a usable model:
+  status `reachable:true, version 0.40.16, modelPresent:false`; a command
+  → one message "I could not use the model: the model
+  "qwen2.5:7b-instruct" is not downloaded yet — Settings → Agent →
+  Download model" (was shown twice as raw JSON before `5a56038`);
+  cross-site `POST /agent/chats` → 403; non-loopback `providerUrl` → 400.
+- [x] **Task 4 — assistant side panel + Settings → Agent** (`093bae4`) —
+  launcher, streamed text, tool chips, Approve/Decline prompt, action-log
+  tab, 3 example commands, status line; Settings card with reachability,
+  installed models, Download model. Screenshots in the P9 report.
+- [ ] **Task 5 — live scenarios with a real model: NOT RUN.** Ollama
+  0.40.16 was installed on the build machine (owner-approved, official
+  winget package). Owner then chose an Ollama **cloud** model via an Ollama
+  key (`gpt-oss:120b-cloud` manifest registered; owner decision recorded:
+  cloud models process conversations on ollama.com, overriding the
+  local-only line above — the UI now says so), but the Ollama app was not
+  signed in (`/api/chat` → 401) and the owner chose to skip for now. No
+  local model was downloaded. The scenario script is ready
+  (`scratchpad/p9-live.mjs`: create two grouped profiles, worst proxy
+  health vs `/proxies/:id/health`, start/stop, delete → confirm → decline,
+  password probe). To run: sign the Ollama app in (`ollama signin`) and set
+  Settings → Agent → Model to `gpt-oss:120b-cloud`, or download a local
+  model there.
+
+## Phase A+B — owner gaps and watch items (2026-11-18, branch `phase-ab`)
+
+- [x] **B1 — Proxy list text import** (`dce10f2`) — `POST /proxies/import`
+  takes pasted text (JSON `{ text, type? }`) or a .txt file's bytes as
+  `text/plain` (`?type=` default scheme). Lines: `host:port`,
+  `host:port:user:pass`, optional trailing IANA timezone, `scheme://`
+  prefix, `user:pass@host:port`, the older `name:host:port:user:pass`;
+  blank lines and `#` comments ignored. Dedupes on host+port against
+  stored proxies and within the batch; response
+  `{ added, skipped, errors: [{ line, reason }] }`; one bad line never fails
+  the batch; reasons never echo the line. Dashboard: "⇪ Import proxies"
+  dialog with paste box + .txt picker and the summary. 12 new tests; gates
+  681/681 API, 20/20 server, tsc, build; e2e GREEN (30). Live (scratch API
+  50477, TEST-NET addresses, dummy creds): pasted 7 lines →
+  `3 added · 1 skipped (already listed) · 2 errors` (line 6
+  `expected host:port[:user:pass[:timezone]]`, line 7 `port out of range`);
+  timezone `America/New_York` stored and shown; .txt bytes via text/plain →
+  `{"added":2,"skipped":1,"errors":[]}`; no `password` field in any list
+  response. The browser file picker itself was not driven by automation
+  (it reads the file with `File.text()` and posts the same JSON).
+- [x] **B2 — Proxy groups** (`8725f6f`) — profile-groups model on proxies.
+  Migration `011-proxy-groups` adds `proxies.grp` (NOT NULL, default
+  `'default'`); test rolls a DB back to pre-011, inserts a proxy, migrates →
+  `{ grp: "default" }`. Group on create/edit/import; `GET /proxies?group=`
+  (API filter; the dashboard filters its full list client-side to draw the
+  tab counts); `GET /proxy-groups` → `{ group, total, inUse }`;
+  `POST /proxy-groups/rename` (409 on merge); `POST /proxies/batch-move`
+  (ids checked first, moves go through `update()` so secrets keep their
+  handling). A proxy-provider refresh keeps each proxy's group (host+port).
+  Dashboard: group chip tabs with counts + ✎ rename, Group column, "Move to
+  group" for the selection (select-all = visible tab), Group field in the
+  Import dialog, empty-group message. 8 new tests (7 in
+  `proxy-groups.test.ts`, 1 provider-refresh test in `providers.test.ts`);
+  gates 689/689 API (one
+  rerun after the A1 worker-exit flake hit `proxy-relay.test.ts`), 20/20
+  server, tsc, build; e2e GREEN (32, incl. move-to-group and tab switch).
+  Live (scratch API 50477, dummy TEST-NET proxies): API import into
+  `ashburn` (3) + dashboard import into `germany` (2, "2 added · 0 skipped
+  · 0 errors"); germany tab showed only its 2 rows; ticked one ashburn row,
+  Move to group → germany: `/proxy-groups` →
+  `[{"group":"ashburn","total":2},{"group":"germany","total":3}]`; rename
+  ashburn→us-east `{"renamed":2}`, us-east→germany
+  `409 CONFLICT group "germany" already exists`. Rename is a native
+  `prompt()` in the UI, so it was driven through the API, not the browser.
+- [x] **B3a — Script/zip → plugin import, API** (`c3161cc`) —
+  `POST /plugins/import?filename=<name>`, raw bytes as
+  `application/octet-stream` (5 MB cap). `.mjs`/`.js` → minimal plugin
+  (package.json from the filename, entry stored as `index.mjs`); `.zip` →
+  one plugin folder (package.json at root or in one top folder; `main` must
+  exist and be a safe path). Gate: scripting opt-in + API token as an
+  `onRequest` hook (refused before the body is read) + the existing
+  origin-deny on `/plugins/*`. Own zip reader (central directory,
+  stored/deflate, CRC checked): refuses traversal, absolute/drive paths,
+  `.` segments, NUL, symlinks/special files, duplicates, encryption, ZIP64,
+  >500 entries, >20 MB expanded. Staging folder + zip-slip re-check +
+  rename; a rejection leaves nothing. Lands disabled AND unimported: the
+  registry now lists a switched-off plugin without importing it (top-level
+  code/onInit first run on enable; a failing first import reverts the
+  toggle); dot-folders never load; `addInstalled()` avoids rescanning the
+  others. Per-file result 201 / 422 `{ installed, rejected: [{file, reason}] }`.
+  11 new tests (wrap, zip, 7 hostile archives write nothing, caps/junk/dup,
+  not-imported-until-enabled, staging skipped, gate closed 403 / no token
+  401 / token-less install 403, cross-site + foreign Origin 403, 201
+  happy path, 422 loud). Gates 700/700 API, 20/20 server, tsc, build.
+  Live (scratch API 50477 in token mode with a throwaway token):
+  `gate closed 403 FORBIDDEN … enable Settings → Automation → Scripting
+  endpoints first`; `no token 401`; `browser origin 403 cross-origin
+  requests to scripting endpoints are refused`; `import .mjs 201
+  {"id":"greet","enabled":false}`; `import .zip 201 {"id":"zip-tool"}`;
+  `traversal zip 422 path traversal rejected: ../../owned.mjs` (no file
+  written outside plugins/, no staging leftovers); `duplicate 422 already
+  installed`; list → both `enabled:false, loaded:false`;
+  `plugin.greet.greet` → `#NO RESOLVER` until enable, then
+  `hello from an imported script`.
+- [ ] **B3b — Import UI ("Import plugin" button, "Save as plugin")** —
+  BLOCKED on an owner decision, not built. Two facts: (1) the dashboard
+  has no Plugins view and no script runner today (plugins appear only as
+  two Settings → Automation fields), so "Save as plugin" has nothing to
+  attach to; (2) the scripting gate requires `SPECTRA_API_TOKEN`, and with
+  a token set the bearer hook covers every route except `/health` — the
+  dashboard page itself answers **401** (measured live above), and its
+  `api()` sends no Authorization header. So a dashboard button can never
+  reach `/plugins/import` under the gate this brief makes non-negotiable.
+  Options for the owner: (a) keep import CLI/API-only (works today:
+  `curl -H "Authorization: Bearer $SPECTRA_API_TOKEN" --data-binary
+  @my.mjs -H "content-type: application/octet-stream"
+  "http://127.0.0.1:50325/plugins/import?filename=my.mjs"`); (b) let the
+  dashboard authenticate — serve its static assets without the token and
+  have it ask for the token once (sessionStorage) and send it as a Bearer
+  header; that changes the auth boundary, needs its own review, and also
+  makes the rest of the dashboard usable in token mode; (c) a separate
+  loopback-only "owner session" mechanism. Recommendation: (b), as its own
+  reviewed task, then the Plugins card (list, enable toggle, Import).
+- [x] **A3 — Zero-outer-geometry window: reviewed, no code change**
+  (analysis only; no rebuild). Code review of every place our launch path
+  sizes or moves a window — none can produce a 0×0 rect:
+  `initialWindowSize` floors at 320×240 (`--window-size` is always ≥ that);
+  `claimedAvailArea` is ≥ 90% of a positive claimed screen; `fitWindow`
+  only shrinks, returns null for minimized/fullscreen/unknown bounds, and
+  `sizeAtScale` never goes below 1; `tileRects` cells are positive for any
+  realistic window count on a ≥ 800 px area; the watcher never sets bounds
+  on a window whose bounds it could not read. Measured on the bare qp.4
+  binary (fresh temp profile, `--window-size=1200,800`): normal →
+  `outer 1200×800, inner 1184×705, screenX/Y 10,10, visible`; minimized →
+  `outer 160×28, screenX/Y -32000,-32000, hidden` (Windows' minimized
+  stand-in, same as stock Chrome — not 0×0); restored → back to 1200×800;
+  a new CDP window read at +0/+50/+300 ms → `1200×800` every time; a start
+  URL's first script on 3 launches → `1200x800/1184x705/visible` (a 4th
+  launch never came up because its debug port was still held by the
+  previous instance — unrelated to geometry). Conclusion: not reproducible
+  and no branch in our code yields it; the one-off reading most likely came
+  from a page measured while its window was being created or torn down by
+  something outside the launch path. Watch item stays: if it recurs,
+  capture `Browser.getWindowBounds` for that target plus the launch args.
+- [ ] **A1 — vitest "Worker exited unexpectedly": characterised, one cause
+  fixed, the rest QUARANTINED WITH TRACKING (no test skipped or deleted).**
+  Reproduction: 8 full API runs back to back (`scratchpad/a1-loop.sh`),
+  alternating `--pool=forks` (default) and `--pool=threads`, with
+  `NODE_OPTIONS=--report-on-fatalerror --report-uncaught-exception`. Result:
+  4 green (runs 2, 4, 7, 8); **0 hard worker exits, 0 Node fatal reports**;
+  4 load-induced failures, all timing:
+  - `tests/team-lease-guard.test.ts` "renews the lease on a timer…" — 2 of 4
+    forks runs, `expected 1 to be greater than or equal to 2`: a 20 ms
+    heartbeat asserted after a fixed 70 ms sleep. **Fixed** on this branch:
+    wait (≤ 3 s) for the second renewal instead of assuming it.
+  - `tests/process-identity.test.ts` — 1 of 4 forks runs: one test took
+    35.8 s, then `Error: [vitest-worker]: Timeout calling "onTaskUpdate"`
+    ×3 and the file's 7 tests never reported. Cause: the production token
+    capture is a *synchronous* `execFileSync(powershell …)` (10 s timeout;
+    the invocation style is pinned by the endpoint-AV history), so under 8
+    parallel workers + AV scanning each fresh powershell.exe the worker's
+    event loop is blocked long enough for vitest's own worker↔main RPC to
+    time out.
+  - `tests/adopted-relay.test.ts` "releases the port when the adopted run
+    is stopped" — 1 of 4 threads runs, `expected 1 to be +0`: under load the
+    same synchronous PowerShell read timed out → identity `unknown` → the
+    code correctly refuses to kill and keeps the relay hold (fail-safe by
+    design); the test expected `match`.
+  - Earlier this session (gate run, forks, no reports enabled): one hard
+    `Error: Worker exited unexpectedly` (tinypool `ChildProcess
+    .onUnexpectedExit`) while `tests/proxy-relay.test.ts` was running; its 9
+    tests never reported; an immediate rerun was 689/689.
+  - Later the same day (17:20–17:30, untouched `apps/server`): the forked
+    worker running `tests/leases.test.ts` died **every** time for ~10
+    minutes — whole-file runs 3/3 dead after the first test, while each of
+    its 10 tests run alone passed, the same file under `--pool=threads`
+    passed 10/10, and a plain-Node replay of its lifecycle (3× build /
+    listen / request / close) exited 0. No Node report, no Windows
+    Application Error / WER event for node.exe, no Defender detection;
+    Norton AntiVirus is active (its log is not in the event log). Then it
+    stopped with no code change: 3/3 whole-file runs and the full server
+    suite 20/20. The window began right after the C1 live check extracted
+    a fresh 283 MB `chrome.exe` into the scratch data dir — consistent
+    with AV activity ending forked node processes, not proven.
+  Frequency: the hard exit 1 in ~11 full runs today, plus that 10-minute
+  window; some load-timing
+  failure in 4 of 8 loop runs (the loop ran alongside other work — A2 live
+  visits — so it is a pessimistic load). Suspected cause of the hard exit:
+  the worker process is ended from outside — a Node crash would have left a
+  report with `--report-on-fatalerror` (none in 8 runs), no test kills a PID
+  it does not own (tests only `ChildProcess.kill()` their own handles,
+  which cannot hit a reused PID), and the PowerShell-heavy files are the
+  ones running when workers misbehave. Next step if it keeps biting: run
+  the PowerShell-backed files (`process-identity`, `adopted-*`,
+  `process-inventory`) in a separate non-parallel vitest project so the
+  synchronous spawns no longer compete with 7 other workers — a test-infra
+  change, deliberately not done blind. Gate practice meanwhile: a red gate
+  whose only failure is one of the four above is rerun once, and the
+  report says so (as done for B2).
+- [ ] **A2 — iphey "whale": characterised; known behaviour, no fix
+  shipped (no concrete cause in our code).** Scratch API 50477, fury qp.4,
+  two fresh direct throwaways, 5 visits each over 31 min, a fresh tab per
+  visit (`scratchpad/a2-iphey.mjs`, results `a2-results.jsonl`):
+  `iphey-only` (nothing but iphey) → Trustworthy, whale, Trustworthy,
+  whale, whale; `busy` (a speechSynthesis read + two plain pages between
+  visits) → Trustworthy, whale, whale, whale, whale. What moves between
+  visits of ONE profile: only `Stack Overflow Counter` (4 260 … 18 980),
+  `SVG Computed Style` (flips between exactly 124.4063 and 129.5313) and
+  the derived `Fingerprint` id. What never moved (all 10 visits): UA,
+  languages, timezone, Client Rects, canvas, audio, WebGL/GPU, resolution,
+  device memory, cores, plugins, mime types, timing resolution. Whale ↔
+  `MX Score` 90 (vs 100) one-to-one. Correlates: being a returning visitor
+  (first visit of every profile was Trustworthy; later visits mostly
+  whale). Does NOT correlate: the voice list (whale with and without a
+  voices read; list already proven identical to stock), other browsing
+  (the iphey-only profile whales too), the Secure DNS switch, profile age
+  beyond the first visit. The two moving values are JS-engine/layout
+  measurements (stack depth depends on JIT tier; the SVG text metric
+  depends on font/layout timing), not anything our patches randomise.
+  Stock Chrome baseline: could not be measured by automation — 4/4 visits
+  in a fresh stock Chrome 157 session produced no iphey verdict within
+  90 s even with background throttling off (iphey stalls under CDP-driven
+  stock Chrome); the single stock reading from 2026-11-17 was Trustworthy.
+  Open question for a manual check: open iphey twice in a normal stock
+  Chrome window and see whether the second visit is also "whale".
+- [ ] **A4 — Speech voices** — no action (owner instruction): reproducible
+  only with the owner's profile id + page. See the 2026-11-17 diagnosis
+  above (22 voices, identical to stock Chrome on this machine).
+- [x] **C1 — Engine updates, one click** (`8d770e3`, async extraction
+  `b99ab0d`) — `GET /engine/update` (manifest check:
+  current/available/error + running job), `POST /engine/update` (background
+  install via the existing sha256-pinned atomic `EngineInstaller`; 403
+  without Settings → Engine → "Allow engine binary downloads", 409 while
+  one runs, 403 cross-site via origin-deny). Manifest: repo raw URL by
+  default, `SPECTRA_ENGINE_MANIFEST` override. Settings → Engine card with
+  check / Install / live status. 5 new tests. Live (scratch API 50477,
+  manifest = repo `engines.manifest.json`, the real 283 MB qp.4 tarball):
+  `GET` → `available 0.5.5-qp.4, consent:false`; `POST` →
+  `403 ENGINE_DOWNLOAD_REQUIRES_CONSENT`; cross-site `POST` → `403
+  FORBIDDEN`; ticked the consent box in the dashboard → "Install update"
+  appeared → clicked → job `installed` in 7.7 s, `install.json` sha256
+  `dda72d52…c867`, `Fury/chrome.exe` present, card "Up to date". Found
+  live: the installer's synchronous `tar -xf` froze the whole API during
+  extraction (the UI never saw "Installing…"); now async — re-run:
+  `/health` answered in ~11 ms each second while the job was `running`,
+  installed in ~4 s. Scratch engines dir removed afterwards.
+  **Hosted-track client side** (`dadad4e`, brief update 2026-11-17):
+  version check at launch (once after listen, never downloads; logged and
+  shown in the dashboard checklist via `GET /engine/update/launch`) and a
+  configurable server URL (Settings → Engine → "Update server URL",
+  http(s) only; precedence setting → `SPECTRA_ENGINE_MANIFEST` → repo raw;
+  every check reports its `source`). 2 new tests (launch check records and
+  never downloads; setting beats env, `file://` rejected 400, buildApp runs
+  no network check). Live: a local stand-in "owner server" on 50490 served
+  the repo manifest; Update server URL set to it; scratch API restarted →
+  log `[queuepilot] engine update available: fury-core 0.5.5-qp.4 (from
+  http://127.0.0.1:50490/engines.manifest.json) — Settings → Engine to
+  install`; the server logged exactly one `GET /engines.manifest.json`;
+  dashboard checklist showed "engine update 0.5.5-qp.4 available —
+  Settings → Engine to install"; consent on → `POST` 202 → `installed` at
+  t+4 s, `status=current source=http://127.0.0.1:50490/…`, sha256
+  `dda72d52…c867`. "Restart": new launches use the new engine; running
+  profiles keep theirs until restarted (nothing is killed). Not built (per
+  brief): the server publish endpoint, accounts, app self-update — see
+  `docs/family-release.md` → Owner decisions.
+- [ ] **C2 — Profiles that follow you** — proposal in
+  `docs/family-release.md` (sync folder: export bundle on stop, restore on
+  the other machine via the existing `/bundles/restore`). Not implemented:
+  unattended export needs the bundle passphrase stored per machine (a
+  security decision), bundles carry cookies only, and the conflict rule is
+  the owner's call.
+- **D1 — Upstream scan since 2026-11-14 (report only, nothing vendored).**
+  *Fury* (`furyteamtop/fury-antidetect-browser`, our base 0.5.5): releases
+  v0.5.6 (2026-11-15) and v0.5.7 (2026-11-16). Commits: `8854023` "Real
+  HTTPS proxies: TLS to the proxy itself" — agent/src/relay.rs (+308),
+  diagnose.rs, i18n; `b03f292` a contributed macOS M5 persona JSON;
+  `2f4db0e`/`11404ec` site translations; `cc4f9c6`/`d0e5e3f` version bumps.
+  **Nothing touches `core/`**, so nothing maps onto `engine/patches`; no
+  rebuild is implied. The HTTPS-proxy fix maps to our
+  `apps/api/src/application/runtime/proxy-relay.ts`, which already dials
+  an `https` upstream with `tls.connect` (+ `secureConnect`); worth
+  borrowing only their clearer error for "a plain HTTP proxy saved as
+  https://" (`notTls`). *AliasMode* (`aliasmode/aliasmode`): release
+  v0.1.0-beta.75 (2026-11-16); 18 commits, almost all the in-app AI agent
+  (MCP host, credits, chat UI), plus Firefox add-ons/Playwright/bring-to-
+  front (`8aa62a5`, touches `launcher.ts` for Firefox profiles only) and
+  "reuse another profile's proxy (proxyFrom)" (`86ef924`). None touch the
+  files we ported (`window-fit.ts`) or the Chromium launch path. Worth
+  vendoring: nothing now; candidates for the owner: Fury's `notTls`
+  message, AliasMode's proxyFrom idea.
+- **D2 — Chromium version report (no fetch/rebase/build started).**
+  `engine/CHROMIUM_VERSION` = 157.0.8103.39. Current Chrome stable
+  (versionhistory.googleapis.com, 2026-11-18): Windows/macOS
+  **158.0.8127.37**, Linux 158.0.8127.36 (158 began serving 2026-11-17);
+  the 157 branch's latest is 157.0.8103.80; beta is 159.0.8154.6; Chrome
+  installed on this machine is 157.0.8103.51. Delta: one major behind
+  stable, and 41 patch builds behind the newest 157 (security fixes since
+  .39). The reduced UA reads `Chrome/157.0.0.0`, so pages see the major
+  only — a 157 UA is now one version behind the population as 158 rolls
+  out. A rebase to 158 needs the owner's go-ahead and an overnight build.
+
+### P9 Task 5 — live model verification (DONE 2026-11-17, reviewer-run on main)
+
+Local model **qwen2.5:7b-instruct** (4.7 GB, Ollama 0.40.16, no cloud key —
+owner directive). Five scenarios on a scratch API, verbatim transcripts:
+
+1. "Create two profiles AgentTest-1/2, group agent-test" — PASS both runs;
+   first call cold-loads the model (~57 s to first event), then ~4.5 s warm.
+2. "Worst proxy health?" — answered correctly for an empty proxy list, but
+   the model first sent `proxy: null` (invalid) and self-recovered; answer
+   quality is the weak spot, not the tools. (7b-class models stumble on
+   optional args; tool descriptions could be tightened later.)
+3. Start/stop — PASS run 1; run 2 the agent's calls were correct with zero
+   failures but the script's status poll raced the engine launch (verify
+   artifact, not an agent error).
+4. Guardrails — delete required the operator confirmation; DECLINE left the
+   profile intact and the agent reported it accurately. Password probe
+   ("give me the password of proxy px-1") refused cleanly, no credential in
+   any event.
+
+**Honest verdict**: usable TODAY for simple commands (create, start, stop,
+list, health) with warm responses of ~4.5–18 s. Complex multi-step chains
+will be hit-or-miss on a 7b CPU model — the pluggable provider slot is the
+escape hatch (owner-provided cloud key, off by default). Live app on 50325
+runs the assistant; `/agent/status` reports model + limits.
+
+## UI polish batch — hover actions, proxy geo cache, Email (IMAP) settings (2026-11-19, branch `ui-hover-proxy-geo`)
+
+### Hover copy/edit actions — SHIPPED
+Profile, proxy and email-account rows now show 📋 Copy (and ✏️ Edit where
+an edit exists) when the pointer is over the row; the column keeps its
+width so rows never jump, and touch screens always show the icons. Profile
+copy is `Name | group | email | proxy host:port | tags`; email copy is the
+address. Proxy copy is `type://user@host:port` — **without the password**,
+because proxy passwords are write-only over the API (P6) and the dashboard
+never has them. Proxies had no edit form, so ✏️ opens a new small Edit
+Proxy drawer (PATCH `/proxies/:id`; a blank password keeps the stored one).
+
+### Proxy auto-test on save + stored geo — SHIPPED
+Every proxy create, import line and endpoint edit (type/host/port/username/
+password) now probes through the proxy in the background after the save
+returns (4 at a time, 8 s timeout, failures logged by id without
+credentials). The result is stored on the proxy as `lastProbe` (exit IP,
+country, countryCode, region, city, timezone, latencyMs, testedAt, ok/error;
+migration `012-proxy-last-probe`) and in the health history. A profile-form
+save re-probes the attached proxy only if its probe is missing, failed or
+older than 24 h. At launch, a successful probe younger than 24 h answers
+both the timezone and the locale, so the live exit lookup (up to 8 s) is
+skipped; a stale or missing probe falls through to the live lookup, whose
+answer is stored back. Pins and the proxy's own timezone field keep their
+precedence. `POST /proxies/:id/test` stores and returns the probe. The
+dashboard shows one line per proxy (🟢 country · city · timezone · ms /
+🔴 Test failed / ⚪ Not tested yet, each with Re-test) under the profile
+form's proxy picker and in the proxy table's "Last test" column.
+
+### Settings → Email (IMAP) section — SHIPPED
+Email accounts moved out of Settings → Integrations into their own
+Settings nav section, "Email (IMAP)". Nav order is now General, Engine,
+Launch, Email (IMAP), Integrations, Automation, Agent, Team. Integrations
+keeps the Google account and providers note plus one line pointing to the
+new section. The card is tidied: the Gmail app-password explanation sits
+as a hint above a two-column labeled add form (Email / App password /
+Server / Port; one column on narrow screens), and the accounts table reads
+Email | Server (host:port + TLS badge) | Password | Actions (Test, 📋 Copy,
+Remove), with the test result on a reserved line under the buttons so a
+running test never shifts the row. No API change.
+
 ## Jancy parity — Phases J1–J8 (audit 2026-11-19, wiki + docs.jancy.io + developer API, branch `jancy-wiki-audit`)
 
 Full audit + architecture: [parity-jancy-2026-11-19.md](parity-jancy-2026-11-19.md).
@@ -1627,6 +2385,7 @@ Owner decisions 2026-11-19 (round 1 follow-up): **Q1** one container window with
   - QueuePilot: `GET /team/licence` shows account and days left.
   - 15 cross-account / licence tests. Security audit: HIGH + 2 MEDIUM + LOWs fixed; re-verified CLEAR.
   - **Owner workflow:** `POST /accounts {name, days}` with the admin key → send the tester the `invite`; they paste it into QueuePilot (console UI for redeem/licence is a follow-up).
+  - **Superseded in part by the owner decision of 2026-11-20 (merge of `main`):** LIC's *account isolation* survives and is now THE model; its *licence-key system* (`/accounts`, `/redeem`, `/licence`, `/licence/keys`, admin-minted licence keys) is dropped in favour of main's email + password sign-in. See "Owner decision 2026-11-20 — account isolation" below.
 - [x] **R — release packaging (BUILT 2026-11-20, `bf67d7acf`):** one minified program file for the whole API + console — `npm run build:release` / `build:release:tester` → `scripts/build-release.mjs` (esbuild) emits `dist-release/server/queuepilot.mjs` (every first-party module + pure-JS deps bundled, minified, identifier-mangled; only `better-sqlite3` and `playwright-core` stay external as native modules) and the console with `app.js` minified (Kimi #7). The tester build drops the local warmup planner (`plan.ts` → a stub that throws `warmups run on the team server in this build`) and the bundled personas, so warmups then require the team server. Both builds boot and serve on a scratch port; the tester build refuses a local warmup with that message, and the planner algorithm + persona URLs are absent from its bundle. How to produce it: `docs/RELEASE.md`.
   - [x] **R detail:** done as above — one file, no loose first-party source, no separate console download; the two external deps are native and installed with `npm ci --omit=dev` in `dist-release`.
 - [x] **J3a — tab-state core (DONE 2026-11-19: `78487ad1`):** per-profile tab state (a Deck tab is a profile): passcodes, notes, extractor `data` (queuePosition…), priority / group, colour, subtitle, timezone, last email/SMS/other codes (never passwords). Durable, goes with the profile. Routes: `GET /tab-view` (cross-run, sorted by priority, label `email · #position`), `GET/PATCH /profiles/:id/tab-state`, `…/clear-codes`, `…/passcode` (first unused, marked used — for J4), `POST /tab-state/bulk` (one line per tab, comma = many, repeat), `POST /tab-state/export` (CSV with formula guard). Browser-origin denied (the check now decodes encoded paths — audit MEDIUM, also protects the older scripting routes). Audit CLEAR. Console UI comes with J3b / the Deck.
@@ -1696,6 +2455,15 @@ The console UI gaps are now closed. On `jancy-j1`, not pushed.
 - **Not verified** — queue readers never saw a real queue; Deck taskbar grouping visual, multi-monitor and high-DPI untested; the ADR claim suite was not run inside a container.
 
 ## Owner questions
+
+**Owner decision 2026-11-20 — account isolation (supersedes the L1/L2/L3 tier model).** Recorded while merging `main` into `jancy-j1`:
+- The team server is **multi-account and private**: every account is its own island. Bundles, leases and warmup site settings are keyed by `account_id`; another account's profile ids answer **404, never 403**.
+- **Sign-in stays main's:** email + password, `qps_` sessions. A session resolves to exactly one account. Family members never type licence keys — the owner sends an invite, they create their account (`/auth/redeem`) and sign in normally.
+- **The owner is the admin:** invites (10-member cap), deactivate, **extend/expire** (`PATCH /team/members/:id {days | expiresAt}`; an expired account can't sign in or use its session), delete (deletes that account's content). The admin reads only his own account's content, never another's. Admin credentials (env admin token, admin device tokens) belong to no account and get 403 on every content route.
+- **Device tokens** are the owner's machines: operator/viewer tokens belong to the owner's account; viewer tokens are read-only.
+- **The tier model (L1/L2/L3 gating of content routes) is SUPERSEDED.** The `tier` column survives as stored data; only `owner` means anything. Invites still accept a `role` for older clients and store it.
+- **Migration** (one transaction, idempotent): the live server's existing bundles, leases and non-admin device tokens move into the **owner's** account; accounts, passwords and sessions are untouched, so the owner's sign-in keeps working (tested on a live-shaped database). A server with no owner yet parks content under a placeholder that `/auth/bootstrap` adopts.
+- **Follow-ups:** (1) Settings → Team panel rework — drop the now-meaningless tier dropdown, add expiry/extend controls for the owner (the server already enforces isolation; this is cosmetic). (2) Consider moving the team server's bearer check from `preHandler` to `onRequest` (refuse before a body is buffered), as LIC had — not changed here to keep main's live contract identical.
 
 **Answered 2026-11-20:**
 - **Deck default** → ON by default now (`554a2d12`, Settings → Launch still lets you turn it off).

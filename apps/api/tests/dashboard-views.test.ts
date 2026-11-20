@@ -25,13 +25,33 @@ const shortcuts = Object.fromEntries(
 const htmlIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]!));
 
 describe("dashboard views are wired end to end", () => {
-  it("includes the Warmups view between Cookies and Providers", () => {
-    expect(views.slice(views.indexOf("cookies"), views.indexOf("providers") + 1)).toEqual([
+  it("nav order: Tab View + Deck after Tabs; Cookie Thinger + Autofill Map after Cookies; Warmups before Providers", () => {
+    expect(views).toEqual([
+      "profiles",
+      "proxies",
+      "tabs",
+      "tabview",
+      "deck",
       "cookies",
+      "thinger",
+      "autofill",
       "warmups",
       "providers",
+      "events",
+      "settings",
     ]);
-    expect(shortcuts.warmups).toBe("w");
+    expect({
+      tabview: shortcuts.tabview,
+      deck: shortcuts.deck,
+      thinger: shortcuts.thinger,
+      autofill: shortcuts.autofill,
+      warmups: shortcuts.warmups,
+    }).toEqual({ tabview: "n", deck: "d", thinger: "k", autofill: "a", warmups: "w" });
+  });
+
+  it("the sidebar lists the views in the same order as VIEWS", () => {
+    const navOrder = [...html.matchAll(/<button data-view="(\w+)"/g)].map((m) => m[1]);
+    expect(navOrder).toEqual(views);
   });
 
   for (const view of views) {

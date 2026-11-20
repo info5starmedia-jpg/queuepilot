@@ -16,6 +16,7 @@ export const SETTINGS_SECTIONS = [
   "automation",
   "sites",
   "ui",
+  "agent",
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -33,6 +34,16 @@ export const EngineSettingsSchema = z.object({
   channel: z.enum(["stable", "beta"]).default("stable"),
   /** Explicit operator consent before any engine binary download. */
   downloadConsent: z.boolean().default(false),
+  /**
+   * Where the client looks for engine updates: the owner's server URL of an
+   * engines manifest (hosted-deployment track). Empty = SPECTRA_ENGINE_MANIFEST,
+   * else the repo's raw manifest. http(s) only.
+   */
+  updateUrl: z
+    .string()
+    .max(500)
+    .refine((v) => v === "" || /^https?:\/\/[^\s]+$/i.test(v), "must be an http(s) URL or empty")
+    .default(""),
 });
 export type EngineSettings = z.infer<typeof EngineSettingsSchema>;
 
@@ -59,6 +70,14 @@ export const TeamSettingsSchema = z.object({
    * treats this machine as inside the trust boundary.
    */
   syncPassphrase: z.string().max(200).nullable().default(null),
+  /**
+   * Hosted sign-in (2026-11-18): a `qps_` session token from POST
+   * /auth/signin on the team server. When present and unexpired it is the
+   * credential the client sends; otherwise `token` (the device token) is.
+   * Plaintext here for the same reason as `token`.
+   */
+  sessionToken: z.string().max(500).nullable().default(null),
+  sessionExpiresAt: z.string().max(64).nullable().default(null),
 });
 export type TeamSettings = z.infer<typeof TeamSettingsSchema>;
 
@@ -157,6 +176,39 @@ export const UiSettingsSchema = z.object({
 });
 export type UiSettings = z.infer<typeof UiSettingsSchema>;
 
+/** True for http(s) URLs whose host is this machine (127.x, localhost, ::1). */
+export function isLoopbackUrl(v: string): boolean {
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    return h === "localhost" || h === "[::1]" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * P9 local AI agent. The model runs on this machine (Ollama by default);
+ * the provider URL is LOOPBACK-ONLY by schema so no setting can send a
+ * conversation off the machine. A cloud provider is a reserved kind in the
+ * agent code, not a setting.
+ */
+export const AgentSettingsSchema = z.object({
+  providerUrl: z
+    .string()
+    .max(200)
+    .refine(isLoopbackUrl, "must be a loopback URL (127.0.0.1, localhost or ::1) — the agent's model runs on this machine")
+    .default("http://127.0.0.1:11434"),
+  model: z
+    .string()
+    .min(1)
+    .max(120)
+    .regex(/^[a-zA-Z0-9._:/-]+$/, "model names are letters, digits and . _ : / -")
+    .default("qwen2.5:7b-instruct"),
+});
+export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
+
 export const SettingsSchema = z.object({
   general: GeneralSettingsSchema.default({}),
   engine: EngineSettingsSchema.default({}),
@@ -166,6 +218,7 @@ export const SettingsSchema = z.object({
   automation: AutomationSettingsSchema.default({}),
   sites: SitesSettingsSchema.default({}),
   ui: UiSettingsSchema.default({}),
+  agent: AgentSettingsSchema.default({}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -179,4 +232,5 @@ export const SettingsPatchSchemas = {
   automation: AutomationSettingsSchema.partial(),
   sites: SitesSettingsSchema.partial(),
   ui: UiSettingsSchema.partial(),
+  agent: AgentSettingsSchema.partial(),
 } as const;

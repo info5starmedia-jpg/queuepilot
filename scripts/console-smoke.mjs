@@ -1,6 +1,6 @@
 /**
  * Console smoke — drives the REAL dashboard in a headless Chromium and
- * clicks its buttons, the way a family member does.
+ * clicks its buttons, the way a team member does.
  *
  * Why it exists: from v0.8.0 to v0.16.4 every body-less console button
  * (profile Delete/Stop, proxy test, provider refresh, tab close) answered
@@ -234,8 +234,44 @@ export async function runConsoleSmoke({ base, ok }) {
     ok("pasting two lines adds two proxies", Boolean(added), added ? added.map((p) => p.name).join(", ") : "");
     const named = (added ?? []).find((p) => p.name === "smoke-a");
     ok("pasted line keeps its name, user and port", Boolean(named && named.username === "user" && named.port === 9));
+    const summary = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#proxy-add-status').textContent; return t.startsWith("2 added") ? t : undefined; })()`));
+    ok("import dialog shows the added/skipped/errors summary", Boolean(summary), summary ?? "");
+    // The table reloads after the import returns; select-all acts on what is rendered.
+    await waitFor(() => page.evaluate(`document.querySelectorAll('#proxies tbody tr').length === 2`));
     await page.evaluate(`(() => {
       document.querySelector('#proxy-add-close').click();
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    // Proxy groups: move the selection into a new group via the toolbar.
+    await page.evaluate(`(() => {
+      window.prompt = () => "smoke-grp";
+      document.querySelector('#proxies-move-group').value = "__new__";
+      document.querySelector('#proxies-move').click();
+      return true;
+    })()`);
+    const grouped2 = await waitFor(async () => {
+      const list = (await api("GET", "/proxies?group=smoke-grp")).json?.proxies ?? [];
+      return list.length === 2;
+    });
+    const tabActive = await waitFor(() => page.evaluate(`document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "smoke-grp"`));
+    ok("Move to group files the selection under a new proxy group", Boolean(grouped2 && tabActive));
+    // Switching tabs keeps only selected rows the new tab still shows (All shows both).
+    await page.evaluate(`(() => {
+      const box = document.querySelector('#proxies-select-all');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      return true;
+    })()`);
+    await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected"`));
+    await page.evaluate(`(() => { const t = document.querySelector('#proxy-tabs [data-proxy-group="all"]'); t.click(); return true; })()`);
+    const kept = await waitFor(() => page.evaluate(`document.querySelector('#proxies-selected').textContent === "2 selected" && document.querySelector('#proxy-tabs .chip-tab.active')?.dataset.proxyGroup === "all"`));
+    ok("switching to All keeps rows that are still visible selected", Boolean(kept));
+    await page.evaluate(`(() => {
+      window.prompt = () => null;
       const box = document.querySelector('#proxies-select-all');
       box.checked = true;
       box.dispatchEvent(new Event('change'));
@@ -246,14 +282,30 @@ export async function runConsoleSmoke({ base, ok }) {
     const emptied = await waitFor(async () => ((await api("GET", "/proxies")).json?.proxies ?? []).length === 0);
     ok("select-all + Delete selected removes every proxy", Boolean(emptied));
 
-    // Settings → Integrations: add an email account (dummy test values), see it, remove it
+    // Settings → Integrations only points at Email (IMAP) now
     await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" })); true`);
-    await waitFor(() => page.evaluate(`(() => {
-      const b = [...document.querySelectorAll('#settings-nav button')].find((x) => x.textContent === 'integrations');
+    const pointer = await waitFor(() => page.evaluate(`(() => {
+      const b = document.querySelector('#settings-nav button[data-section="integrations"]');
       if (!b) return false;
       b.click();
-      return !!document.querySelector('#email-account-form');
+      const info = document.querySelector('#integrations-info').textContent;
+      return info.includes('Email accounts live under') && !document.querySelector('#email-account-form');
     })()`));
+    ok("Settings → Integrations points to Email (IMAP) and no longer holds the account form", Boolean(pointer));
+
+    // Settings → Email (IMAP): add an email account (dummy test values), see it, remove it
+    const navOrder = await waitFor(() => page.evaluate(`(() => {
+      const labels = [...document.querySelectorAll('#settings-nav button')].map((x) => x.textContent);
+      const b = document.querySelector('#settings-nav button[data-section="email"]');
+      if (!b) return false;
+      b.click();
+      return document.querySelector('#email-account-form') ? labels.join(",") : false;
+    })()`));
+    ok(
+      "Settings nav lists Email (IMAP) between Launch and Integrations",
+      navOrder === "general,engine,launch,Email (IMAP),integrations,automation,agent,team",
+      String(navOrder),
+    );
     await page.evaluate(`(() => {
       document.querySelector('#email-account-email').value = 'smoke-test@example.org';
       document.querySelector('#email-account-password').value = 'dummy-app-password';
@@ -265,7 +317,7 @@ export async function runConsoleSmoke({ base, ok }) {
       return accounts.find((a) => a.email === "smoke-test@example.org");
     });
     const shown = await waitFor(() => page.evaluate(`document.querySelector('#email-accounts-table').textContent.includes('smoke-test@example.org')`));
-    ok("Settings → Integrations adds an email account and lists it", Boolean(account && account.hasPassword && shown));
+    ok("Settings → Email (IMAP) adds an email account and lists it", Boolean(account && account.hasPassword && shown));
     await page.evaluate(`(() => {
       const row = [...document.querySelectorAll('#email-accounts-table tr')].find((tr) => tr.textContent.includes('smoke-test@example.org'));
       row.querySelector('[data-act="remove"]').click();
@@ -273,6 +325,20 @@ export async function runConsoleSmoke({ base, ok }) {
     })()`);
     const removed = await waitFor(async () => ((await api("GET", "/email-accounts")).json?.accounts ?? []).length === 0);
     ok("Remove deletes the email account", Boolean(removed));
+
+    // P9 assistant panel: opens from the launcher, offers 3 example
+    // commands, and reports the local model's state (no model is needed
+    // here — without Ollama the status line must say so, not hang).
+    await page.evaluate(`document.querySelector('#agent-launcher').click(); true`);
+    const panel = await waitFor(() =>
+      page.evaluate(`(() => {
+        const p = document.querySelector('#agent-panel');
+        const s = document.querySelector('#agent-status').textContent;
+        const ex = document.querySelectorAll('.agent-empty button').length;
+        return !p.hidden && ex === 3 && !/checking/.test(s) ? s : undefined;
+      })()`),
+    );
+    ok("assistant panel opens with 3 example commands and a model status", Boolean(panel), panel ?? "");
 
     ok("no uncaught exceptions in the console page", page.exceptions.length === 0, page.exceptions.slice(0, 3).join(" | "));
   } finally {

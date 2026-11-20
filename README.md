@@ -147,7 +147,7 @@ touching code.
 (C++-level identity patches, vendored in `engine/`) + AliasMode's lifecycle
 discipline (launch snapshots, edit-while-running, clean teardown, health
 checks) + Jancy's workflow layer (CSV/Sheets providers, proxies, tab ops,
-scripting) — rebuilt as original MIT code. Personal/family use only, never
+scripting) — rebuilt as original MIT code. Personal/team use only, never
 commercial. Features ship only if they serve that formula.
 
 **What is locked — do not change without an ADR:**
@@ -184,10 +184,10 @@ hash of the commit that shipped it.
 **Where to continue (current next steps):** Phase 2 of the release-hardening
 plan in `docs/roadmap.md` — D-002 PID-reuse hardening follow-ups, warmup
 console UX, tab-ops depth, and the canvas cross-context engine item. The
-release-gate script and the family start script (`scripts/start-queuepilot.cmd`)
+release-gate script and the team-member start script (`scripts/start-queuepilot.cmd`)
 are done; do not regress them.
 
-**Family-machine entry point:** `scripts\start-queuepilot.cmd` — checks
+**Team-member entry point:** `scripts\start-queuepilot.cmd` — checks
 Node, boots the API (log at `%USERPROFILE%\.queuepilot\api.log`), waits for
 `/health`, opens the dashboard. If the API is already healthy it just opens
 the dashboard.

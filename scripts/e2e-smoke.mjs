@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * e2e-smoke — the Phase-1 release gate: one command that proves the product
- * works the way a family member will use it.
+ * works the way a team member will use it.
  *
  *   node scripts/e2e-smoke.mjs            API phases + a HEADLESS console
  *                                         click-through (temp data dir, no
@@ -23,7 +23,7 @@
  *                the exit IP, cookie export → import round-trips, stop
  *   6. teardown— profile stopped, no leaked child processes
  *
- * Exit 0 + "E2E GREEN" means: ship it to family.
+ * Exit 0 + "E2E GREEN" means: ship it to the team.
  */
 import { spawn, execSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";

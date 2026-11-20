@@ -241,6 +241,12 @@ export const PersonaFieldsSchema = z.object({
     .default(null),
   /** Last-applied window geometry (tiling presets remember it per profile). */
   windowBounds: PersonaWindowBoundsSchema.nullable().default(null),
+  /**
+   * "Store on cloud" (hosted team, 2026-11-18): false = the team sync loop
+   * skips this profile. Default on; it only matters once a team server is
+   * configured.
+   */
+  storeOnCloud: z.boolean().default(true),
 });
 export type PersonaFields = z.infer<typeof PersonaFieldsSchema>;
 
@@ -278,6 +284,8 @@ export const UpdatePersonaInputSchema = z
     startUrls: z.array(z.string().url().max(4000)).max(25).optional(),
     /** Remembered window geometry (A3 tiling); null clears. */
     windowBounds: PersonaWindowBoundsSchema.nullable().optional(),
+    /** "Store on cloud" toggle — false keeps the profile out of team sync. */
+    storeOnCloud: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" })
   .refine((v) => !v.fields || Object.keys(v.fields).length <= 50, {

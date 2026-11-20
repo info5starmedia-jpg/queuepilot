@@ -1,6 +1,6 @@
 /**
  * Team server config (P7.7a). One self-hosted node that moves encrypted
- * session bundles between family/friends machines. The server never sees
+ * session bundles between team members' machines. The server never sees
  * plaintext: bundle payloads are opaque bytes (AES-256-GCM sealed by the
  * client, passphrase never transmitted), and auth is bearer tokens verified
  * as SHA-256 hashes.
@@ -23,6 +23,12 @@ export interface TeamServerConfig {
   /** Machine name recorded as `updatedBy` on pushes this server initiates. */
   machineName: string;
   /**
+   * One-time owner bootstrap code (env QUEUEPILOT_SERVER_BOOTSTRAP_CODE).
+   * POST /auth/bootstrap accepts it ONLY while no owner account exists, and
+   * only when it is set — after the owner exists the endpoint is dead.
+   */
+  bootstrapCode?: string | null;
+  /**
    * W2: folder of persona JSON files (plus the built-in default). Absent =
    * the bundled `apps/server/personas`; null = built-in default only.
    */
@@ -36,6 +42,7 @@ export function teamServerConfigFromEnv(env: NodeJS.ProcessEnv = process.env): T
     dbPath: env.QUEUEPILOT_TEAM_DB ?? "team-server.db",
     adminToken: env.QUEUEPILOT_TEAM_ADMIN_TOKEN ?? null,
     machineName: env.QUEUEPILOT_TEAM_MACHINE ?? "server",
+    bootstrapCode: env.QUEUEPILOT_SERVER_BOOTSTRAP_CODE ?? null,
     ...(env.QUEUEPILOT_TEAM_PERSONAS ? { personaDir: env.QUEUEPILOT_TEAM_PERSONAS } : {}),
   };
 }

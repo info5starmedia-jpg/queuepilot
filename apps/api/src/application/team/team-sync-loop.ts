@@ -3,8 +3,23 @@ import path from "node:path";
 import type { BundleService } from "../bundles/bundle.service.js";
 import type { SettingsService } from "../settings/settings.service.js";
 import { writeFileAtomic } from "../../infrastructure/atomic-write.js";
-import { TeamServerClient } from "./team-client.js";
+import { TeamServerClient, teamCredential } from "./team-client.js";
 import { TeamSyncService } from "./team-sync.js";
+import { personaFieldsOf } from "../profiles/persona-fields.js";
+import type { Profile } from "@queuepilot/contracts";
+
+/**
+ * The `skip` filter main.ts wires in: a remote head is left alone when a
+ * LOCAL profile with that id exists and has "Store on cloud" switched off.
+ * Unknown ids (a teammate's profile not on this machine yet) still sync.
+ */
+export function storeOnCloudOff(profiles: { get(id: string): Profile }, profileId: string): boolean {
+  try {
+    return personaFieldsOf(profiles.get(profileId).extra).storeOnCloud === false;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * TeamSyncLoop (P7.7c) — the background half of team sync. While the
@@ -23,8 +38,8 @@ import { TeamSyncService } from "./team-sync.js";
  *   honest v1; a push side needs dirty-tracking, which is its own design.
  * - Machine-bound secrets never travel (BundleService owns that boundary).
  *
- * Enabled exactly when Settings → Team has all three of serverUrl, token,
- * and syncPassphrase; otherwise every tick is a no-op. State (revision
+ * Enabled exactly when Settings → Team has serverUrl, a credential (signed-in
+ * session token, else device token), and syncPassphrase; otherwise every tick is a no-op. State (revision
  * watermarks) lives in dataDir/team-sync-state.json, written atomically.
  */
 
@@ -35,6 +50,8 @@ export interface SyncTickResult {
   /** Profiles whose metadata imported but whose cookies are still pending (engine not live). */
   pending: number;
   failed: number;
+  /** Heads left alone because the local profile has "Store on cloud" off. */
+  skipped: number;
 }
 
 interface SyncState {
@@ -52,6 +69,12 @@ export class TeamSyncLoop {
       dataDir: string;
       intervalMs?: number;
       log?: (msg: string) => void;
+      /**
+       * Per-profile "Store on cloud" filter (2026-11-18): true = leave this
+       * remote head alone (the local profile with that id has the toggle
+       * off). Absent = sync everything, the pre-toggle behavior.
+       */
+      skip?: (profileId: string) => boolean;
     },
   ) {}
 
@@ -78,19 +101,25 @@ export class TeamSyncLoop {
   /** One pass. Safe to call manually; never throws on remote errors. */
   async tick(): Promise<SyncTickResult> {
     const team = this.deps.settings.get("team");
-    if (!team.serverUrl || !team.token || !team.syncPassphrase) {
-      return { enabled: false, checked: 0, imported: 0, pending: 0, failed: 0 };
+    const cred = teamCredential(team);
+    if (!team.serverUrl || !cred || !team.syncPassphrase) {
+      return { enabled: false, checked: 0, imported: 0, pending: 0, failed: 0, skipped: 0 };
     }
     const sync = new TeamSyncService(
       this.deps.bundles,
-      new TeamServerClient(team.serverUrl, team.token),
+      new TeamServerClient(team.serverUrl, cred.token),
     );
     const remote = await sync.listRemote();
     const state = this.loadState();
     let imported = 0;
     let pending = 0;
     let failed = 0;
+    let skipped = 0;
     for (const head of remote) {
+      if (this.deps.skip?.(head.profileId)) {
+        skipped++;
+        continue;
+      }
       if (state[head.profileId]?.revision === head.revision) continue;
       try {
         const out = await sync.pullProfile(team.syncPassphrase, head.profileId, {
@@ -125,7 +154,7 @@ export class TeamSyncLoop {
       }
     }
     this.saveState(state);
-    return { enabled: true, checked: remote.length, imported, pending, failed };
+    return { enabled: true, checked: remote.length, imported, pending, failed, skipped };
   }
 
   start(): void {

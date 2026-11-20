@@ -26,15 +26,26 @@ function authed(token: string, init: RequestInit = {}): RequestInit {
   return { ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers ?? {}) } };
 }
 
+async function mint(base: string, name: string, role: "admin" | "operator" | "viewer"): Promise<{ token: string; id: string }> {
+  const res = await fetch(`${base}/tokens`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${ADMIN}` },
+    body: JSON.stringify({ name, role }),
+  });
+  expect(res.status).toBe(201);
+  return (await res.json()) as { token: string; id: string };
+}
+
 describe("team server", () => {
   let server: TeamServerApp;
   let base: string;
+  /** An operator device token: the owner's machine, so it reads/writes the owner's account. */
   let OP: string;
 
   beforeEach(async () => {
     server = buildTeamServerApp(config());
     base = await listen(server.app);
-    OP = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
+    OP = (await mint(base, "op-desktop", "operator")).token;
   });
 
   afterEach(async () => {
@@ -56,6 +67,17 @@ describe("team server", () => {
     expect((await fetch(`${base}/bundles`, authed("wrong"))).status).toBe(401);
   });
 
+  it("admin credentials manage accounts but read no content (403)", async () => {
+    const adminDevice = (await mint(base, "admin-pc", "admin")).token;
+    for (const t of [ADMIN, adminDevice]) {
+      expect((await fetch(`${base}/bundles`, authed(t))).status).toBe(403);
+      expect((await fetch(`${base}/bundles/x`, authed(t, { method: "PUT", body: Buffer.from("v") }))).status).toBe(403);
+      expect((await fetch(`${base}/leases`, authed(t))).status).toBe(403);
+      expect((await fetch(`${base}/warmup/personas`, authed(t))).status).toBe(403);
+      expect((await fetch(`${base}/tokens`, authed(t))).status).toBe(200);
+    }
+  });
+
   it("push/pull round-trips opaque bytes with revision headers", async () => {
     const bytes = Buffer.from("sealed-bundle-bytes", "utf8");
     const put = await fetch(
@@ -69,7 +91,7 @@ describe("team server", () => {
     expect(got.status).toBe(200);
     expect(Buffer.from(await got.arrayBuffer()).equals(bytes)).toBe(true);
     expect(got.headers.get("x-revision")).toBe("1");
-    expect(got.headers.get("x-updated-by")).toBe("test-machine");
+    expect(got.headers.get("x-updated-by")).toBe("op-desktop");
   });
 
   it("optimistic concurrency: stale baseRevision is a 409 with current revision", async () => {
@@ -95,35 +117,17 @@ describe("team server", () => {
     expect(res.status).toBe(409);
   });
 
-  it("roles: viewer reads but cannot write; operator writes", async () => {
-    const mint = await fetch(`${base}/tokens`, authed(ADMIN, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${ADMIN}` },
-      body: JSON.stringify({ name: "friend-laptop", role: "viewer" }),
-    }));
-    expect(mint.status).toBe(201);
-    const { token } = (await mint.json()) as { token: string };
-
-    expect((await fetch(`${base}/bundles`, authed(token))).status).toBe(200);
+  it("roles: viewer reads but cannot write; operator writes; both see the owner's account", async () => {
+    const { token } = await mint(base, "friend-laptop", "viewer");
+    expect((await fetch(`${base}/bundles/x`, authed(OP, { method: "PUT", body: Buffer.from("v") }))).status).toBe(200);
+    const list = (await (await fetch(`${base}/bundles`, authed(token))).json()) as { bundles: { profileId: string }[] };
+    expect(list.bundles.map((b) => b.profileId)).toEqual(["x"]);
     const denied = await fetch(`${base}/bundles/x`, authed(token, { method: "PUT", body: Buffer.from("v") }));
     expect(denied.status).toBe(403);
-
-    const op = await fetch(`${base}/tokens`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${ADMIN}` },
-      body: JSON.stringify({ name: "my-desktop", role: "operator" }),
-    });
-    const { token: opToken } = (await op.json()) as { token: string };
-    expect((await fetch(`${base}/bundles/x`, authed(opToken, { method: "PUT", body: Buffer.from("v") }))).status).toBe(200);
   });
 
   it("minted tokens are hash-only: list shows metadata, never the secret; deleted token dies", async () => {
-    const mint = await fetch(`${base}/tokens`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${ADMIN}` },
-      body: JSON.stringify({ name: "temp", role: "operator" }),
-    });
-    const { token, id } = (await mint.json()) as { token: string; id: string };
+    const { token, id } = await mint(base, "temp", "operator");
 
     const list = await fetch(`${base}/tokens`, authed(ADMIN));
     const { tokens } = (await list.json()) as { tokens: Record<string, unknown>[] };
@@ -160,7 +164,6 @@ describe("team server", () => {
     await server.close();
     server = buildTeamServerApp(config({ adminToken: null }));
     base = await listen(server.app);
-    OP = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
     // No bootstrap, empty DB: nobody is admin yet — minting is impossible
     // until an admin token exists in the DB (documented chicken-and-egg).
     const res = await fetch(`${base}/tokens`, {

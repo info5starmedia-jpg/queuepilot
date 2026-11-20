@@ -13,6 +13,7 @@ const GEO_BODY = JSON.stringify({
   status: "success",
   query: "203.0.113.7",
   country: "United States",
+  countryCode: "US",
   regionName: "Florida",
   city: "Miami",
   timezone: "America/New_York",
@@ -55,6 +56,7 @@ describe("proxy validation probe", () => {
     expect(r.exitIp).toBe("203.0.113.7");
     expect(r.geo).toEqual({
       country: "United States",
+      countryCode: "US",
       region: "Florida",
       city: "Miami",
       timezone: "America/New_York",

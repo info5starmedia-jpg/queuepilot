@@ -105,7 +105,9 @@ describe("ProxyService secrets integration (P6)", () => {
       username: null,
       password: "plaintext-era",
       timezone: null,
+      group: "default",
       providerId: null,
+      lastProbe: null,
       createdAt: now,
       updatedAt: now,
     });

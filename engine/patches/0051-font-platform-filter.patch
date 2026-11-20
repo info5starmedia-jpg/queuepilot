@@ -1,4 +1,5 @@
 diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_party/blink/renderer/platform/fonts/font_cache.cc
+index 32364aef25..1628e19ba4 100644
 --- a/third_party/blink/renderer/platform/fonts/font_cache.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
 @@ -82,6 +82,10 @@
@@ -12,22 +13,22 @@ diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_par
  const char kColorEmojiLocale[] = "und-Zsye";
  const char kMonoEmojiLocale[] = "und-Zsym";
  
-@@ -161,6 +165,14 @@
+@@ -161,6 +165,14 @@ const FontPlatformData* FontCache::GetFontPlatformData(
      AlternateFontName alternate_font_name) {
    TRACE_EVENT0("fonts", "FontCache::GetFontPlatformData");
  
 +  // This gate precedes the platform cache, including local() / unique-name
 +  // lookups and availability checks that never pass through GetFontData().
-+  if (creation_params.CreationType() == kCreateFontByFamily &&
++  if (creation_params.CreationType() == FontFaceCreationType::kFamily &&
 +      fury_internal::ShouldHideFont(creation_params.Family(),
 +                                    alternate_font_name)) {
 +    return nullptr;
 +  }
 +
  #if !BUILDFLAG(IS_MAC)
-   if (creation_params.CreationType() == kCreateFontByFamily &&
+   if (creation_params.CreationType() == FontFaceCreationType::kFamily &&
        creation_params.Family() == font_family_names::kSystemUi) {
-@@ -292,6 +304,19 @@
+@@ -292,6 +304,19 @@ void ResumeFilter() {
    --g_fury_filter_suspended;
  }
  
@@ -47,7 +48,7 @@ diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_par
  }  // namespace fury_internal
  
  const SimpleFontData* FontCache::GetFontData(
-@@ -327,16 +352,6 @@
+@@ -327,16 +352,6 @@ const SimpleFontData* FontCache::GetFontData(
    //
    // So: a filter may narrow, never to zero. Same rule as the speech-voice
    // filter in 0041, for the same reason.

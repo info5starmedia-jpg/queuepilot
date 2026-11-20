@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 rem ============================================================================
-rem  QueuePilot - one-double-click start for family machines.
+rem  QueuePilot - one-double-click start for team members' machines.
 rem
 rem  Boots the API (port 50325, fury engine runtime), waits until it answers
 rem  /health, then opens the dashboard. Dependency-free: needs only Node.js.

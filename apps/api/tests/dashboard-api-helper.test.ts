@@ -21,10 +21,25 @@ const appJs = readFileSync(
   "utf8",
 );
 const apiSource = /async function api\([\s\S]*?\n}\n/.exec(appJs)?.[0];
+// P9 Task 0: api() sends the operator's token; run the real helpers too.
+const tokenSource = [
+  /const TOKEN_KEY = .*\n/.exec(appJs)?.[0],
+  /function storedToken\([\s\S]*?\n}\n/.exec(appJs)?.[0],
+  /function authHeaders\([\s\S]*?\n}\n/.exec(appJs)?.[0],
+].join("\n");
+
+function fakeStorage(init: Record<string, string> = {}) {
+  const m = new Map(Object.entries(init));
+  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+}
 
 type Call = { path: string; method: string; headers: Record<string, string>; body: string | undefined };
 
-function loadApi(ctx: ReturnType<typeof makeTestContext>, calls: Call[]) {
+function loadApi(
+  ctx: ReturnType<typeof makeTestContext>,
+  calls: Call[],
+  env: { token?: string; signIns?: string[] } = {},
+) {
   const fetch = async (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
     const headers = init.headers ?? {};
     calls.push({ path, method: init.method ?? "GET", headers, body: init.body });
@@ -40,8 +55,13 @@ function loadApi(ctx: ReturnType<typeof makeTestContext>, calls: Call[]) {
       json: async () => JSON.parse(res.body),
     };
   };
-  const sandbox: Record<string, unknown> = { fetch };
-  vm.runInNewContext(`${apiSource}\nthis.api = api;`, sandbox);
+  const sandbox: Record<string, unknown> = {
+    fetch,
+    sessionStorage: fakeStorage(env.token ? { "queuepilot.apiToken": env.token } : {}),
+    localStorage: fakeStorage(),
+    showSignIn: (msg: string) => env.signIns?.push(msg),
+  };
+  vm.runInNewContext(`${tokenSource}\n${apiSource}\nthis.api = api;`, sandbox);
   return sandbox.api as (path: string, opts?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -77,5 +97,63 @@ describe("dashboard api() helper", () => {
     const api = loadApi(ctx, calls);
     await api("/profiles", { method: "POST", body: JSON.stringify({ name: "y" }) });
     expect(calls[0]?.headers["content-type"]).toBe("application/json");
+  });
+});
+
+describe("dashboard token sign-in (P9 Task 0)", () => {
+  const tokenCtx = () => makeTestContext(undefined, { apiToken: "operator-token-1" });
+
+  it("the static console loads WITHOUT the token; every API route still demands it", async () => {
+    const ctx = tokenCtx();
+    expect((await ctx.app.inject({ method: "GET", url: "/" })).statusCode).toBe(200);
+    expect((await ctx.app.inject({ method: "GET", url: "/?x=1" })).statusCode).toBe(200);
+    expect((await ctx.app.inject({ method: "GET", url: "/dashboard/app.js" })).statusCode).toBe(200);
+    expect((await ctx.app.inject({ method: "GET", url: "/dashboard/styles.css" })).statusCode).toBe(200);
+    // Not assets: still behind the token.
+    for (const url of ["/profiles", "/proxies", "/engine/health", "/events", "/dashboard", "/dashboardx/app.js", "/dashboard/a/b.js"]) {
+      expect((await ctx.app.inject({ method: "GET", url })).statusCode, url).toBe(401);
+    }
+    expect((await ctx.app.inject({ method: "POST", url: "/" })).statusCode).toBe(401);
+    expect(
+      (await ctx.app.inject({ method: "GET", url: "/profiles", headers: { authorization: "Bearer operator-token-1" } })).statusCode,
+    ).toBe(200);
+  });
+
+  it("api() sends the stored token as a Bearer header", async () => {
+    const ctx = tokenCtx();
+    const calls: Call[] = [];
+    const api = loadApi(ctx, calls, { token: "operator-token-1" });
+    await expect(api("/profiles")).resolves.toMatchObject({ profiles: [] });
+    expect(calls[0]?.headers.authorization).toBe("Bearer operator-token-1");
+  });
+
+  it("a 401 opens the sign-in (with a plain message when a stored token was refused)", async () => {
+    const ctx = tokenCtx();
+    const signIns: string[] = [];
+    await expect(loadApi(ctx, [], { signIns })("/profiles")).rejects.toThrow(/invalid token/);
+    await expect(loadApi(ctx, [], { token: "wrong-token", signIns })("/profiles")).rejects.toThrow();
+    expect(signIns).toEqual(["", "That token was refused — sign in again."]);
+  });
+
+  it("a loopback install without a token is unaffected: no header, no prompt", async () => {
+    const ctx = makeTestContext();
+    const calls: Call[] = [];
+    const signIns: string[] = [];
+    await loadApi(ctx, calls, { signIns })("/profiles");
+    expect(calls[0]?.headers.authorization).toBeUndefined();
+    expect(signIns).toEqual([]);
+  });
+});
+
+describe("plugin enable is gated (it is where an imported plugin's code first runs)", () => {
+  it("refuses while the scripting gate is closed", async () => {
+    const ctx = makeTestContext(undefined, { apiToken: "operator-token-1" });
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/plugins/any/enable",
+      headers: { authorization: "Bearer operator-token-1" },
+      payload: { enabled: true },
+    });
+    expect(res.statusCode).toBe(403);
   });
 });

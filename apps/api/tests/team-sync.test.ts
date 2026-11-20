@@ -71,7 +71,7 @@ describe("team sync — two machines, one server", () => {
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     const { port } = server.app.server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
-    KEY = server.store.mintToken("test-machine", "operator", server.store.ensureLegacyAccount()).token;
+    KEY = server.store.mintToken("test-machine", "operator", server.store.ownerAccountId()).token;
   });
 
   afterEach(async () => {

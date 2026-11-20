@@ -160,6 +160,7 @@ export class FuryCoreRuntime implements BrowserRuntime {
       "--no-default-browser-check",
       `--window-size=${initialSize.width},${initialSize.height}`,
       ...(relay ? [`--proxy-server=http://127.0.0.1:${relay.port}`] : []),
+      ...ENGINE_FEATURE_SWITCHES,
       ...startUrls,
     ];
 
@@ -224,6 +225,17 @@ export class FuryCoreRuntime implements BrowserRuntime {
     return new FurySession(child, enginePid, debugPort, relay, fitArea, egress);
   }
 }
+
+/**
+ * Chromium feature switches on every launch. Chromium honors only the LAST
+ * --disable-features on a command line, so every disabled feature goes in
+ * this one switch, never a second one.
+ * - DnsOverHttpsUpgrade: Secure DNS "automatic" mode silently upgrades a
+ *   host resolver it recognizes (1.1.1.1, 8.8.8.8, ...) to DoH. A proxied
+ *   page never resolves locally, but the browser's own lookups would then
+ *   reach a public DoH provider from the host's real IP.
+ */
+export const ENGINE_FEATURE_SWITCHES = ["--disable-features=DnsOverHttpsUpgrade"] as const;
 
 /**
  * Start URLs for a launch, from the profile's extra bag: `startUrls` (array)

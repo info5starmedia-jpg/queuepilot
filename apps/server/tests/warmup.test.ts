@@ -2,18 +2,22 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { buildTeamServerApp, type TeamServerApp } from "../src/app.js";
 
-/** W2 — personas, site settings and plans live on the server, per account. */
+/** W2 — personas, site settings and plans live on the server, per account (each account a private island). */
 
 const ADMIN = "bootstrap-secret";
+const BOOT = "boot-code-123";
 
 describe("warmup planning on the server", () => {
   let server: TeamServerApp;
   let base: string;
+  let owner: string;
 
   beforeEach(async () => {
-    server = buildTeamServerApp({ host: "127.0.0.1", port: 0, dbPath: ":memory:", adminToken: ADMIN, machineName: "t" });
+    server = buildTeamServerApp({ host: "127.0.0.1", port: 0, dbPath: ":memory:", adminToken: ADMIN, machineName: "t", bootstrapCode: BOOT });
     await server.app.listen({ host: "127.0.0.1", port: 0 });
     base = `http://127.0.0.1:${(server.app.server.address() as AddressInfo).port}`;
+    const boot = await call("POST", "/auth/bootstrap", null, { code: BOOT, email: "owner@example.com", password: "owner-password-1", displayName: "Owner" });
+    owner = ((await boot.json()) as { token: string }).token;
   });
   afterEach(async () => {
     await server.close();
@@ -26,10 +30,12 @@ describe("warmup planning on the server", () => {
     return fetch(`${base}${p}`, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   }
 
-  async function key(name: string): Promise<{ id: string; key: string }> {
-    const a = (await (await call("POST", "/accounts", ADMIN, { name })).json()) as { id: string; invite: string };
-    const k = (await (await call("POST", "/redeem", null, { invite: a.invite })).json()) as { token: string };
-    return { id: a.id, key: k.token };
+  /** A member account the real way: owner invite → redeem with email + password → session. */
+  async function key(name: string): Promise<{ key: string }> {
+    const inv = (await (await call("POST", "/team/invites", owner, {})).json()) as { code: string };
+    const r = await call("POST", "/auth/redeem", null, { code: inv.code, email: `${name}@example.com`, password: "member-password-1", displayName: name });
+    expect(r.status).toBe(201);
+    return { key: ((await r.json()) as { token: string }).token };
   }
 
   it("lists personas and returns a plan of concrete visits", async () => {
@@ -122,10 +128,12 @@ describe("warmup planning on the server", () => {
     await call("PUT", "/warmup/personas/us-shopper/sites", a.key, { excluded: sites.sites.filter((s) => s.pool === "main").map((s) => s.host) });
     expect((await call("POST", "/warmup/plan", a.key, { target: "t" })).status).toBe(400);
 
+    // Admin credentials have no account, so no warmup content.
     for (const p of ["/warmup/personas", "/warmup/personas/us-shopper/sites"]) expect((await call("GET", p, ADMIN)).status).toBe(403);
     expect((await call("POST", "/warmup/plan", ADMIN, { target: "t" })).status).toBe(403);
 
-    const v = (await (await call("POST", "/licence/keys", a.key, { name: "ro", role: "viewer" })).json()) as { token: string };
+    // A viewer device key (the owner's read-only machine) reads but cannot plan or edit.
+    const v = (await (await call("POST", "/tokens", ADMIN, { name: "ro", role: "viewer" })).json()) as { token: string };
     expect((await call("GET", "/warmup/personas", v.token)).status).toBe(200);
     expect((await call("POST", "/warmup/plan", v.token, { target: "t" })).status).toBe(403);
     expect((await call("PUT", "/warmup/personas/us-shopper/sites", v.token, {})).status).toBe(403);

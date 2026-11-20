@@ -244,11 +244,29 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    // J3a — tab state per profile (a Deck tab is a profile, ADR-0008).
-    // JSON validated by TabStateSchema; goes with the profile.
-    id: "011-tab-state",
+    // Proxy groups (B2), same shape as profile groups: every existing proxy
+    // lands in "default".
+    id: "011-proxy-groups",
     up: `
-      CREATE TABLE tab_state (
+      ALTER TABLE proxies ADD COLUMN grp TEXT NOT NULL DEFAULT 'default';
+    `,
+  },
+  {
+    // Last probe result (JSON) — lets a launch reuse the exit geo instead of
+    // a live lookup. Old rows start untested (NULL).
+    id: "012-proxy-last-probe",
+    up: `
+      ALTER TABLE proxies ADD COLUMN last_probe TEXT;
+    `,
+  },
+  {
+    // J3a — tab state per profile (a Deck tab is a profile, ADR-0008). JSON
+    // validated by TabStateSchema; goes with the profile. Renumbered from 011
+    // to 013 on the merge (main added 011/012 proxy migrations meanwhile);
+    // IF NOT EXISTS so a pre-merge jancy-j1 DB that ran this as 011 is a no-op.
+    id: "013-tab-state",
+    up: `
+      CREATE TABLE IF NOT EXISTS tab_state (
         profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
         state TEXT NOT NULL,
         updated_at TEXT NOT NULL
