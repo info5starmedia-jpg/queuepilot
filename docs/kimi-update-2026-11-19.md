@@ -367,3 +367,10 @@ In-house `security-auditor` review of commit 694c2326: **BLOCK** (1 HIGH, 4 MEDI
 - Routes: `GET /deck`, `POST /deck/open`, `POST /deck/profiles/:id/adopt|select`, `DELETE /deck`, `POST /deck/group-taskbar`. Setting: Launch → `deckEnabled`.
 - Tab label = `email · #queuePosition` (owner Q13), refreshed every 5 s from tab state.
 - Windows only. Not done: console UI, popups under the profile's tab, DPI/multi-monitor checks.
+
+### 11. J3b — tab commands + Tab View screen (2026-11-20)
+
+- New engine ops through every runtime: `navigateTab`, `focusTab`, hard `reloadTab` (CDP `Page.navigate`, `Page.bringToFront`, `Page.reload{ignoreCache}`).
+- API: change URL (focus delay + delay), sequential/hard reload, reopen, export open tabs, log note. One bad tab never aborts the rest.
+- Console: Tab View screen (N) over `/tab-view`.
+- Not done: Sheet sink, ephemeral profiles, per-tab timezone, console buttons for the new commands.

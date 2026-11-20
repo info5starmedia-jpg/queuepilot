@@ -614,8 +614,16 @@ export class FurySession implements BrowserSession {
     return this.tabs.closeTab(engineTabId);
   }
 
-  async reloadTab(engineTabId: string): Promise<void> {
-    return this.tabs.reloadTab(engineTabId);
+  async reloadTab(engineTabId: string, opts?: { hard?: boolean }): Promise<void> {
+    return this.tabs.reloadTab(engineTabId, opts);
+  }
+
+  async navigateTab(engineTabId: string, url: string): Promise<void> {
+    return this.tabs.navigateTab(engineTabId, url);
+  }
+
+  async focusTab(engineTabId: string): Promise<void> {
+    return this.tabs.focusTab(engineTabId);
   }
 
   async screenshotTab(engineTabId: string): Promise<Buffer> {

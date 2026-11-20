@@ -29,6 +29,8 @@ import { registerTabRoutes } from "./http/tabs.routes.js";
 import { registerTabStateRoutes } from "./http/tab-state.routes.js";
 import { registerSiteRoutes } from "./http/sites.routes.js";
 import { registerDeckRoutes } from "./http/deck.routes.js";
+import { registerTabCommandRoutes } from "./http/tab-commands.routes.js";
+import { TabCommandService } from "./application/tabs/tab-commands.js";
 import type { DeckService } from "./application/deck/deck.service.js";
 import type { SitePluginService } from "./application/siteplugins/site-plugin.service.js";
 import type { DiscordService } from "./application/discord/discord.service.js";
@@ -206,6 +208,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return null;
       }
     },
+  });
+  registerTabCommandRoutes(app, {
+    commands: new TabCommandService(deps.lifecycle),
+    reopen: (id, max) => deps.lifecycle.reopenTab(id, max),
+    profile: (id) => {
+      const p = deps.profiles.get(id);
+      return { id: p.id, name: p.name, email: p.email };
+    },
+    dataDir: deps.config.dataDir,
   });
   if (deps.deck) {
     registerDeckRoutes(app, {

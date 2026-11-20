@@ -141,9 +141,24 @@ export class FakeSession extends EventEmitter implements BrowserSession {
   /** Test hook: reloads per engine tab id. */
   readonly reloads = new Map<string, number>();
 
-  async reloadTab(engineTabId: string): Promise<void> {
+  readonly hardReloads = new Map<string, number>();
+  /** Test hook: ordered "focus <id>" / "navigate <id> <url>" calls. */
+  readonly tabCalls: string[] = [];
+
+  async reloadTab(engineTabId: string, opts: { hard?: boolean } = {}): Promise<void> {
     if (!this.tabs.has(engineTabId)) throw new Error(`no such tab ${engineTabId}`);
     this.reloads.set(engineTabId, (this.reloads.get(engineTabId) ?? 0) + 1);
+    if (opts.hard) this.hardReloads.set(engineTabId, (this.hardReloads.get(engineTabId) ?? 0) + 1);
+  }
+
+  async navigateTab(engineTabId: string, url: string): Promise<void> {
+    if (!this.tabs.has(engineTabId)) throw new Error(`no such tab ${engineTabId}`);
+    this.tabCalls.push(`navigate ${engineTabId} ${url}`);
+  }
+
+  async focusTab(engineTabId: string): Promise<void> {
+    if (!this.tabs.has(engineTabId)) throw new Error(`no such tab ${engineTabId}`);
+    this.tabCalls.push(`focus ${engineTabId}`);
   }
 
   async screenshotTab(engineTabId: string): Promise<Buffer> {

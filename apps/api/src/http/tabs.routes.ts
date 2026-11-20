@@ -71,7 +71,8 @@ export function registerTabRoutes(
 
   app.post("/profiles/:id/tabs/:tabId/reload", async (req) => {
     const { id, tabId } = req.params as { id: string; tabId: string };
-    return { reloaded: true, tab: await lifecycle.reloadTab(id, tabId) };
+    const { hard } = z.object({ hard: z.boolean().default(false) }).strict().parse(req.body ?? {});
+    return { reloaded: true, tab: await lifecycle.reloadTab(id, tabId, { hard }) };
   });
 
   app.post("/profiles/:id/tabs/:tabId/auto-reload", async (req) => {

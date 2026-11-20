@@ -17,6 +17,7 @@
         <button data-view="profiles" class="active"><span class="ico">▦</span><span class="lbl">Profiles</span><kbd>P</kbd></button>
         <button data-view="proxies"><span class="ico">⇄</span><span class="lbl">Proxies</span><kbd>X</kbd></button>
         <button data-view="tabs"><span class="ico">⊞</span><span class="lbl">Tabs</span><kbd>T</kbd></button>
+        <button data-view="tabview"><span class="ico">☰</span><span class="lbl">Tab View</span><kbd>N</kbd></button>
         <button data-view="cookies"><span class="ico">◈</span><span class="lbl">Cookies</span><kbd>C</kbd></button>
         <button data-view="warmups"><span class="ico">♨</span><span class="lbl">Warmups</span><kbd>W</kbd></button>
         <button data-view="providers"><span class="ico">⇶</span><span class="lbl">Providers</span><kbd>V</kbd></button>
@@ -100,6 +101,25 @@
         </section>
 
         <!-- ============================ tabs ============================ -->
+        <section class="view" id="view-tabview" hidden>
+          <div class="view-hint">Every running profile as one tab: label <code>email · #position</code>, stage, cart timer, priority (high first). Refreshes every 5 s.</div>
+          <div class="toolbar">
+            <input id="tabview-filter" placeholder="filter by name, email or note" maxlength="200" style="min-width:260px" />
+            <label style="color:var(--muted);font-size:12px"><input type="checkbox" id="tabview-all" /> include stopped</label>
+            <div class="spacer"></div>
+            <input id="tabview-note" placeholder="note to log for selected" maxlength="2000" style="min-width:220px" />
+            <button id="tabview-lognote">Log note</button>
+            <button id="tabview-export">Export tabs CSV</button>
+            <button id="tabview-clear">Clear codes</button>
+          </div>
+          <div class="table-wrap">
+            <table class="grid" id="tabview-table">
+              <thead><tr><th style="width:28px"><input type="checkbox" id="tabview-select" /></th><th>Tab</th><th style="width:90px">Stage</th><th style="width:90px">Position</th><th style="width:90px">Cart</th><th style="width:80px">Priority</th><th>Notes</th><th style="width:90px">Passcodes</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="tabview-empty" hidden>No running profiles.</div>
+          </div>
+        </section>
         <section class="view" id="view-tabs" hidden>
           <div class="view-hint">Tab query syntax: <code>status:open url:*shop*</code> · bare word = url match · <code>!</code> negates · <code>*</code> wildcard</div>
           <div class="toolbar">

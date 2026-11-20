@@ -797,7 +797,7 @@ export class BrowserLifecycleService {
   private requireTabOp(
     profileId: string,
     tabId: string,
-    capability: "reloadTab" | "screenshotTab",
+    capability: "reloadTab" | "screenshotTab" | "navigateTab" | "focusTab",
   ): { run: BrowserRun; tab: BrowserTab; session: BrowserSession; engineTabId: string } {
     this.requireProfile(profileId);
     const run = this.runs.occupyingForProfile(profileId);
@@ -824,12 +824,45 @@ export class BrowserLifecycleService {
     return { run, tab, session, engineTabId: tab.engineTabId };
   }
 
-  async reloadTab(profileId: string, tabId: string): Promise<BrowserTab> {
+  async reloadTab(profileId: string, tabId: string, opts: { hard?: boolean } = {}): Promise<BrowserTab> {
     return this.mutex.runExclusive(profileId, async () => {
       const { tab, session, engineTabId } = this.requireTabOp(profileId, tabId, "reloadTab");
-      await session.reloadTab!(engineTabId);
+      await session.reloadTab!(engineTabId, opts);
       return tab;
     });
+  }
+
+  /** J3b: change a tab's URL (optionally bringing it to the front first). */
+  async navigateTab(profileId: string, tabId: string, url: string, opts: { focus?: boolean } = {}): Promise<BrowserTab> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { tab, session, engineTabId } = this.requireTabOp(profileId, tabId, "navigateTab");
+      if (opts.focus && session.focusTab) await session.focusTab(engineTabId);
+      await session.navigateTab!(engineTabId, url);
+      return tab;
+    });
+  }
+
+  async focusTab(profileId: string, tabId: string): Promise<void> {
+    return this.mutex.runExclusive(profileId, async () => {
+      const { session, engineTabId } = this.requireTabOp(profileId, tabId, "focusTab");
+      await session.focusTab!(engineTabId);
+    });
+  }
+
+  /** J3b: reopen the most recently closed tab of this run (same URL, a fresh isolated tab). */
+  async reopenTab(profileId: string, maxRestorable = 10): Promise<BrowserTab> {
+    const run = this.runs.occupyingForProfile(profileId);
+    if (!run) throw new DomainError(ErrorCodes.PROFILE_NOT_RUNNING, `profile ${profileId} has no active browser run`);
+    const closed = this.tabRegistry
+      .listForRun(run.id)
+      .tabs.filter((t) => t.status === "closed" && t.url)
+      .sort((a, b) => (b.closedAt ?? "").localeCompare(a.closedAt ?? ""))
+      .slice(0, maxRestorable);
+    const last = closed[0];
+    if (!last) throw new DomainError(ErrorCodes.CONFLICT, "no closed tab to reopen");
+    // A tab is reopened once: the entry is retired so the next reopen goes further back.
+    this.tabRegistry.clearReopened(last.id);
+    return this.openTab(profileId, { url: last.url });
   }
 
   async screenshotTab(profileId: string, tabId: string): Promise<Buffer> {

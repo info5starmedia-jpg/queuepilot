@@ -36,7 +36,10 @@ export interface BrowserSession {
   openTab?(request: OpenTabRequest): Promise<{ engineTabId: string }>;
   closeTab?(engineTabId: string): Promise<void>;
   /** Optional per-tab ops (tab-ops depth). Absent = TABS_UNSUPPORTED. */
-  reloadTab?(engineTabId: string): Promise<void>;
+  reloadTab?(engineTabId: string, opts?: { hard?: boolean }): Promise<void>;
+  /** J3b: change the tab's URL, and bring it to the front (focus delay needs it visible). */
+  navigateTab?(engineTabId: string, url: string): Promise<void>;
+  focusTab?(engineTabId: string): Promise<void>;
   /** PNG of the tab's current viewport. */
   screenshotTab?(engineTabId: string): Promise<Buffer>;
   /**

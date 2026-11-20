@@ -72,8 +72,16 @@ export class CdpTabController {
   }
 
   /** Reload a tab (Page.reload on its attached page session). */
-  async reloadTab(engineTabId: string): Promise<void> {
-    await this.onTarget(engineTabId, (call) => call("Page.reload", {}));
+  async reloadTab(engineTabId: string, opts: { hard?: boolean } = {}): Promise<void> {
+    await this.onTarget(engineTabId, (call) => call("Page.reload", { ignoreCache: opts.hard === true }));
+  }
+
+  async navigateTab(engineTabId: string, url: string): Promise<void> {
+    await this.onTarget(engineTabId, (call) => call("Page.navigate", { url }));
+  }
+
+  async focusTab(engineTabId: string): Promise<void> {
+    await this.onTarget(engineTabId, (call) => call("Page.bringToFront", {}));
   }
 
   /** PNG of the tab's viewport (Page.captureScreenshot). */

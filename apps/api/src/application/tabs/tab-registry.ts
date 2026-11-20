@@ -117,6 +117,11 @@ export class TabRegistry {
     return closed;
   }
 
+  /** J3b: a reopened tab leaves the restorable list. */
+  clearReopened(tabId: string): void {
+    this.tabs.delete(tabId);
+  }
+
   listForRun(runId: string): {
     tabs: BrowserTab[];
     partitions: SessionPartition[];

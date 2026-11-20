@@ -39,7 +39,7 @@ function toast(detail, type = "info") {
 
 /* ============================ view switching ============================ */
 
-const VIEWS = ["profiles", "proxies", "tabs", "cookies", "warmups", "providers", "events", "settings"];
+const VIEWS = ["profiles", "proxies", "tabs", "tabview", "cookies", "warmups", "providers", "events", "settings"];
 let activeView = "profiles";
 
 function setView(name) {
@@ -53,6 +53,7 @@ function setView(name) {
   renderTopbarActions();
   renderStats();
   if (name === "cookies") refreshCookiesProfiles();
+  if (name === "tabview") loadTabView();
   if (name === "warmups") { loadWarmups(); loadPersonaCard(); }
 }
 
@@ -64,7 +65,7 @@ window.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   const k = e.key.toLowerCase();
-  const map = { p: "profiles", x: "proxies", t: "tabs", c: "cookies", w: "warmups", v: "providers", e: "events", g: "settings" };
+  const map = { p: "profiles", x: "proxies", t: "tabs", n: "tabview", c: "cookies", w: "warmups", v: "providers", e: "events", g: "settings" };
   if (map[k]) setView(map[k]);
   if (k === "/" && activeView === "profiles") {
     e.preventDefault();
@@ -2141,3 +2142,57 @@ refreshTabsProfiles();
 loadSettings();
 connectEvents();
 setInterval(refreshHealth, 30_000);
+
+/* ============================ Tab View (J3a/J3b) ============================ */
+
+let tabViewTimer = null;
+async function loadTabView() {
+  clearTimeout(tabViewTimer);
+  if (activeView !== "tabview") return;
+  try {
+    const data = await api(`/tab-view${$("#tabview-all").checked ? "?all=1" : ""}`);
+    const q = $("#tabview-filter").value.trim().toLowerCase();
+    const rows = (data.rows ?? data.tabs ?? data).filter((r) =>
+      !q || `${r.profileName} ${r.email ?? ""} ${r.state?.notes ?? ""}`.toLowerCase().includes(q),
+    );
+    const tbody = $("#tabview-table tbody");
+    tbody.innerHTML = rows
+      .map((r) => {
+        const d = r.state?.data ?? {};
+        const colour = r.state?.colour ? ` style="border-left:4px solid ${esc(r.state.colour)}"` : "";
+        return `<tr${colour}>
+          <td><input type="checkbox" data-profile="${esc(r.profileId)}" /></td>
+          <td>${esc(r.label)}${r.state?.subtitle ? `<div class="mono" style="color:var(--muted)">${esc(r.state.subtitle)}</div>` : ""}</td>
+          <td>${esc(d.stage ?? "—")}</td><td>${esc(d.queuePosition ?? "—")}</td><td>${esc(d.cartTimer ?? "—")}</td>
+          <td>${esc(r.state?.priority ?? "—")}</td><td>${esc(r.state?.notes ?? "")}</td>
+          <td>${(r.state?.passcodes ?? []).filter((p) => !p.used).length}/${(r.state?.passcodes ?? []).length}</td></tr>`;
+      })
+      .join("");
+    $("#tabview-empty").hidden = rows.length !== 0;
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  tabViewTimer = setTimeout(loadTabView, 5000);
+}
+const tabViewSelected = () => [...document.querySelectorAll("#tabview-table tbody input[data-profile]:checked")].map((i) => i.dataset.profile);
+$("#tabview-select").addEventListener("change", (e) => document.querySelectorAll("#tabview-table tbody input[data-profile]").forEach((i) => (i.checked = e.target.checked)));
+$("#tabview-filter").addEventListener("input", loadTabView);
+$("#tabview-all").addEventListener("change", loadTabView);
+$("#tabview-clear").addEventListener("click", async () => {
+  for (const id of tabViewSelected()) await api(`/profiles/${id}/tab-state/clear-codes`, { method: "POST", body: "{}" }).catch((e) => toast(e.message, "error"));
+  loadTabView();
+});
+$("#tabview-lognote").addEventListener("click", async () => {
+  const note = $("#tabview-note").value.trim();
+  if (!note) return toast("type a note first", "error");
+  for (const id of tabViewSelected()) await api(`/profiles/${id}/log-note`, { method: "POST", body: JSON.stringify({ note }) }).catch((e) => toast(e.message, "error"));
+  toast("note logged", "info");
+});
+$("#tabview-export").addEventListener("click", async () => {
+  const ids = tabViewSelected();
+  if (!ids.length) return toast("select tabs first", "error");
+  const res = await fetch("/tabs/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileIds: ids }) });
+  const url = URL.createObjectURL(await res.blob());
+  Object.assign(document.createElement("a"), { href: url, download: "open-tabs.csv" }).click();
+  URL.revokeObjectURL(url);
+});
