@@ -186,6 +186,15 @@ export class MockCdpServer {
         return { id, result: { sessionId: `session-${++this.nextSession}` } };
       case "Target.detachFromTarget":
         return { id, result: {} };
+      case "Page.getFrameTree":
+        // Autofill's isolated-world path (P0 SEC-4) asks for the frame tree
+        // before creating its world; one static frame is enough.
+        return {
+          id,
+          result: { frameTree: { frame: { id: "frame-1", loaderId: "loader-1", url: "" } } },
+        };
+      case "Page.createIsolatedWorld":
+        return { id, result: { executionContextId: 9000 + ++this.nextSession } };
       case "Runtime.evaluate":
         this.evaluations.push(String(params.expression ?? ""));
         return {

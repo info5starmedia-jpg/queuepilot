@@ -109,7 +109,7 @@ const clickRowAction = (name, act) => `(() => {
   return true;
 })()`;
 
-export async function runConsoleSmoke({ base, ok }) {
+export async function runConsoleSmoke({ base, ok, token }) {
   const exe = findBrowser();
   if (!exe) {
     console.log("  [SKIP] console smoke — no Chromium-family browser found (set QP_SMOKE_BROWSER)");
@@ -133,7 +133,11 @@ export async function runConsoleSmoke({ base, ok }) {
   const api = async (method, url, body) => {
     const res = await fetch(`${base}${url}`, {
       method,
-      headers: body === undefined ? {} : { "content-type": "application/json" },
+      headers: {
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        // P0 audit item 3: the scratch API carries the auto-generated token.
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, json: res.status === 204 ? null : await res.json().catch(() => null) };

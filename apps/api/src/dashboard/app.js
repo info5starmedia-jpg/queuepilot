@@ -28,15 +28,51 @@ function authHeaders(extra = {}) {
   return t ? { ...extra, authorization: `Bearer ${t}` } : extra;
 }
 
+/* P0 audit item 3: the API token is generated automatically on installs
+   without SPECTRA_API_TOKEN. Pick it up once from the same-origin,
+   loopback-only session endpoint so the operator is not prompted. The
+   endpoint is still behind the deny-by-default origin wall, so a hostile
+   page cannot read it. Manual token entry (below) remains the fallback
+   for installs configured with an external token. */
+let bootstrapPromise = null;
+function silentBootstrapToken() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = fetch("/dashboard/session-token")
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const body = await res.json().catch(() => null);
+        if (!body?.token) return false;
+        try {
+          sessionStorage.setItem(TOKEN_KEY, body.token);
+        } catch {
+          return false; /* storage blocked: the token cannot be kept */
+        }
+        return true;
+      })
+      .catch(() => false);
+  }
+  return bootstrapPromise;
+}
+
 async function api(path, opts = {}) {
   /* JSON content-type only when there IS a body: Fastify answers a body-less
      request that claims application/json with a 500, which broke every
      body-less DELETE/POST in the console (delete, stop, proxy test, …). */
-  const res = await fetch(path, {
-    ...opts,
-    headers: authHeaders(opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers }),
-  });
-  if (res.status === 401) showSignIn(storedToken() ? "That token was refused — sign in again." : "");
+  const sent = authHeaders(opts.body === undefined ? opts.headers : { "content-type": "application/json", ...opts.headers });
+  const res = await fetch(path, { ...opts, headers: sent });
+  if (res.status === 401) {
+    /* Token refused or not picked up yet: the first 401 of the session
+       fetches the auto-generated token ONCE (every concurrent caller
+       awaits the same promise), and every caller retries as long as the
+       stored token CHANGED. A retry with the identical token is skipped,
+       so a genuinely refused token falls through to the sign-in prompt
+       instead of looping. */
+    if (await silentBootstrapToken()) {
+      const t = storedToken();
+      if (t && sent.authorization !== `Bearer ${t}`) return api(path, opts);
+    }
+    showSignIn(storedToken() ? "That token was refused — sign in again." : "");
+  }
   if (res.status === 204) return null;
   const body = await res.json();
   if (!res.ok) {

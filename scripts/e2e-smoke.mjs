@@ -27,7 +27,7 @@
  */
 import { spawn, execSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 
@@ -41,6 +41,8 @@ const BASE = `http://127.0.0.1:${API_PORT}`;
 const scratch = mkdtempSync(path.join(tmpdir(), "qp-e2e-"));
 let failures = 0;
 let api = null;
+/** P0 audit item 3: the token is auto-generated into the data dir. */
+const AUTO_TOKEN = () => readFileSync(path.join(scratch, "api-token"), "utf8").trim();
 
 function ok(name, cond, detail = "") {
   const tag = cond ? "PASS" : "FAIL";
@@ -49,11 +51,13 @@ function ok(name, cond, detail = "") {
 }
 
 async function apiCall(method, url, body, token) {
+  // token === null explicitly sends NO Authorization (to test the wall).
+  const auth = token === null ? {} : { authorization: `Bearer ${token ?? AUTO_TOKEN()}` };
   const res = await fetch(`${BASE}${url}`, {
     method,
     headers: {
       "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...auth,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -114,8 +118,14 @@ async function main() {
   console.log("\nphase 2: security gates");
   const refused = await apiCall("POST", "/jyl/run", { kind: "command", name: "x" });
   ok("scripting endpoint refuses without opt-in (403)", refused.status === 403);
+  // P0 audit item 3: the token is auto-generated now, so API calls without
+  // it are 401 (they used to sail through on a default install).
+  const noAuth = await apiCall("GET", "/profiles", undefined, null);
+  ok("API refuses requests without the token (401)", noAuth.status === 401);
   const scriptingOn = await apiCall("PATCH", "/settings/sections/automation", { scriptingEndpoints: true });
-  ok("scripting toggle refuses without SPECTRA_API_TOKEN (403)", scriptingOn.status === 403);
+  ok("scripting toggle works with the auto-generated token (200)", scriptingOn.status === 200);
+  const scriptingBackOff = await apiCall("PATCH", "/settings/sections/automation", { scriptingEndpoints: false });
+  ok("scripting toggle turns back off", scriptingBackOff.status === 200);
 
   // ---- phase 3: imports ----------------------------------------------
   console.log("\nphase 3: CSV + xlsx import");
@@ -158,7 +168,7 @@ async function main() {
 
   // ---- phase 4b: console (real dashboard in a headless browser) -------
   console.log("\nphase 4b: console buttons in a real browser");
-  await runConsoleSmoke({ base: BASE, ok });
+  await runConsoleSmoke({ base: BASE, ok, token: AUTO_TOKEN() });
 
   // ---- phase 5: real launch (optional) --------------------------------
   if (WITH_LAUNCH) {
@@ -166,22 +176,32 @@ async function main() {
     // Point at the REAL install (engine already present) — separate DB by
     // using the default data dir, but our throwaway profiles are named.
     const launchBase = "http://127.0.0.1:50325";
+    // P0 audit item 3: the real install has an auto-generated token in its
+    // data dir; send it like any other local caller must.
+    let launchToken = null;
+    try {
+      launchToken = readFileSync(path.join(homedir(), ".queuepilot", "api-token"), "utf8").trim();
+    } catch { /* pre-token install: proceed without auth */ }
+    const launchHeaders = {
+      "content-type": "application/json",
+      ...(launchToken ? { authorization: `Bearer ${launchToken}` } : {}),
+    };
     const health = await fetch(`${launchBase}/health`).then((r) => r.ok).catch(() => false);
     if (!health) {
       ok("dev API on 50325 is up for the launch phase", false, "start it first: apps/api with SPECTRA_RUNTIME=fury");
     } else {
       const created = await fetch(`${launchBase}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: launchHeaders,
         body: JSON.stringify({ name: `E2E-Launch-${Date.now().toString(36)}`, generateFingerprint: true }),
       }).then((r) => r.json());
       const id = created.id;
-      const started = await fetch(`${launchBase}/profiles/${id}/start`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const started = await fetch(`${launchBase}/profiles/${id}/start`, { method: "POST", headers: launchHeaders, body: "{}" });
       ok("profile starts on the real engine", started.status === 201);
       if (started.status === 201) {
-        const egress = await fetch(`${launchBase}/profiles/${id}/egress`).then((r) => r.json()).catch(() => null);
+        const egress = await fetch(`${launchBase}/profiles/${id}/egress`, { headers: launchHeaders }).then((r) => r.json()).catch(() => null);
         ok("egress endpoint answers", !!egress && "running" in egress, JSON.stringify(egress));
-        const cookiesRes = await fetch(`${launchBase}/profiles/${id}/cookies`);
+        const cookiesRes = await fetch(`${launchBase}/profiles/${id}/cookies`, { headers: launchHeaders });
         const cookiesText = await cookiesRes.text();
         let cookies = null;
         try {
@@ -194,11 +214,11 @@ async function main() {
           Array.isArray(cookies?.cookies),
           `status=${cookiesRes.status} body=${cookiesText.slice(0, 200)}`,
         );
-        const stopped = await fetch(`${launchBase}/profiles/${id}/stop`, { method: "POST" }).then((r) => r.json());
+        const stopped = await fetch(`${launchBase}/profiles/${id}/stop`, { method: "POST", headers: launchHeaders }).then((r) => r.json());
         ok("profile stops cleanly", stopped?.stopped === true);
-        const run = await fetch(`${launchBase}/profiles/${id}/run`).then((r) => r.json());
+        const run = await fetch(`${launchBase}/profiles/${id}/run`, { headers: launchHeaders }).then((r) => r.json());
         ok("no run reported after stop", !run?.run);
-        await fetch(`${launchBase}/profiles/${id}`, { method: "DELETE" }).catch(() => {});
+        await fetch(`${launchBase}/profiles/${id}`, { method: "DELETE", headers: launchHeaders }).catch(() => {});
       }
     }
   }

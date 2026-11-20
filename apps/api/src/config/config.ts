@@ -1,6 +1,8 @@
 import { z } from "zod";
 import os from "node:os";
 import path from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
 /**
  * Runtime configuration. Everything is an environment variable with a safe
@@ -31,7 +33,36 @@ const ConfigSchema = z.object({
   engineManifest: z.string().optional(),
 });
 
-export type AppConfig = z.infer<typeof ConfigSchema> & { dbPath: string };
+export type AppConfig = z.infer<typeof ConfigSchema> & {
+  dbPath: string;
+  /** P0 audit item 3: false when the token came from env (explicit operator opt-in). */
+  apiTokenAuto: boolean;
+};
+
+/**
+ * P0 audit item 3 (default-on token). An install without SPECTRA_API_TOKEN
+ * used to trust every local caller; now a strong token is generated once and
+ * persisted in the data dir (0o600). The dashboard receives it through the
+ * same-origin /dashboard/session-token endpoint, so day-to-day use is
+ * unchanged while random local processes and hostile pages lose their free
+ * pass. `apiTokenAuto` distinguishes this from an operator-set env token,
+ * which some features (e.g. raw cookie export) treat as an explicit opt-in.
+ */
+function ensurePersistedToken(dataDir: string): string {
+  mkdirSync(dataDir, { recursive: true });
+  const file = path.join(dataDir, "api-token");
+  try {
+    if (existsSync(file)) {
+      const existing = readFileSync(file, "utf8").trim();
+      if (existing.length >= 16) return existing;
+    }
+  } catch {
+    /* unreadable file: fall through and regenerate */
+  }
+  const token = randomBytes(24).toString("base64url");
+  writeFileSync(file, token, { mode: 0o600 });
+  return token;
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = ConfigSchema.parse({
@@ -44,5 +75,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     googleClientSecret: env.SPECTRA_GOOGLE_CLIENT_SECRET,
     engineManifest: env.SPECTRA_ENGINE_MANIFEST,
   });
-  return { ...parsed, dbPath: path.join(parsed.dataDir, "queuepilot.db") };
+  const apiToken = parsed.apiToken ?? ensurePersistedToken(parsed.dataDir);
+  return {
+    ...parsed,
+    apiToken,
+    apiTokenAuto: !parsed.apiToken,
+    dbPath: path.join(parsed.dataDir, "queuepilot.db"),
+  };
 }

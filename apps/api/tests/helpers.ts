@@ -191,6 +191,9 @@ export function makeTestContext(
     dataDir,
     runtime: "fake",
     dbPath: ":memory:",
+    // P0 audit item 3: tests pass an explicit token when they want one
+    // (configPatch), so the default here is "operator-set", not auto-generated.
+    apiTokenAuto: false,
     ...configPatch,
   };
   const app = buildApp({

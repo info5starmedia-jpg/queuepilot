@@ -50,7 +50,9 @@ export class AutofillService {
     this.requireRunning(profileId);
     const card = this.cardSet(profileId, profile.extra, set);
 
-    const { target, value } = await this.evaluateOnPage(
+    // P0 audit SEC-4: card fills run in an ISOLATED world — a hostile page
+    // must not be able to swap setters/Function to read the card number.
+    const { target, value } = await this.evaluateIsolatedOnPage(
       profileId,
       buildCardFillExpression(card),
       targetId,
@@ -76,7 +78,8 @@ export class AutofillService {
       );
     }
 
-    const { target, value } = await this.evaluateOnPage(
+    // P0 audit SEC-4: address/PII fills also run in the isolated world.
+    const { target, value } = await this.evaluateIsolatedOnPage(
       profileId,
       buildAddressFillExpression(input),
       targetId,
@@ -109,7 +112,8 @@ export class AutofillService {
     const worstMsPerKey = (60000 / (wpm * 5)) * 1.35 * 2.2 + 400;
     const timeoutMs = Math.min(Math.ceil(text.length * worstMsPerKey) + 10_000, 300_000);
 
-    const { target, value } = await this.evaluateOnPage(
+    // P0 audit SEC-4: typed text runs in the isolated world too.
+    const { target, value } = await this.evaluateIsolatedOnPage(
       profileId,
       buildTypingExpression(text, wpm),
       targetId,
@@ -161,6 +165,16 @@ export class AutofillService {
    * read what is filled). Shares the DOM only.
    */
   async evaluateIsolated(profileId: string, expression: string, targetId?: string, timeoutMs = 120_000): Promise<unknown> {
+    return (await this.evaluateIsolatedOnPage(profileId, expression, targetId, timeoutMs)).value;
+  }
+
+  /** Isolated-world variant of evaluateOnPage — same contract, safe world. */
+  private async evaluateIsolatedOnPage(
+    profileId: string,
+    expression: string,
+    targetId?: string,
+    timeoutMs = 120_000,
+  ): Promise<{ target: string; value: unknown }> {
     this.requireRunning(profileId);
     const run = this.lifecycle.activeRun(profileId);
     const conn = await CdpConnection.connect(run!.wsEndpoint!);
@@ -182,7 +196,7 @@ export class AutofillService {
           sessionId,
         );
         if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? "autofill evaluation failed");
-        return r.result?.value;
+        return { target, value: r.result?.value };
       } finally {
         await conn.call("Target.detachFromTarget", { sessionId }, 5_000).catch(() => {});
       }

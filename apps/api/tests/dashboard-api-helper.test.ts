@@ -22,8 +22,11 @@ const appJs = readFileSync(
 );
 const apiSource = /async function api\([\s\S]*?\n}\n/.exec(appJs)?.[0];
 // P9 Task 0: api() sends the operator's token; run the real helpers too.
+// P0 audit item 3: api() also silently bootstraps the auto-generated token
+// once — those module-level lets and the bootstrap fn must exist in the vm.
 const tokenSource = [
   /const TOKEN_KEY = .*\n/.exec(appJs)?.[0],
+  /let bootstrapPromise[\s\S]*?\n}\n/.exec(appJs)?.[0],
   /function storedToken\([\s\S]*?\n}\n/.exec(appJs)?.[0],
   /function authHeaders\([\s\S]*?\n}\n/.exec(appJs)?.[0],
 ].join("\n");
@@ -127,12 +130,22 @@ describe("dashboard token sign-in (P9 Task 0)", () => {
     expect(calls[0]?.headers.authorization).toBe("Bearer operator-token-1");
   });
 
-  it("a 401 opens the sign-in (with a plain message when a stored token was refused)", async () => {
+  it("a 401 silently bootstraps the token before any sign-in prompt", async () => {
     const ctx = tokenCtx();
     const signIns: string[] = [];
-    await expect(loadApi(ctx, [], { signIns })("/profiles")).rejects.toThrow(/invalid token/);
-    await expect(loadApi(ctx, [], { token: "wrong-token", signIns })("/profiles")).rejects.toThrow();
-    expect(signIns).toEqual(["", "That token was refused — sign in again."]);
+    // No stored token: the 401 triggers the one-shot bootstrap, the retry
+    // carries the bootstrapped token and succeeds — no prompt appears.
+    await expect(loadApi(ctx, [], { signIns })("/profiles")).resolves.toMatchObject({
+      profiles: [],
+    });
+    expect(signIns).toEqual([]);
+    // A refused (stale) stored token is likewise replaced by the bootstrap
+    // on this install — the prompt only appears when the session endpoint
+    // has nothing (e.g. a no-token loopback install never 401s at all).
+    await expect(
+      loadApi(ctx, [], { token: "wrong-token", signIns })("/profiles"),
+    ).resolves.toMatchObject({ profiles: [] });
+    expect(signIns).toEqual([]);
   });
 
   it("a loopback install without a token is unaffected: no header, no prompt", async () => {

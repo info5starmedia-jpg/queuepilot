@@ -153,6 +153,20 @@ export class EngineInstaller {
     // content. Extraction uses the OS tar (bsdtar on Windows/macOS, GNU tar on
     // Linux — both handle xz). No tar = a loud, named failure.
     const archive = entry.archive ?? "raw";
+    // P0 audit SEC-3: binaryPath comes from the (unsigned) manifest and is
+    // later joined onto the install dir — an absolute path or ".." would
+    // point the "engine binary" outside the engine dir. Only relative,
+    // inside-the-archive paths are allowed.
+    if (entry.binaryPath) {
+      const bp = entry.binaryPath;
+      if (path.isAbsolute(bp) || bp.includes("\\") || bp.split("/").includes("..")) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        throw new DomainError(
+          ErrorCodes.ENGINE_MANIFEST_INVALID,
+          `engine ${entry.kind}@${entry.version}: unsafe binaryPath "${bp}" (must be a relative path inside the archive)`,
+        );
+      }
+    }
     if (archive !== "raw") {
       try {
         // cwd + relative name: bsdtar (Windows/macOS) would otherwise parse

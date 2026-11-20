@@ -41,30 +41,38 @@ export function registerGoogleRoutes(
       code?: string;
       error?: string;
     };
+    // P0 audit SEC-1: every reflected value is HTML-escaped. The old page
+    // wrote the `error` query value raw into HTML — a reflected XSS on the
+    // API's own origin, reachable from any page (incl. one inside a profile).
+    const esc = (s: unknown) =>
+      String(s ?? "").replace(
+        /[&<>"']/g,
+        (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+      );
     const page = (title: string, body: string) =>
       reply
         .type("text/html")
         .send(
-          `<html><body><h3>${title}</h3><p>${body}</p></body></html>`,
+          `<html><body><h3>${esc(title)}</h3><p>${body}</p></body></html>`,
         );
     if (error || !code || !state) {
-      return reply
-        .code(400)
-        .type("text/html")
-        .send(
-          `<html><body><h3>Google connection failed</h3><p>${error ?? "no code returned"}</p></body></html>`,
-        );
+      return page(
+        "Google connection failed",
+        esc(error ?? "no code returned"),
+      );
     }
     try {
       const { account } = await google.complete(state, code);
+      // `account` is reflected only after google.complete() validated the
+      // state — an attacker can't inject it without a valid code+state.
       return page(
         "Google connected to QueuePilot.",
-        `Account <b>${account}</b> is connected. You can close this tab.`,
+        `Account <b>${esc(account)}</b> is connected. You can close this tab.`,
       );
     } catch (err) {
       return page(
         "Google connection failed",
-        err instanceof Error ? err.message : String(err),
+        esc(err instanceof Error ? err.message : String(err)),
       );
     }
   });

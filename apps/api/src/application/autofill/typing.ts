@@ -56,9 +56,13 @@ export function buildTypingExpression(text: string, wpm: number): string {
           "value",
         ).set
       : null;
+  /* C3 (audit 2026-11-20): the setter variable above already holds the
+     setter function; reading .set off it was undefined, so every
+     input/textarea fill crashed. No backticks allowed in this comment —
+     this whole expression is a template string evaluated in the page. */
   const setVal = (v) => {
     if (setter) {
-      setter.set.call(el, v);
+      setter.call(el, v);
     } else {
       el.textContent = v; // contenteditable and exotic inputs
     }

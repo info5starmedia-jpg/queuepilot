@@ -2,11 +2,17 @@ import { isIPv4 } from "node:net";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 /**
- * Audit GPT-5.4 finding 1 (v0.16): scripting endpoints execute operator
- * code and touch secrets, so a web page loaded inside ANY profile browser
- * must never be able to reach them — even when the scripting opt-in is on
- * and even before the bearer-token hook runs. Browsers tell us where a
- * fetch came from:
+ * Browser-origin wall for the whole API (audit 2026-11-20, P0 SEC-2).
+ *
+ * Earlier versions protected only a hand-maintained list of "scripting"
+ * routes; every route NOT on the list (cookie export, TOTP, profile
+ * start/stop, the AdsPower launch, the whole profile list) was reachable by
+ * any web page — including a hostile page open inside a profile browser,
+ * and DNS-rebinding pages that make evil.com resolve to 127.0.0.1. The wall
+ * is now DENY BY DEFAULT: every request passes the browser fingerprints
+ * check except a tiny exempt set (see EXEMPT below).
+ *
+ * Browsers tell us where a fetch came from:
  *
  * - `Sec-Fetch-Site: cross-site` — the request was issued by a page whose
  *   origin differs from the API's; any profile browser visiting an outside
@@ -14,81 +20,47 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * - `Origin` — for same-site requests the header still names the page
  *   origin; if it does not match the request's own Host, the request is
  *   cross-origin and we refuse.
+ * - `Host` — a rebinding page sends `Host: evil.com`; real clients reach the
+ *   loopback API by IP literal or localhost.
  *
- * Non-browser clients (curl, httpx, Node CLIs, the desktop tray) send
- * neither header and are unaffected. The dashboard is same-origin (served
- * by this API), so its Origin equals Host and it passes. Read-only GETs
- * from a top-level navigation carry no Origin and remain reachable — the
- * dangerous verbs all carry one of the fingerprints above.
+ * Non-browser clients (curl, httpx, Node CLIs, the desktop tray) send none
+ * of the browser fingerprints and pass. The dashboard is same-origin (served
+ * by this API), so its Origin equals Host and it passes.
+ *
+ * Additionally, browser-originated mutating requests that carry a body must
+ * declare `application/json` or `multipart/form-data`: a same-origin page
+ * posting a "simple request" form body is stuck with `text/plain`, so this
+ * blocks the cross-site write trick's fallback. The check only applies when
+ * Origin or Sec-Fetch-Site is present — a cross-site request was already
+ * refused above, and local clients (curl, raw-byte proxy/plugin imports)
+ * send neither header and must not be 415'd.
  */
 
-// "/engine/update" (C1) installs a browser binary; a page must not be able
-// to start one either.
-// "/agent" (P9): the local agent can start, change and (with confirmation)
-// delete things — a page inside a profile browser must never command it.
-const SCRIPTING_PREFIXES = ["/jyl", "/plugins", "/resolvers", "/parsers", "/aliases", "/engine/update", "/agent"];
+/** Requests that must stay reachable for boot, monitoring and OAuth. */
+const EXEMPT_PATHS = new Set(["/health", "/metrics", "/google/auth/callback"]);
+
+function isDashboardAsset(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  // The session-token endpoint lives under /dashboard/ for the bearer-hook
+  // exemption, but it is SECRET — a DNS-rebinding page must not read it, so
+  // the origin wall does not treat it as a static asset.
+  if (path === "/dashboard/session-token") return false;
+  return path === "/" || /^\/dashboard\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(path);
+}
 
 /**
- * Also browser-denied (security audits 2026-11-19): routes that drive a real
- * browser or touch stored secrets without being "scripting" — persona
- * warmups (navigate, click, start profiles), live code resolution, and the
- * AYCD key slot. A page inside a profile must never reach them.
+ * Normalize a request path the way the router sees it (security audits
+ * 2026-11-19/20): percent-decode, fold repeated slashes, drop ";params".
+ * An undecodable path is treated as sensitive (all checks then apply).
  */
-const SENSITIVE_PATTERNS = [
-  /^\/profiles\/[^/]+\/warmup(\/|$)/,
-  /^\/profiles\/[^/]+\/resolve$/,
-  /^\/warmups\/personas(\/|$)/,
-  /^\/integrations\/aycd(\/|$)/,
-  // J3a: tab state holds resolved codes and passcodes.
-  /^\/profiles\/[^/]+\/tab-state(\/|$)/,
-  /^\/tab-state(\/|$)/,
-  /^\/tab-view$/,
-  // J6: Discord webhook + cookie export, the queue-position log, tools.
-  /^\/integrations\/discord(\/|$)/,
-  /^\/profiles\/[^/]+\/discord(\/|$)/,
-  /^\/queue-positions$/,
-  /^\/tools(\/|$)/,
-  // ADR-0008: the Deck re-parents real windows.
-  /^\/deck(\/|$)/,
-  // Audit: cookie import / clear / export are side-effecting too.
-  /^\/profiles\/[^/]+\/cookies(\/|$)/,
-  // LIC: the redeemed team key.
-  /^\/team(\/|$)/,
-  // Audit: tab commands, tab export, notes, and every autofill route (card numbers).
-  /^\/profiles\/[^/]+\/tabs(\/|$)/,
-  /^\/tabs(\/|$)/,
-  /^\/profiles\/[^/]+\/log-note$/,
-  /^\/profiles\/[^/]+\/autofill(\/|$)/,
-  // J7/J8: commands, preference sets, tab strings, network logs.
-  /^\/commands(\/|$)/,
-  /^\/presets(\/|$)/,
-  /^\/profiles\/[^/]+\/(tab-string|netlog)(\/|$)/,
-  // J5: cookie lists hold session cookies.
-  /^\/cookie-thinger(\/|$)/,
-  /^\/profiles\/[^/]+\/cookie-thinger(\/|$)/,
-  // J4: autofill map fills move card numbers, codes and passcodes.
-  /^\/autofill(\/|$)/,
-  /^\/profiles\/[^/]+\/autofill\/map$/,
-  // Audit M2: the "sites" settings section flips Discord export and page clicks.
-  /^\/settings(\/|$)/,
-];
-
-function isScriptingUrl(url: string): boolean {
-  // Match what the router matches (security audit 2026-11-19): the router
-  // percent-decodes, so "/%74ab-view" must count as "/tab-view". Also fold
-  // repeated slashes and drop ";params". An undecodable path is treated as
-  // sensitive (the origin checks then apply).
+function normalizePath(url: string): string | null {
   let path = url.split("?")[0] ?? url;
   try {
     path = decodeURIComponent(path);
   } catch {
-    return true;
+    return null;
   }
-  path = path.split(";")[0]!.replace(/\/{2,}/g, "/");
-  return (
-    SCRIPTING_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`)) ||
-    SENSITIVE_PATTERNS.some((re) => re.test(path))
-  );
+  return path.split(";")[0]!.replace(/\/{2,}/g, "/");
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -101,11 +73,28 @@ function isLoopbackHost(hostname: string): boolean {
   );
 }
 
+/** Body-bearing mutating requests must declare a JSON or multipart body. */
+function hasBody(req: FastifyRequest): boolean {
+  const len = req.headers["content-length"];
+  if (len !== undefined) return len !== "0";
+  return req.headers["transfer-encoding"] !== undefined;
+}
+
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 export function denyBrowserScriptingRequest(
   req: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  if (!isScriptingUrl(req.url)) return;
+  const path = normalizePath(req.url);
+
+  // The exempt set: boot health, local monitoring, the OAuth redirect
+  // target (a top-level navigation after a cross-site Google redirect
+  // carries Sec-Fetch-Site: cross-site — that is expected), and static
+  // dashboard files (no data; the page must render to reach its sign-in).
+  if (path !== null && (EXEMPT_PATHS.has(path) || (req.method === "GET" && isDashboardAsset(req.url)))) {
+    return;
+  }
 
   // DNS rebinding (audit M1): a page on evil.com that re-resolves to 127.0.0.1
   // sends Host: evil.com. Real clients use an IP literal or localhost.
@@ -120,7 +109,7 @@ export function denyBrowserScriptingRequest(
     void reply.code(403).send({
       error: {
         code: "FORBIDDEN",
-        message: "cross-site requests to scripting endpoints are refused",
+        message: "cross-site requests are refused",
       },
     });
     return;
@@ -143,9 +132,33 @@ export function denyBrowserScriptingRequest(
       void reply.code(403).send({
         error: {
           code: "FORBIDDEN",
-          message: "cross-origin requests to scripting endpoints are refused",
+          message: "cross-origin requests are refused",
         },
       });
+      return;
+    }
+  }
+
+  // Content-type gate: only police requests a BROWSER could have made.
+  // Cross-site requests were already refused above (they always carry
+  // Origin / Sec-Fetch-Site), so this block exists for one case: a
+  // same-origin page posting a "simple request" (text/plain form body).
+  // Local clients (curl, the tray app, proxy .txt imports, plugin uploads)
+  // send neither header and keep their raw-byte routes; 415ing them would
+  // break legitimate non-browser callers without adding any security.
+  if (MUTATING.has(req.method) && hasBody(req)) {
+    const fromBrowser =
+      req.headers.origin !== undefined || req.headers["sec-fetch-site"] !== undefined;
+    if (fromBrowser) {
+      const ct = String(req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+      if (ct !== "application/json" && ct !== "multipart/form-data") {
+        void reply.code(415).send({
+          error: {
+            code: "UNSUPPORTED_MEDIA_TYPE",
+            message: "browser-originated mutating requests require application/json or multipart/form-data",
+          },
+        });
+      }
     }
   }
 }

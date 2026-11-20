@@ -236,6 +236,22 @@ class ImapSession {
   }
 }
 
+/**
+ * P0 audit SEC-5: IMAP commands are newline-delimited, so a CR/LF inside any
+ * spec value breaks out of the command — e.g. a shared CSV whose Site column
+ * carries `?query=UNSEEN%0d%0a<arbitrary IMAP commands>` would run those
+ * commands on the real mailbox with the stored app password. Reject every
+ * control character (and DEL) in every spec value, after alias substitution
+ * and URL decoding too (URLSearchParams decodes %0d%0a for us).
+ */
+function rejectControlChars(what: string, ...values: string[]): void {
+  for (const v of values) {
+    if (/[\x00-\x1f\x7f]/.test(v)) {
+      throw new Error(`#BAD SPEC imap ${what} contains control characters`);
+    }
+  }
+}
+
 function parseImapUrl(
   args: string,
   aliases: AliasStore | undefined,
@@ -266,6 +282,10 @@ function parseImapUrl(
   }
   if (!pass) throw new Error("#NO PASSWORD imap pass missing");
   const query = (params.get("query") ?? "UNSEEN").trim() || "UNSEEN";
+  rejectControlChars("host", host);
+  rejectControlChars("user", user);
+  rejectControlChars("pass", pass);
+  rejectControlChars("query", query);
   return { host, port, tls, user, pass, query };
 }
 
@@ -332,6 +352,9 @@ function accountSpec(
   if (!account) throw new Error(`#NO ACCOUNT ${email} is not added in Settings → Integrations`);
   const params = new URLSearchParams(m[2] ?? "");
   const query = (params.get("query") ?? "UNSEEN").trim() || "UNSEEN";
+  // P0 audit SEC-5: stored-account values ride into LOGIN/SEARCH too.
+  rejectControlChars("query", query);
+  rejectControlChars("stored account", account.host, account.user, account.pass);
   return { ...account, query };
 }
 

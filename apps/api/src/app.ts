@@ -160,6 +160,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerScriptingOriginDeny(app);
 
+  // P0 audit SEC-1 (defense in depth, alongside the escaping fix in
+  // google.routes): no security headers existed anywhere. The dashboard has
+  // no remote assets, so a same-origin CSP costs nothing and keeps any
+  // future reflected content from loading remote code.
+  app.addHook("onSend", async (_req, reply) => {
+    reply.header(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+    );
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+  });
+
   if (deps.config.apiToken) {
     const token = deps.config.apiToken;
     const expected = Buffer.from(`Bearer ${token}`, "utf8");
@@ -245,13 +258,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerCookieRoutes(app, deps.lifecycle, {
     // Audit A5: raw cookie values only on installs that explicitly set a
     // token — that choice is the operator's opt-in to raw export.
-    rawCookieExportAllowed: Boolean(deps.config.apiToken),
+    rawCookieExportAllowed: !deps.config.apiTokenAuto && Boolean(deps.config.apiToken), // auto-token ≠ explicit opt-in (P0 audit item 3)
   });
   registerSiteRoutes(app, {
     ...(deps.sites ? { sites: deps.sites } : {}),
     ...(deps.discord ? { discord: deps.discord } : {}),
     lifecycle: deps.lifecycle,
-    rawCookieExportAllowed: Boolean(deps.config.apiToken),
+    rawCookieExportAllowed: !deps.config.apiTokenAuto && Boolean(deps.config.apiToken), // auto-token ≠ explicit opt-in (P0 audit item 3)
     profileName: (id) => deps.profiles.get(id).name,
     proxyName: (id) => {
       const proxyId = deps.profiles.get(id).proxyId;
@@ -322,6 +335,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
   registerGoogleRoutes(app, deps.google);
+  // P0 audit item 3 (default-on token): the operator must not have to type
+  // the auto-generated token. This endpoint is exempt from the bearer hook
+  // (it IS a dashboard asset), but the deny-by-default origin wall above
+  // still applies — a hostile page, cross-origin or DNS-rebinding, fails
+  // the Host/Origin checks and cannot read the token. Registered before the
+  // static :file route so the exact path wins.
+  app.get("/dashboard/session-token", async (_req, reply) => {
+    if (!deps.config.apiToken) {
+      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "no token on this install" } });
+    }
+    return { token: deps.config.apiToken };
+  });
   registerDashboardRoutes(app);
   if (deps.bundles) registerBundleRoutes(app, deps.bundles);
   if (deps.plugins && deps.resolvers && deps.parsers && deps.aliases) {
