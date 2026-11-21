@@ -53,6 +53,37 @@ describe("Settings → Email (IMAP)", () => {
     expect(card).toContain('class="email-form"');
   });
 
+  it("the AYCD Inbox card lives here, next to the mail accounts — not under Integrations", () => {
+    const emailStart = appJs.indexOf("function renderEmailAccountsCard(");
+    const emailCard = appJs.slice(emailStart, appJs.indexOf("\n}\n", emailStart));
+    // Key slot, Test and the usage notes moved wholesale.
+    expect(emailCard).toContain('id="aycd-card"');
+    for (const id of ["aycd-key", "aycd-test", "aycd-remove", "aycd-state", "aycd-status"]) {
+      expect(emailCard).toContain(`id="${id}"`);
+    }
+    expect(emailCard).toContain("Inbox → Mail → IMAP Server"); // usage notes came along
+    expect(emailCard).toContain("wireAycdCard()");
+
+    // Integrations keeps Discord (and room for more), but no longer AYCD.
+    const intStart = appJs.indexOf("function integrationCardsHtml(");
+    const intCard = appJs.slice(intStart, appJs.indexOf("\n}\n", intStart));
+    expect(intCard).toContain('id="discord-card"');
+    expect(intCard).not.toContain("aycd");
+
+    // Exactly one of each — the card was moved, not copied.
+    expect(appJs.match(/id="aycd-card"/g)).toHaveLength(1);
+    expect(appJs.match(/wireAycdCard\(\);/g)).toHaveLength(1);
+  });
+
+  it("the AYCD move is UI-only: the same /integrations/aycd routes are called", () => {
+    const start = appJs.indexOf("function wireAycdCard(");
+    const body = appJs.slice(start, appJs.indexOf("\n}\n", start));
+    expect(body).toContain('api("/integrations/aycd")');
+    expect(body).toContain('api("/integrations/aycd", { method: "PUT"');
+    expect(body).toContain('api("/integrations/aycd", { method: "DELETE" })');
+    expect(body).toContain('api("/integrations/aycd/verify", { method: "POST" })');
+  });
+
   it("rows carry Test, Copy and Remove, a TLS badge, and a reserved test-result line", () => {
     expect(appJs).toMatch(/data-act="test">Test<\/button><button[^>]*data-hover="copy"[^>]*>📋 Copy<\/button><button[^>]*data-act="remove"/);
     expect(appJs).toContain('<span class="tag">TLS</span>');

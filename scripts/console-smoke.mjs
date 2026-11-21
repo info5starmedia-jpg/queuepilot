@@ -109,7 +109,7 @@ const clickRowAction = (name, act) => `(() => {
   return true;
 })()`;
 
-export async function runConsoleSmoke({ base, ok, token }) {
+export async function runConsoleSmoke({ base, ok, token, fakeAycdKey }) {
   const exe = findBrowser();
   if (!exe) {
     console.log("  [SKIP] console smoke — no Chromium-family browser found (set QP_SMOKE_BROWSER)");
@@ -455,6 +455,46 @@ export async function runConsoleSmoke({ base, ok, token }) {
     })()`);
     const removed = await waitFor(async () => ((await api("GET", "/email-accounts")).json?.accounts ?? []).length === 0);
     ok("Remove deletes the email account", Boolean(removed));
+
+    // ---- AYCD Inbox card, now in Email (IMAP) — against the fake Inbox ----
+    const aycdHere = await page.evaluate(`(() => {
+      const card = document.querySelector('#aycd-card');
+      const inEmail = Boolean(card) && Boolean(document.querySelector('#email-accounts-card'));
+      return inEmail && Boolean(document.querySelector('#aycd-key')) && Boolean(document.querySelector('#aycd-test'));
+    })()`);
+    const notInIntegrations = await page.evaluate(`(() => {
+      document.querySelector('#settings-nav button[data-section="integrations"]').click();
+      const aycdThere = Boolean(document.querySelector('#aycd-card'));
+      const discordThere = Boolean(document.querySelector('#discord-card'));
+      document.querySelector('#settings-nav button[data-section="email"]').click();
+      return !aycdThere && discordThere; /* Integrations keeps Discord, loses AYCD */
+    })()`);
+    ok("AYCD card renders under Email (IMAP) and no longer under Integrations", Boolean(aycdHere && notInIntegrations));
+
+    const saveKey = (key) => `(() => {
+      document.querySelector('#aycd-key').value = ${JSON.stringify(key)};
+      document.querySelector('#aycd-form').requestSubmit();
+      return true;
+    })()`;
+    // A wrong key must fail cleanly against the fake Inbox (401).
+    await page.evaluate(saveKey("wrong-key-0000"));
+    await waitFor(async () => (await api("GET", "/integrations/aycd")).json?.configured === true);
+    await page.evaluate(`document.querySelector('#aycd-test').click(); true`);
+    const badMsg = await waitFor(() =>
+      page.evaluate(`(() => { const t = document.querySelector('#aycd-status').textContent; return t && !/contacting/i.test(t) ? t : undefined; })()`),
+    );
+    ok("AYCD Test reports a bad key instead of claiming success", Boolean(badMsg) && !/^ok\b/i.test(String(badMsg)), String(badMsg));
+
+    await page.evaluate(saveKey(fakeAycdKey));
+    await page.evaluate(`document.querySelector('#aycd-test').click(); true`);
+    const okMsg = await waitFor(() =>
+      page.evaluate(`(() => { const t = document.querySelector('#aycd-status').textContent; return /ok —/.test(t) ? t : undefined; })()`),
+    );
+    ok("AYCD save + Test succeed against the fake Inbox", Boolean(okMsg), String(okMsg));
+
+    await page.evaluate(`document.querySelector('#aycd-remove').click(); true`);
+    const keyGone = await waitFor(async () => (await api("GET", "/integrations/aycd")).json?.configured === false);
+    ok("AYCD Remove clears the stored key", Boolean(keyGone));
 
     // P9 assistant panel: opens from the launcher, offers 3 example
     // commands, and reports the local model's state (no model is needed

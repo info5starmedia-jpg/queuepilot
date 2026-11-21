@@ -2170,7 +2170,6 @@ function renderIntegrationsInfo() {
     settingsSection = "email";
     renderSettings();
   });
-  wireAycdCard();
   wireDiscordCard();
 }
 
@@ -2198,25 +2197,6 @@ function renderEmailAccountsCard(box) {
         <div class="email-form-actions"><button type="submit" class="primary" id="email-account-add">+ Add account</button> <span class="hint" id="email-account-status"></span></div>
       </form>
       <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=imap:you@gmail.com:ticketmaster</code> returns the code (the parser picks the right email). Raw body for scripts: <code>imap:you@gmail.com</code>.</p>
-    </div>`;
-  $("#email-account-form").addEventListener("submit", addEmailAccount);
-  loadEmailAccounts();
-}
-
-/* Settings → Integrations: Discord notifications + AYCD Inbox (J6 / J1). */
-function integrationCardsHtml() {
-  return `
-    <div class="info-card" id="discord-card">
-      <h4>Discord notifications</h4>
-      <p>Paste a Discord <b>webhook URL</b> (channel settings → Integrations → Webhooks). It is stored encrypted on this machine and only a masked form is ever shown. Choose what to send under Settings → sites.</p>
-      <p id="discord-state" class="hint">checking…</p>
-      <form id="discord-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(260px,3fr) auto auto auto;gap:8px;align-items:end;margin-top:6px">
-        <label>Webhook URL <input id="discord-url" type="password" maxlength="400" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/…" /></label>
-        <button type="submit" class="primary">Save</button>
-        <button type="button" class="ghost" id="discord-test">Send test</button>
-        <button type="button" class="danger" id="discord-remove">Remove</button>
-      </form>
-      <p class="hint" id="discord-status"></p>
     </div>
     <div class="info-card" id="aycd-card">
       <h4>AYCD Inbox</h4>
@@ -2231,6 +2211,28 @@ function integrationCardsHtml() {
       <p class="hint" id="aycd-status"></p>
       <p>In a profile CSV <code>Site:Ticketmaster</code> column: <code>emailcode=aycd:@aycd</code>. Catch-all/forwarding accounts: <code>aycd:@aycd:ticketmaster:&lt;templateId&gt;</code>. Or use AYCD's <b>IMAP Server</b> (Inbox → Mail → IMAP Server): <code>emailcode=imap:127.0.0.1:&lt;port&gt;:&lt;account email&gt;:&lt;password&gt;:ticketmaster</code>.</p>
     </div>`;
+  $("#email-account-form").addEventListener("submit", addEmailAccount);
+  loadEmailAccounts();
+  wireAycdCard();
+}
+
+/* Settings → Integrations: Discord notifications (J6). AYCD moved to
+   Settings → Email (IMAP), where the mail accounts live. */
+function integrationCardsHtml() {
+  return `
+    <div class="info-card" id="discord-card">
+      <h4>Discord notifications</h4>
+      <p>Paste a Discord <b>webhook URL</b> (channel settings → Integrations → Webhooks). It is stored encrypted on this machine and only a masked form is ever shown. Choose what to send under Settings → sites.</p>
+      <p id="discord-state" class="hint">checking…</p>
+      <form id="discord-form" autocomplete="off" style="display:grid;grid-template-columns:minmax(260px,3fr) auto auto auto;gap:8px;align-items:end;margin-top:6px">
+        <label>Webhook URL <input id="discord-url" type="password" maxlength="400" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/…" /></label>
+        <button type="submit" class="primary">Save</button>
+        <button type="button" class="ghost" id="discord-test">Send test</button>
+        <button type="button" class="danger" id="discord-remove">Remove</button>
+      </form>
+      <p class="hint" id="discord-status"></p>
+    </div>
+`;
 }
 
 function wireDiscordCard() {

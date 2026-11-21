@@ -26,6 +26,7 @@
  * Exit 0 + "E2E GREEN" means: ship it to the team.
  */
 import { spawn, execSync } from "node:child_process";
+import http from "node:http";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
@@ -39,6 +40,9 @@ const WITH_LAUNCH = process.argv.includes("--launch");
 const API_PORT = 51234;
 const BASE = `http://127.0.0.1:${API_PORT}`;
 const scratch = mkdtempSync(path.join(tmpdir(), "qp-e2e-"));
+/** Stand-in for AYCD Inbox: never the real key, never AYCD servers. */
+let fakeInbox = null;
+const FAKE_AYCD_KEY = "fake-inbox-key-1234";
 let failures = 0;
 let api = null;
 /** P0 audit item 3: the token is auto-generated into the data dir. */
@@ -88,6 +92,21 @@ async function main() {
 
   // ---- phase 1: boot --------------------------------------------------
   console.log("\nphase 1: boot");
+  // Stand-in for AYCD Inbox so the console AYCD card can be exercised without
+  // the owner's real key and without touching AYCD's servers. Contract from
+  // aycd-inbox.ts: GET /api/v1/user/verify, header `Authorization: Token <key>`.
+  fakeInbox = http.createServer((req, res) => {
+    const good = req.headers.authorization === `Token ${FAKE_AYCD_KEY}`;
+    if (req.url?.startsWith("/api/v1/user/verify")) {
+      res.writeHead(good ? 200 : 401, { "content-type": "application/json" });
+      res.end(JSON.stringify(good ? { success: true } : { error: "invalid key" }));
+      return;
+    }
+    res.writeHead(404).end("{}");
+  });
+  await new Promise((resolve) => fakeInbox.listen(0, "127.0.0.1", resolve));
+  const fakeInboxBase = `http://127.0.0.1:${fakeInbox.address().port}`;
+
   api = spawn(
     process.execPath,
     ["--import", "tsx", "src/main.ts"],
@@ -98,6 +117,7 @@ async function main() {
         SPECTRA_PORT: String(API_PORT),
         SPECTRA_DATA_DIR: scratch,
         SPECTRA_RUNTIME: "fake", // import phases never touch a real engine
+        SPECTRA_AYCD_API_BASE: fakeInboxBase,
         NODE_ENV: "production",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -168,7 +188,7 @@ async function main() {
 
   // ---- phase 4b: console (real dashboard in a headless browser) -------
   console.log("\nphase 4b: console buttons in a real browser");
-  await runConsoleSmoke({ base: BASE, ok, token: AUTO_TOKEN() });
+  await runConsoleSmoke({ fakeAycdKey: FAKE_AYCD_KEY, base: BASE, ok, token: AUTO_TOKEN() });
 
   // ---- phase 5: real launch (optional) --------------------------------
   if (WITH_LAUNCH) {
@@ -234,6 +254,7 @@ async function main() {
     gone = false;
   } catch { /* dead */ }
   ok("API process exits on SIGTERM", gone);
+  fakeInbox?.close();
   rmSync(scratch, { recursive: true, force: true });
   ok("scratch data dir removed", !existsSync(scratch));
 
@@ -249,6 +270,6 @@ function finish() {
 
 main().catch((err) => {
   console.error("e2e-smoke crashed:", err);
-  try { api?.kill(); rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { api?.kill(); fakeInbox?.close(); rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ }
   process.exit(1);
 });
