@@ -217,6 +217,17 @@ export async function runConsoleSmoke({ base, ok, token }) {
     const clip = await waitFor(() => page.evaluate("window.__clip.length === 2 && window.__clip"));
     ok("Copy email / Copy proxy put the email and host:port on the clipboard",
       JSON.stringify(clip) === JSON.stringify(["menu@example.com", "203.0.113.7:8080"]), JSON.stringify(clip));
+    // Hover copy icon on the value the row actually shows (the profile's proxy).
+    const cellCopied = await page.evaluate(`(() => {
+      window.__clip.length = 0;
+      const row = [...document.querySelectorAll('#profiles-table tbody tr')].find((tr) => tr.textContent.includes(${JSON.stringify(menuName)}));
+      const btn = row && row.querySelector('.cell-copy');
+      if (!btn) return "no icon";
+      btn.click();
+      return window.__clip[0] ?? "nothing copied";
+    })()`);
+    ok("hover copy icon on the proxy cell copies host:port", cellCopied === "203.0.113.7:8080", String(cellCopied));
+
     // Drop the fixture proxy now: the proxies phase below asserts an exact
     // count. Detach it first — the service refuses to delete a proxy that a
     // profile still references (409 CONFLICT).

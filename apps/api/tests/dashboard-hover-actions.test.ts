@@ -49,6 +49,42 @@ describe("row hover actions", () => {
     expect(css).toMatch(/td\.hover-col \{ width: 64px/);
   });
 
+  it("the values a row shows — profile proxy, proxy endpoint — carry their own copy icon", () => {
+    // The profiles table has no email column (owner's layout), so Copy email
+    // for a profile lives in the right-click menu; see dashboard-profile-menu.
+    expect(appJs).toContain('<td class="mono">${esc(proxyText)}${cellCopy(proxy ? proxyText : null, "proxy")}</td>');
+    expect(appJs).toContain('${cellCopy(`${p.host}:${p.port}`, "endpoint")}');
+    // Delegated, so the icons survive the frequent table re-renders.
+    expect(appJs).toMatch(/for \(const sel of \["#profiles-table", "#proxies"\]\)/);
+    expect(appJs).toContain('e.target.closest?.(".cell-copy")');
+    expect(appJs).toContain("copyText(b.dataset.copy)");
+  });
+
+  it("a cell copy icon renders only when there is a value, and is escaped", () => {
+    // cellCopy calls esc(); inject it rather than pulling in the whole file.
+    const start = appJs.indexOf("function cellCopy(");
+    expect(start).toBeGreaterThan(-1);
+    const src = appJs.slice(start, appJs.indexOf("\n}\n", start) + 2);
+    const cellCopy = new Function("esc", `${src}; return cellCopy;`)((s: unknown) =>
+      String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"),
+    ) as (v: string | null, l: string) => string;
+
+    expect(cellCopy(null, "proxy")).toBe("");
+    expect(cellCopy("", "proxy")).toBe("");
+    const icon = cellCopy("1.2.3.4:8080", "proxy");
+    expect(icon).toContain('data-copy="1.2.3.4:8080"');
+    expect(icon).toContain('title="copy proxy"');
+    // The value and the label both go through esc() in the source.
+    expect(appJs).toContain('data-copy="${esc(value)}"');
+    expect(cellCopy('a"b', "proxy")).toContain("&quot;");
+  });
+
+  it("the copy icon fades in with the row and stays visible on touch", () => {
+    expect(css).toMatch(/\.cell-copy \{[^}]*opacity: 0/);
+    expect(css).toMatch(/tr:hover \.cell-copy/);
+    expect(css).toMatch(/@media \(hover: none\) \{ \.cell-copy \{ opacity: 0\.75; \} \}/);
+  });
+
   it("copy falls back to execCommand when the Clipboard API is unavailable", () => {
     expect(appJs).toContain("navigator.clipboard.writeText(text)");
     expect(appJs).toContain('document.execCommand("copy")');

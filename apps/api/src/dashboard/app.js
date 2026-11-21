@@ -166,6 +166,11 @@ function hoverActionsCell(edit = true) {
   </span></td>`;
 }
 
+/** Hover-revealed 📋 next to a value shown in a cell (copies that value). */
+function cellCopy(value, label) {
+  return value ? ` <button type="button" class="cell-copy" data-copy="${esc(value)}" title="copy ${esc(label)}" aria-label="copy ${esc(label)}">📋</button>` : "";
+}
+
 /** Wire a row's hover buttons. */
 function wireHoverActions(tr, { copy, edit }) {
   tr.querySelector('[data-hover="copy"]')?.addEventListener("click", (e) => { e.stopPropagation(); copyText(copy()); });
@@ -699,7 +704,7 @@ async function renderProfileTable() {
       <td class="mono" style="color:var(--faint)">${String(start + i + 1).padStart(4, "0")}</td>
       <td><span class="pname">${tabColor ? `<span class="color-dot" style="background:${esc(tabColor)}"></span>` : ""}<span class="fav ${favorite ? "" : "off"}" data-act="favorite" title="favorite">${favorite ? "★" : "☆"}</span><span data-act="edit" title="open profile editor" style="cursor:pointer">${esc(p.name)}</span></span> ${driftBadge}${relayBadge}${degradedBadge}</td>
       <td><span class="status status-${esc(status)}"><span class="dot ${running ? "dot-on" : status === "error" ? "dot-warn" : "dot-off"}"></span>${esc(status.toUpperCase())}</span></td>
-      <td class="mono">${esc(proxyText)}</td>
+      <td class="mono">${esc(proxyText)}${cellCopy(proxy ? proxyText : null, "proxy")}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td class="mono" style="color:var(--faint)">${tabCount ?? "—"}</td>
       <td><span class="row-actions">
@@ -801,6 +806,17 @@ async function onProfileAction(id, act, profile) {
     toast(err.message, "error");
   }
   await loadProfiles();
+}
+
+/* Cell copy icons (profiles → proxy, proxies → endpoint): delegated so they
+   survive the frequent table re-renders. */
+for (const sel of ["#profiles-table", "#proxies"]) {
+  $(sel)?.addEventListener("click", (e) => {
+    const b = e.target.closest?.(".cell-copy");
+    if (!b) return;
+    e.stopPropagation();
+    copyText(b.dataset.copy);
+  });
 }
 
 /* selection: delegated on the table so it survives re-renders */
@@ -1112,7 +1128,7 @@ async function loadProxies() {
       <td style="font-weight:600">${esc(p.name)}</td>
       <td><span class="tag">${esc(p.group ?? "default")}</span></td>
       <td><span class="tag">${esc(p.type)}</span></td>
-      <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.host)}:${esc(p.port)}${p.username ? ` · ${esc(p.username)}` : ""}">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}</td>
+      <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.host)}:${esc(p.port)}${p.username ? ` · ${esc(p.username)}` : ""}">${esc(p.host)}:${esc(p.port)}${p.username ? ` <span class="proxy-cred" style="color:var(--faint)">· ${esc(p.username)}</span>` : ""}${cellCopy(`${p.host}:${p.port}`, "endpoint")}</td>
       <td class="mono" data-tz-cell>${esc(p.lastProbe?.timezone ?? p.timezone ?? "—")}</td>
       <td><span class="probe-line" data-out></span></td>
       <td><span class="row-actions"><button class="act-delete" data-act="delete" title="delete proxy">🗑</button></span></td>
