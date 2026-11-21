@@ -672,3 +672,13 @@ tr:hover .hover-actions, tr:focus-within .hover-actions { opacity: 1; }
 tr:hover .cell-copy, tr:focus-within .cell-copy { opacity: 0.75; }
 .cell-copy:hover { opacity: 1; }
 @media (hover: none) { .cell-copy { opacity: 0.75; } }
+/* Swatch in the row-colour picker. */
+.ctx-menu .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 7px;
+  border: 1px solid #0006;
+  border-radius: 2px;
+  vertical-align: middle;
+}

@@ -240,6 +240,37 @@ export async function runConsoleSmoke({ base, ok, token }) {
     const menuRunning = await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "running");
     ok("menu Launch calls POST /profiles/:id/start", Boolean(menuRunning && (await called(`POST /profiles/${id}/start`))));
     await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profiles-table tbody tr')].some((tr) => tr.textContent.includes(${JSON.stringify(name)}) && tr.textContent.includes("RUNNING"))`));
+
+    // ---- Tab View row colour: pick by name, save, reload ----
+    // (Tab View lists running profiles, so this runs while the profile is up.)
+    await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); true`);
+    const tabRow = await waitFor(() =>
+      page.evaluate(`!document.querySelector('#view-tabview').hidden && [...document.querySelectorAll('#tabview-table tbody tr')].some((tr) => tr.querySelector('[data-tv="colour"][data-id="${id}"]'))`),
+    );
+    await page.evaluate(`document.querySelector('[data-tv="colour"][data-id="${id}"]').click(); true`);
+    const names = await waitFor(() =>
+      page.evaluate(`(() => { const m = document.querySelector('#colour-menu'); return m ? [...m.querySelectorAll('[data-colour]')].map((b) => b.textContent.replace(" ✓", "").trim()) : undefined; })()`),
+    );
+    ok("row colour picker lists the nine named colours (no hex prompt)",
+      Boolean(tabRow) && JSON.stringify(names) === JSON.stringify(["Fluorescent Red", "Green", "Blue", "Gold", "Purple", "Yellow", "Sky Blue", "Pink", "Orange", "No colour"]),
+      JSON.stringify(names));
+    await page.evaluate(`[...document.querySelectorAll('#colour-menu [data-colour]')].find((b) => b.textContent.includes("Sky Blue")).click(); true`);
+    const stored = await waitFor(async () => (await api("GET", `/profiles/${id}/tab-state`)).json?.colour);
+    const painted = await waitFor(() =>
+      page.evaluate(`(() => { const b = document.querySelector('[data-tv="colour"][data-id="${id}"]'); return b && b.closest('tr').getAttribute('style') || undefined; })()`),
+    );
+    ok("picking Sky Blue stores it and repaints the row", stored === "#7fdbff" && String(painted).includes("#7fdbff"), `${stored} / ${painted}`);
+    await page.evaluate(`document.querySelector('[data-tv="colour"][data-id="${id}"]').click(); true`);
+    const ticked = await waitFor(() =>
+      page.evaluate(`(() => { const b = [...document.querySelectorAll('#colour-menu [data-colour]')].find((x) => x.textContent.includes("Sky Blue")); return b ? b.textContent.trim() : undefined; })()`),
+    );
+    ok("re-opening the picker ticks the saved colour", String(ticked).endsWith("✓"), String(ticked));
+    await page.evaluate(`document.querySelector('#colour-menu [data-colour=""]').click(); true`);
+    const cleared = await waitFor(async () => (await api("GET", `/profiles/${id}/tab-state`)).json?.colour === null);
+    ok("'No colour' clears the stored value", Boolean(cleared));
+    await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" })); true`);
+    await waitFor(() => page.evaluate(`!document.querySelector('#view-profiles').hidden`));
+
     await page.evaluate(rightClick(name));
     await page.evaluate(menuClick('[data-ctx="stop"]'));
     const menuIdle = await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "idle");

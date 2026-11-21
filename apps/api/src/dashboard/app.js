@@ -3412,7 +3412,7 @@ async function loadTabView() {
             <button data-tv="passcode" data-id="${esc(r.profileId)}" title="take the next unused passcode">🔑</button>
             <button data-tv="priority" data-id="${esc(r.profileId)}" title="set priority">▲</button>
             <button data-tv="notes" data-id="${esc(r.profileId)}" title="edit note">✎</button>
-            <button data-tv="colour" data-id="${esc(r.profileId)}" title="set row colour">🎨</button>
+            <button data-tv="colour" data-id="${esc(r.profileId)}" data-colour="${esc(r.state?.colour ?? "")}" title="${esc(r.state?.colour ? `row colour: ${rowColourName(r.state.colour) ?? r.state.colour}` : "set row colour")}">🎨</button>
           </span></td></tr>`;
       })
       .join("");
@@ -3766,15 +3766,78 @@ $("#tabview-table tbody").addEventListener("click", async (e) => {
       if (v === null) return;
       await api(`/profiles/${id}/tab-state`, { method: "PATCH", body: JSON.stringify({ notes: v }) });
     } else if (btn.dataset.tv === "colour") {
-      const v = window.prompt("Row colour as #rrggbb (blank clears):", "#3366ff");
-      if (v === null) return;
-      const colour = v.trim() === "" ? null : v.trim();
-      if (colour !== null && !/^#[0-9a-fA-F]{6}$/.test(colour)) return toast("colour must be like #3366ff", "error");
-      await api(`/profiles/${id}/tab-state`, { method: "PATCH", body: JSON.stringify({ colour }) });
+      const r = btn.getBoundingClientRect();
+      openColourMenu(id, btn.dataset.colour || null, r.left, r.bottom + 4);
+      return; /* the picker writes and reloads on pick */
     }
     loadTabView();
   } catch (err) { toast(err.message, "error"); }
 });
+
+/* ============ Row colours (named palette) ============ */
+/* Tab View rows are coloured by name, never by a hex code the operator has to
+   invent. Names map to the stored value; the stored field is unchanged
+   (tab-state `colour`, #rrggbb), so a legacy//custom hex still renders. */
+const ROW_COLOURS = [
+  { name: "Fluorescent Red", hex: "#ff3131" },
+  { name: "Green", hex: "#2ecc40" },
+  { name: "Blue", hex: "#0074d9" },
+  { name: "Gold", hex: "#ffd700" },
+  { name: "Purple", hex: "#b10dc9" },
+  { name: "Yellow", hex: "#ffeb3b" },
+  { name: "Sky Blue", hex: "#7fdbff" },
+  { name: "Pink", hex: "#ff69b4" },
+  { name: "Orange", hex: "#ff851b" },
+];
+
+/** The palette name for a stored value, or null for a legacy/custom hex. */
+function rowColourName(hex) {
+  const v = String(hex ?? "").toLowerCase();
+  return ROW_COLOURS.find((c) => c.hex === v)?.name ?? null;
+}
+
+let colourMenu = null;
+
+function closeColourMenu() {
+  colourMenu?.remove();
+  colourMenu = null;
+}
+
+/** Palette picker for one tab row; writes tab-state `colour`. */
+function openColourMenu(profileId, current, x, y) {
+  closeColourMenu();
+  const cur = String(current ?? "").toLowerCase();
+  const legacy = cur && !rowColourName(cur) ? cur : null;
+  const menu = document.createElement("div");
+  menu.id = "colour-menu";
+  menu.className = "ctx-menu";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML =
+    ROW_COLOURS.map(
+      (c) =>
+        `<button type="button" role="menuitem" data-colour="${esc(c.hex)}"><span class="swatch" style="background:${esc(c.hex)}"></span>${esc(c.name)}${cur === c.hex ? " ✓" : ""}</button>`,
+    ).join("") +
+    (legacy ? `<button type="button" role="menuitem" data-colour="${esc(legacy)}"><span class="swatch" style="background:${esc(legacy)}"></span>Current (${esc(legacy)}) ✓</button>` : "") +
+    `<hr /><button type="button" role="menuitem" data-colour="">No colour</button>`;
+  document.body.appendChild(menu);
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 8))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 8))}px`;
+  colourMenu = menu;
+  menu.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-colour]");
+    if (!b) return;
+    closeColourMenu();
+    const colour = b.dataset.colour === "" ? null : b.dataset.colour;
+    try {
+      await api(`/profiles/${profileId}/tab-state`, { method: "PATCH", body: JSON.stringify({ colour }) });
+      toast(colour ? `row colour: ${rowColourName(colour) ?? colour}` : "row colour cleared");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    loadTabView();
+  });
+}
 
 /* ============ Right-click menu on a profile name ============ */
 /* Launch / Stop reuse the row actions; Run warmer launches the profile with a
@@ -3891,12 +3954,15 @@ $("#profiles-table").addEventListener("contextmenu", (e) => {
 });
 document.addEventListener("mousedown", (e) => {
   if (profileMenu && !profileMenu.contains(e.target)) closeProfileMenu();
+  if (colourMenu && !colourMenu.contains(e.target)) closeColourMenu();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeProfileMenu();
+  if (e.key !== "Escape") return;
+  closeProfileMenu();
+  closeColourMenu();
 });
-window.addEventListener("blur", closeProfileMenu);
-$("#content")?.addEventListener("scroll", closeProfileMenu, true);
+window.addEventListener("blur", () => { closeProfileMenu(); closeColourMenu(); });
+$("#content")?.addEventListener("scroll", () => { closeProfileMenu(); closeColourMenu(); }, true);
 
 /* ---- profile note modal (the profile's own `notes`, not the Log-note CSV) ---- */
 
