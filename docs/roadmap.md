@@ -2477,3 +2477,32 @@ Still open (none blocks the next piece):
 3. **LAN hostnames.** Sensitive routes refuse a non-IP, non-`localhost` Host header (DNS-rebinding guard). If you ever reach the console by a machine name, say so and I'll add an allow-list setting.
 4. **Temp-proxy recall (J8).** Recall the last temporary proxy per profile (re-apply on next launch), or a history list to pick from? Not built until answered.
 5. **Named windows (J7).** Real engine windows (one OS window per name) or only labels in the console?
+
+## Family packaging + release pipeline (DONE 2026-11-20, v0.16.0 → v0.16.1)
+
+- ✅ **App self-update** — `AppUpdateService` + `GET/POST /app/update`, consent-gated
+  (same switch as engine downloads), sha256-verified zip, detached PowerShell
+  swap (`scripts/update-app.ps1`), self-exit so file locks release. Dashboard:
+  Settings → General → App updates card. Dev checkouts report "use git pull".
+- ✅ **Zero-prerequisite launcher** — `scripts/QueuePilot.cmd`: PATH node →
+  `.runtime` portable node → one-time official Node download (v22.23.5; v22.12.0
+  segfaults on better-sqlite3's N-API prebuild — verified). Health-check/reuse,
+  start minimized, open dashboard.
+- ✅ **Release workflow** — `.github/workflows/release.yml`: tag `v*` == package.json
+  version → esbuild+obfuscator bundle → vendored externals (`npm install
+  --omit=dev --ignore-scripts` — npm's auto node-gyp for better-sqlite3's
+  binding.gyp breaks on runner VS18; the N-API prebuild needs no compiler) →
+  zip + latest.json (sha256/size) → GitHub Release.
+- ✅ **CI fixed and green** — windows × node 22/24. Root causes: the npm auto-gyp
+  above; vite-node 2.x can't load fixtures from `~` paths (runner temp is
+  `C:\Users\RUNNER~1`) → CI test step sets TEMP/TMP to `${{ runner.temp }`;
+  two test flakes de-flaked (watchdog timer-rate; 1024x768 headless host).
+- ✅ **Fresh-install rehearsal (twice)** — v0.16.0 rehearsal caught three real
+  bugs: cmd parse crash (stray `)` in an echo inside an if-block), isMain
+  entrypoint never matching relative argv[1] (bundle silently exited 0),
+  Node 22.12 segfault. All fixed; **v0.16.1 published and rehearsed PASS**:
+  launcher → portable Node fetch → API up → dashboard; /app/update reads the
+  release feed ("version 0.16.1, status current"). README gained a
+  family-install section with a real launcher screenshot.
+- Owner decisions honored: NO internal renames (SPECTRA_* prefix is legacy and
+  stays); engine/infrastructure unchanged — this was packaging only.
