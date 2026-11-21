@@ -20,6 +20,35 @@ facts, next tasks) → [docs/parity.md](docs/parity.md) (the completeness checkl
 vs Fury/AliasMode, with green gates) → [docs/roadmap.md](docs/roadmap.md) →
 [docs/adr/](docs/adr/). The engine patchset is owned in [engine/](engine/).
 
+## For family & friends — zero-prerequisite install (v0.16.1)
+
+No Node.js, no admin rights, no command line needed.
+
+1. Download **`queuepilot-windows-x64.zip`** from the
+   [v0.16.1 release](https://github.com/info5starmedia-jpg/queuepilot/releases/tag/v0.16.1).
+2. Right-click the zip → **Extract All…** → pick any folder (Desktop works).
+3. Double-click **`QueuePilot.cmd`**.
+
+On first run the launcher fetches a portable Node into `.runtime\node` (only if no
+Node is installed — ~28 MB from nodejs.org, nothing is installed system-wide),
+starts the API, waits for it to answer, and opens the dashboard. What the console
+looks like on a machine without Node:
+
+![QueuePilot first launch: fetching portable Node, starting the API, opening the dashboard](docs/images/launcher-flow.png)
+
+Sign in with the API token from `%USERPROFILE%\.queuepilot\api-token`
+(Settings → General in the dashboard). The browser engine installs from
+**Settings → Engine** (consent-gated, checksum-pinned) — the app walks you through
+it.
+
+**Updates are one click, forever.** Settings → General → **App updates → Check
+again** downloads the new release, verifies its SHA-256, swaps the files, and
+restarts — profiles, proxies, and settings are untouched (running windows close
+during the swap). Everything the updater needs ships in the zip; no npm, no git,
+ever. To publish an update, push a commit that bumps `version` in
+`apps/api/package.json` and push a matching `v<version>` tag — the release
+workflow does the rest.
+
 ## Status
 
 `v0.11.0` — foundation + Phase 1 (engine trust & launch identity) + profile/proxy
