@@ -3759,3 +3759,166 @@ $("#tabview-table tbody").addEventListener("click", async (e) => {
     loadTabView();
   } catch (err) { toast(err.message, "error"); }
 });
+
+/* ============ Right-click menu on a profile name ============ */
+/* Launch / Stop reuse the row actions; Run warmer launches the profile with a
+   recorded recipe or a persona; Edit note saves the profile's own note (not
+   the Log-note CSV); Copy email / Copy proxy go to the clipboard. */
+
+let profileMenu = null;
+
+function closeProfileMenu() {
+  profileMenu?.remove();
+  profileMenu = null;
+}
+
+/** "host:port" for the profile's launch proxy, or null. Never the password. */
+function profileProxyText(p) {
+  const proxy = p.proxyId ? proxyById.get(p.proxyId) : null;
+  return proxy ? `${proxy.host}:${proxy.port}` : null;
+}
+
+function openProfileMenu(p, x, y) {
+  closeProfileMenu();
+  const running = String(p.status ?? "").toLowerCase() === "running";
+  const menu = document.createElement("div");
+  menu.id = "profile-menu";
+  menu.className = "ctx-menu";
+  menu.setAttribute("role", "menu");
+  menu.dataset.profile = p.id;
+  menu.innerHTML = `
+    <button type="button" role="menuitem" data-ctx="start" ${running ? "disabled" : ""}>▶ Launch</button>
+    <button type="button" role="menuitem" data-ctx="stop" ${running ? "" : "disabled"}>■ Stop</button>
+    <div class="ctx-sub">
+      <button type="button" role="menuitem" data-ctx="warmers" aria-haspopup="true">♨ Run warmer ▸</button>
+      <div class="ctx-menu ctx-submenu" role="menu" hidden></div>
+    </div>
+    <button type="button" role="menuitem" data-ctx="note">✎ Edit note…</button>
+    <hr />
+    <button type="button" role="menuitem" data-ctx="copy-email" ${p.email ? "" : "disabled"}>📋 Copy email</button>
+    <button type="button" role="menuitem" data-ctx="copy-proxy" ${profileProxyText(p) ? "" : "disabled"}>📋 Copy proxy</button>`;
+  document.body.appendChild(menu);
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 8))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 8))}px`;
+  profileMenu = menu;
+  menu.addEventListener("click", (e) => onProfileMenuClick(p, e));
+}
+
+async function showWarmerSubmenu(p) {
+  const sub = profileMenu?.querySelector(".ctx-submenu");
+  if (!sub) return;
+  sub.hidden = false;
+  if (profileMenu.getBoundingClientRect().right + 230 > window.innerWidth) sub.classList.add("flip");
+  sub.innerHTML = `<div class="ctx-head">loading…</div>`;
+  const [rec, per] = await Promise.all([
+    api("/warmups").catch(() => ({ recipes: [] })),
+    api("/warmups/personas").catch(() => ({ personas: [] })),
+  ]);
+  if (profileMenu?.dataset.profile !== p.id) return; /* menu closed or re-opened meanwhile */
+  const recipes = rec.recipes ?? [];
+  const personas = per.personas ?? [];
+  sub.innerHTML =
+    (recipes.length ? `<div class="ctx-head">Recorded recipes</div>` : "") +
+    recipes.map((x) => `<button type="button" role="menuitem" data-warmer="recipe" data-warmer-id="${esc(x.id)}">${esc(x.name)}</button>`).join("") +
+    (personas.length ? `<div class="ctx-head">Personas</div>` : "") +
+    personas.map((x) => `<button type="button" role="menuitem" data-warmer="persona" data-warmer-id="${esc(x.id)}">${esc(x.name)}</button>`).join("") +
+    (recipes.length || personas.length ? "" : `<div class="ctx-head">no warmers yet — record one under Warmups</div>`);
+}
+
+/** Launch the profile with the picked warmer; it keeps running afterwards. */
+async function runWarmerOn(p, kind, warmerId) {
+  if (kind === "persona") {
+    try {
+      await api(`/profiles/${p.id}/warmup/persona`, { method: "POST", body: JSON.stringify({ persona: warmerId, sessions: 1, keepRunning: true }) });
+      toast(`persona warmup started on ${p.name}`);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  } else {
+    toast(`warmup recipe started on ${p.name}`);
+    /* A recipe run holds its request open until the last step finishes. */
+    api(`/warmups/${encodeURIComponent(warmerId)}/run`, { method: "POST", body: JSON.stringify({ profileId: p.id, stopAfter: false }) })
+      .then((d) => {
+        const results = d.results ?? [];
+        const ok = results.filter((x) => x.ok).length;
+        toast(`warmup on ${p.name} finished: ${ok}/${results.length} steps ok`, ok === results.length ? "info" : "error");
+      })
+      .catch((err) => toast(err.message, "error"));
+  }
+  await loadProfiles();
+}
+
+async function onProfileMenuClick(p, e) {
+  const b = e.target.closest("[data-ctx],[data-warmer]");
+  if (!b || b.disabled) return;
+  if (b.dataset.ctx === "warmers") return showWarmerSubmenu(p);
+  closeProfileMenu();
+  if (b.dataset.warmer) return runWarmerOn(p, b.dataset.warmer, b.dataset.warmerId);
+  const act = b.dataset.ctx;
+  if (act === "start" || act === "stop") return onProfileAction(p.id, act, p);
+  if (act === "note") return openNoteModal(p);
+  if (act === "copy-email" && p.email) return copyText(p.email);
+  if (act === "copy-proxy") {
+    const text = profileProxyText(p);
+    if (text) return copyText(text);
+  }
+}
+
+$("#profiles-table").addEventListener("contextmenu", (e) => {
+  const name = e.target.closest?.(".pname");
+  if (!name) return;
+  const p = allProfiles.find((x) => x.id === name.closest("tr")?.dataset.id);
+  if (!p) return;
+  e.preventDefault();
+  openProfileMenu(p, e.clientX, e.clientY);
+});
+document.addEventListener("mousedown", (e) => {
+  if (profileMenu && !profileMenu.contains(e.target)) closeProfileMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeProfileMenu();
+});
+window.addEventListener("blur", closeProfileMenu);
+$("#content")?.addEventListener("scroll", closeProfileMenu, true);
+
+/* ---- profile note modal (the profile's own `notes`, not the Log-note CSV) ---- */
+
+let noteProfileId = null;
+
+async function openNoteModal(p) {
+  noteProfileId = p.id;
+  $("#note-modal-title").textContent = `Note — ${p.name}`;
+  $("#note-modal-status").textContent = "loading…";
+  $("#note-modal-text").value = "";
+  $("#note-modal").hidden = false;
+  try {
+    const fresh = await api(`/profiles/${p.id}`);
+    if (noteProfileId !== p.id) return;
+    $("#note-modal-text").value = fresh.notes ?? "";
+    $("#note-modal-status").textContent = "";
+  } catch (err) {
+    $("#note-modal-status").textContent = err.message;
+  }
+  $("#note-modal-text").focus();
+}
+
+function closeNoteModal() {
+  noteProfileId = null;
+  $("#note-modal").hidden = true;
+}
+
+$("#note-modal-save").addEventListener("click", async () => {
+  const id = noteProfileId;
+  if (!id) return;
+  try {
+    await api(`/profiles/${id}`, { method: "PATCH", body: JSON.stringify({ notes: $("#note-modal-text").value }) });
+    toast("profile note saved");
+    closeNoteModal();
+    await loadProfiles();
+  } catch (err) {
+    $("#note-modal-status").textContent = err.message;
+  }
+});
+$("#note-modal-close").addEventListener("click", closeNoteModal);
+$("#note-modal").addEventListener("click", (e) => { if (e.target.id === "note-modal") closeNoteModal(); });

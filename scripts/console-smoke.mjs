@@ -159,6 +159,13 @@ export async function runConsoleSmoke({ base, ok, token }) {
     const name = `console-smoke-${Date.now()}`;
     const created = await api("POST", "/profiles", { name });
     const id = created.json?.id;
+    // Right-click menu fixture: a second profile with an email and a launch
+    // proxy. Its name must NOT contain `name` — row lookups match on
+    // textContent.includes(), so a superstring would select the same row.
+    const menuName = `ctxmenu-${Date.now()}`;
+    const menuProfile = (await api("POST", "/profiles", { name: menuName })).json;
+    const menuProxy = (await api("POST", "/proxies", { name: `${name}-px`, type: "http", host: "203.0.113.7", port: 8080 })).json;
+    await api("PATCH", `/profiles/${menuProfile?.id}`, { email: "menu@example.com", proxyId: menuProxy?.id });
 
     await page.call("Page.navigate", { url: `${base}/` });
     const listed = await waitFor(() =>
@@ -177,6 +184,83 @@ export async function runConsoleSmoke({ base, ok, token }) {
     const stopClicked = await waitFor(() => page.evaluate(clickRowAction(name, "stop")));
     const idle = await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "idle");
     ok("console ■ Stop stops the profile", Boolean(stopClicked && idle));
+
+    // ---- Right-click menu on a profile name ----
+    // Record the page's own API calls and the clipboard.
+    await page.evaluate(`(() => {
+      window.__calls = [];
+      const realFetch = window.fetch.bind(window);
+      window.fetch = (u, o = {}) => { window.__calls.push((o.method || "GET").toUpperCase() + " " + String(u)); return realFetch(u, o); };
+      window.__clip = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t) => { window.__clip.push(t); } } });
+      return true;
+    })()`);
+    const rightClick = (n) => `(() => {
+      const row = [...document.querySelectorAll('#profiles-table tbody tr')].find((tr) => tr.textContent.includes(${JSON.stringify(n)}));
+      const el = row && row.querySelector('.pname');
+      if (!el) return false;
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 160 }));
+      return document.querySelector('#profile-menu')?.dataset.profile ?? false;
+    })()`;
+    const menuClick = (sel) => `(() => { const b = document.querySelector('#profile-menu ${sel}'); if (!b || b.disabled) return false; b.click(); return true; })()`;
+    const called = (frag) => page.evaluate(`window.__calls.some((c) => c.includes(${JSON.stringify(frag)}))`);
+    const mp = menuProfile?.id;
+    await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profiles-table tbody tr')].some((tr) => tr.textContent.includes(${JSON.stringify(menuName)}))`));
+    const menuFor = [await waitFor(() => page.evaluate(rightClick(name))), await page.evaluate(rightClick(menuName))];
+    ok("right-click opens the menu for the clicked row (per row)", menuFor[0] === id && menuFor[1] === mp, menuFor.join(" / "));
+    const items = await page.evaluate(`[...document.querySelectorAll('#profile-menu > button, #profile-menu .ctx-sub > button')].map((b) => b.textContent.trim())`);
+    ok("menu items: Launch, Stop, Run warmer, Edit note, Copy email, Copy proxy",
+      JSON.stringify(items) === JSON.stringify(["▶ Launch", "■ Stop", "♨ Run warmer ▸", "✎ Edit note…", "📋 Copy email", "📋 Copy proxy"]), JSON.stringify(items));
+    await page.evaluate(menuClick('[data-ctx="copy-email"]'));
+    await page.evaluate(rightClick(menuName));
+    await page.evaluate(menuClick('[data-ctx="copy-proxy"]'));
+    const clip = await waitFor(() => page.evaluate("window.__clip.length === 2 && window.__clip"));
+    ok("Copy email / Copy proxy put the email and host:port on the clipboard",
+      JSON.stringify(clip) === JSON.stringify(["menu@example.com", "203.0.113.7:8080"]), JSON.stringify(clip));
+    // Drop the fixture proxy now: the proxies phase below asserts an exact
+    // count. Detach it first — the service refuses to delete a proxy that a
+    // profile still references (409 CONFLICT).
+    await api("PATCH", `/profiles/${mp}`, { proxyId: null });
+    await api("DELETE", `/proxies/${menuProxy?.id}`);
+    await waitFor(async () => ((await api("GET", "/proxies")).json?.proxies ?? []).every((p) => p.id !== menuProxy?.id));
+    // Launch/Stop/warmer on the proxy-less profile (no live geo lookup through a test proxy).
+    await page.evaluate(rightClick(name));
+    await page.evaluate(menuClick('[data-ctx="start"]'));
+    const menuRunning = await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "running");
+    ok("menu Launch calls POST /profiles/:id/start", Boolean(menuRunning && (await called(`POST /profiles/${id}/start`))));
+    await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profiles-table tbody tr')].some((tr) => tr.textContent.includes(${JSON.stringify(name)}) && tr.textContent.includes("RUNNING"))`));
+    await page.evaluate(rightClick(name));
+    await page.evaluate(menuClick('[data-ctx="stop"]'));
+    const menuIdle = await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "idle");
+    ok("menu Stop calls POST /profiles/:id/stop", Boolean(menuIdle && (await called(`POST /profiles/${id}/stop`))));
+    await page.evaluate(rightClick(menuName));
+    await page.evaluate(menuClick('[data-ctx="note"]'));
+    await waitFor(() => page.evaluate(`!document.querySelector('#note-modal').hidden && document.querySelector('#note-modal-status').textContent === ""`));
+    await page.evaluate(`document.querySelector('#note-modal-text').value = "smoke note — line 1"; document.querySelector('#note-modal-save').click(); true`);
+    const noteSaved = await waitFor(async () => (await api("GET", `/profiles/${mp}`)).json?.notes === "smoke note — line 1");
+    await waitFor(() => page.evaluate(`document.querySelector('#note-modal').hidden`));
+    await page.evaluate(rightClick(menuName));
+    await page.evaluate(menuClick('[data-ctx="note"]'));
+    const reopened = await waitFor(() => page.evaluate(`document.querySelector('#note-modal-text').value === "smoke note — line 1"`));
+    ok("Edit note saves via PATCH /profiles/:id and re-opens with the saved note",
+      Boolean(noteSaved && reopened && (await called(`PATCH /profiles/${mp}`))));
+    await page.evaluate(`document.querySelector('#note-modal-close').click(); true`);
+    const menuRecipe = (await api("POST", "/warmups", { name: `${name}-menu-recipe`, steps: [{ url: "https://example.com/", dwellMs: 1000 }] })).json;
+    await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profiles-table tbody tr')].some((tr) => tr.textContent.includes(${JSON.stringify(name)}) && !tr.textContent.includes("RUNNING"))`));
+    await page.evaluate(rightClick(name));
+    await page.evaluate(menuClick('[data-ctx="warmers"]'));
+    const listedWarmer = await waitFor(() => page.evaluate(`[...document.querySelectorAll('#profile-menu [data-warmer="recipe"]')].some((b) => b.textContent.includes(${JSON.stringify(`${name}-menu-recipe`)}))`));
+    await page.evaluate(`(() => { const b = [...document.querySelectorAll('#profile-menu [data-warmer="recipe"]')].find((x) => x.textContent.includes(${JSON.stringify(`${name}-menu-recipe`)})); if (b) b.click(); return true; })()`);
+    const warmerCalled = await waitFor(() => called(`POST /warmups/${menuRecipe?.id}/run`));
+    ok("Run warmer lists recorded recipes and launches the profile with the picked one", Boolean(listedWarmer && warmerCalled));
+    // The recipe run holds its request until done; wait for it, then leave the profile idle for the Delete step.
+    await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "running", 15_000);
+    await waitFor(() => page.evaluate(`window.__calls.length > 0 && true`));
+    await sleep(2_500);
+    await api("POST", `/profiles/${id}/stop`);
+    await waitFor(async () => (await api("GET", `/profiles/${id}`)).json?.status === "idle");
+    await api("DELETE", `/profiles/${mp}`);
+    await api("DELETE", `/warmups/${menuRecipe?.id}`);
 
     // 🗑 Delete (body-less DELETE)
     const delClicked = await waitFor(() => page.evaluate(clickRowAction(name, "delete")));

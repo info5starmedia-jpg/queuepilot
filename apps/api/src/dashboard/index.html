@@ -385,6 +385,19 @@
       <button id="batch-clear" class="ghost">Clear</button>
     </div>
 
+    <!-- profile note modal (right-click a profile name → Edit note) -->
+    <div id="note-modal" class="overlay" hidden>
+      <div class="drawer" style="width:440px">
+        <div class="drawer-head"><h3 id="note-modal-title">Profile note</h3><button id="note-modal-close" class="ghost">✕</button></div>
+        <div class="hint">Saved on the profile itself (the same note as the profile editor) — separate from the <b>Log note</b> CSV.</div>
+        <textarea id="note-modal-text" rows="6" maxlength="4000" placeholder="a note for this profile"></textarea>
+        <div class="actions">
+          <button id="note-modal-save" class="primary">Save note</button>
+          <span class="hint" id="note-modal-status"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- new-profile modal -->
     <div id="create-modal" class="overlay" hidden>
       <div class="drawer" style="width:380px">
