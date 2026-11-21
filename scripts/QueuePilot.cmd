@@ -17,12 +17,16 @@ rem ============================================================================
 set "APP=%~dp0"
 if "%APP:~-1%"=="\" set "APP=%APP:~0,-1%"
 set "PORT=50325"
+if defined SPECTRA_PORT set "PORT=%SPECTRA_PORT%"
 set "API_URL=http://127.0.0.1:%PORT%"
 set "QDATA=%USERPROFILE%\.queuepilot"
+if defined SPECTRA_DATA_DIR set "QDATA=%SPECTRA_DATA_DIR%"
 set "LOG=%QDATA%\api.log"
 set "RUNTIME=%APP%\.runtime\node"
 set "NODEEXE=%RUNTIME%\node.exe"
-set "NODEVER=v22.12.0"
+rem v22.12.0 segfaults loading better-sqlite3's N-API prebuild (fixed in
+rem later 22.x); v22.23.5 is what CI verifies the exact vendored tree with.
+set "NODEVER=v22.23.5"
 
 if not exist "%QDATA%" mkdir "%QDATA%"
 
@@ -33,7 +37,9 @@ if errorlevel 1 (
   if exist "%NODEEXE%" (
     set "NODECMD=%NODEEXE%"
   ) else (
-    echo [QueuePilot] Node not found - fetching portable Node %NODEVER% once (~28 MB)...
+    rem NOTE: no parentheses in echoes inside this block - cmd parses the whole
+    rem if-block up front and a stray ")" in echo text closes it early.
+    echo [QueuePilot] Node not found - fetching portable Node %NODEVER% once, ~28 MB...
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $u='https://nodejs.org/dist/%NODEVER%/node-%NODEVER%-win-x64.zip'; $z=Join-Path $env:TEMP 'qp-node.zip'; Invoke-WebRequest -UseBasicParsing $u -OutFile $z; $d='%RUNTIME%_tmp'; if (Test-Path $d) { Remove-Item -Recurse -Force $d }; Expand-Archive $z $d; Move-Item (Join-Path $d 'node-%NODEVER%-win-x64') '%RUNTIME%'; Remove-Item -Recurse -Force $d; Remove-Item $z" >> "%APP%\.runtime-fetch.log" 2>&1
     if not exist "%NODEEXE%" (
       echo [QueuePilot] Could not fetch Node. Install Node.js 22+ from https://nodejs.org and re-run.
@@ -54,7 +60,7 @@ if not errorlevel 1 (
 )
 
 echo [QueuePilot] Starting API... (log: %LOG%)
-powershell -NoProfile -Command "Start-Process -FilePath '%NODECMD%' -ArgumentList '\"%~dp0server\queuepilot.mjs\"' -WorkingDirectory '%APP%' -RedirectStandardOutput '%LOG%' -RedirectStandardError '%LOG%.err' -WindowStyle Minimized"
+powershell -NoProfile -Command "Start-Process -FilePath '%NODECMD%' -ArgumentList 'server\queuepilot.mjs' -WorkingDirectory '%APP%' -RedirectStandardOutput '%LOG%' -RedirectStandardError '%LOG%.err' -WindowStyle Minimized"
 
 rem --- wait for /health (up to 60 s) -------------------------------------------
 set /a tries=0

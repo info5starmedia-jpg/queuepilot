@@ -67,6 +67,7 @@ import { secretAliasStore } from "./application/resolvers/token-aliases.js";
 import { migrateLegacyCardStorage } from "./application/profiles/card-secrets.js";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * CLI entry: `queuepilot engine install ...` runs and exits; anything else
@@ -363,9 +364,13 @@ export async function main(): Promise<void> {
   );
 }
 
+// NOTE: the release bundle is launched as `node server/queuepilot.mjs` with
+// a RELATIVE argv[1], so `new URL("file://" + argv[1])` never matches
+// import.meta.url and the API silently no-ops (found in the v0.16.0 install
+// rehearsal). Resolve against cwd and build a proper file URL instead.
 const isMain =
   process.argv[1] &&
-  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   dispatchCli(process.argv.slice(2))
     .then((code) => {
