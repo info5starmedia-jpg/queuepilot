@@ -32,7 +32,8 @@ No Node.js, no admin rights, no command line needed.
 On first run the launcher fetches a portable Node into `.runtime\node` (only if no
 Node is installed — ~28 MB from nodejs.org, nothing is installed system-wide),
 starts the API, waits for it to answer, and opens the dashboard. What the console
-looks like on a machine without Node:
+looks like on first launch (on a machine without Node, one extra line appears
+first: `Node not found - fetching portable Node v22.23.5 once, ~28 MB...`):
 
 ![QueuePilot first launch: fetching portable Node, starting the API, opening the dashboard](docs/images/launcher-flow.png)
 
