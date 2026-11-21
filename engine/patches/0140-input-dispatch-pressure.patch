@@ -1,0 +1,25 @@
+diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browser/devtools/protocol/input_handler.cc
+index a769abea2a..57fb7dcb69 100644
+--- a/content/browser/devtools/protocol/input_handler.cc
++++ b/content/browser/devtools/protocol/input_handler.cc
+@@ -506,7 +506,19 @@ CreateWebMouseEvent(const std::string& event_type,
+   mouse_event->button = event_button;
+   mouse_event->click_count = click_count.value_or(0);
+   mouse_event->pointer_type = GetPointerType(pointer_type.value_or(""));
+-  mouse_event->force = force.value_or(0);
++  // Patch 0140: real OS mouse input never sets WebPointerProperties::force, so
++  // it keeps the quiet_NaN default and Blink reports pointer pressure 0.5
++  // while a button is held -- which a physical mouse must. The CDP default of
++  // 0 yields pressure 0 on pointerdown, a measurable synthetic-input tell
++  // (ENG-INPUT, measured 2026-11-21 against SendInput on this engine). Keep
++  // NaN for mouse when no explicit force was given; non-mouse pointers and
++  // explicit forces keep the protocol behaviour.
++  if (force.has_value()) {
++    mouse_event->force = static_cast<float>(force.value());
++  } else if (mouse_event->pointer_type !=
++             blink::WebPointerProperties::PointerType::kMouse) {
++    mouse_event->force = 0;
++  }
+   mouse_event->tangential_pressure = tangential_pressure.value_or(0);
+   mouse_event->tilt_x = tilt_x.value_or(0);
+   mouse_event->tilt_y = tilt_y.value_or(0);

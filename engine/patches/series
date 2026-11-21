@@ -568,6 +568,15 @@
 # two captured phones, 14.10 and 28.10.2026.
 0136-mobile-apis.patch
 
+# Real OS mouse input never sets WebPointerProperties::force, so it keeps the
+# quiet_NaN default and Blink reports pointer pressure 0.5 while a button is
+# held -- which a physical mouse must. The CDP default of 0 yields pressure 0
+# on pointerdown, a measurable synthetic-input tell (ENG-INPUT; measured
+# 2026-11-21 against SendInput on this engine: real press 0.5, CDP press 0).
+# Keep NaN for mouse when no explicit force was given; explicit forces and
+# non-mouse pointers keep protocol behaviour.
+0140-input-dispatch-pressure.patch!    # input_handler.cc is moderately hot
+
 # --- network ----------------------------------------------------------------
 # NOT NEEDED FOR PARITY, and removing them from the plan is a finding rather
 # than a shortcut. Verified against M150 source on 31.07.2026:
