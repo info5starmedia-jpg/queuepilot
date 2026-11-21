@@ -204,6 +204,72 @@ describe("/team/* relay routes", () => {
     expect(res.json().error.code).toBe("TEAM_UNAVAILABLE");
     expect((await get("/team/session")).json()).toMatchObject({ source: "device", reachable: false });
   });
+
+  // ---- Task 7: owner creates a member directly (no email ever sent) ----
+
+  it("owner creates a member with a temporary password; signs in with it; non-owner is refused", async () => {
+    await signInOwner();
+    const res = await send("POST", "/team/members", { email: "kid@example.test", password: "temp-password-1", displayName: "Kid" });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.account).toMatchObject({ email: "kid@example.test", displayName: "Kid", tier: "L1", active: true });
+    expect(JSON.stringify(body)).not.toContain("temp-password-1");
+
+    const signin = await fetch(`${base}/auth/signin`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "kid@example.test", password: "temp-password-1" }),
+    });
+    expect(signin.status).toBe(200);
+
+    const staff = await addMember("L1", "staff2@example.test");
+    ctx.settings.patch("team", { sessionToken: staff.token, sessionExpiresAt: null });
+    const refused = await send("POST", "/team/members", { email: "x@example.test", password: "temp-password-1" });
+    expect(refused.statusCode).toBe(403);
+  });
+
+  it("creating a member validates the body and relays EMAIL_TAKEN / TEAM_FULL", async () => {
+    await signInOwner();
+    expect((await send("POST", "/team/members", { email: "not-an-email", password: "temp-password-1" })).statusCode).toBe(400);
+    expect((await send("POST", "/team/members", { email: "z@example.test", password: "short" })).statusCode).toBe(400);
+    expect((await send("POST", "/team/members", { email: OWNER.email, password: "temp-password-1" })).statusCode).toBe(409);
+    for (let i = 0; i < 9; i++) {
+      expect((await send("POST", "/team/members", { email: `c${i}@example.test`, password: "temp-password-1" })).statusCode).toBe(201);
+    }
+    const over = await send("POST", "/team/members", { email: "over@example.test", password: "temp-password-1" });
+    expect(over.statusCode).toBe(409);
+    expect(over.json().error.code).toBe("TEAM_FULL");
+  });
+
+  it("a member changes their password; the local session updates and the new password works", async () => {
+    await signInOwner();
+    await send("POST", "/team/members", { email: "kid@example.test", password: "temp-password-1" });
+    const signin = await fetch(`${base}/auth/signin`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "kid@example.test", password: "temp-password-1" }),
+    });
+    const { token } = (await signin.json()) as { token: string };
+    ctx.settings.patch("team", { sessionToken: token, sessionExpiresAt: null });
+
+    const wrong = await send("POST", "/team/password", { currentPassword: "nope", newPassword: "chosen-password-9" });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().error.code).toBe("INVALID_CREDENTIALS");
+
+    const ok = await send("POST", "/team/password", { currentPassword: "temp-password-1", newPassword: "chosen-password-9" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ changed: true });
+
+    // This machine's session (just rotated server-side) still works locally.
+    expect((await get("/team/session")).json()).toMatchObject({ account: { email: "kid@example.test" } });
+
+    const resignin = await fetch(`${base}/auth/signin`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "kid@example.test", password: "chosen-password-9" }),
+    });
+    expect(resignin.status).toBe(200);
+  });
 });
 
 describe("Store on cloud (per-profile sync filter)", () => {

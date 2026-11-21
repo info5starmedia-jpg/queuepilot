@@ -109,7 +109,7 @@ const clickRowAction = (name, act) => `(() => {
   return true;
 })()`;
 
-export async function runConsoleSmoke({ base, ok, token, fakeAycdKey }) {
+export async function runConsoleSmoke({ base, ok, token, fakeAycdKey, teamBase, teamOwnerToken }) {
   const exe = findBrowser();
   if (!exe) {
     console.log("  [SKIP] console smoke — no Chromium-family browser found (set QP_SMOKE_BROWSER)");
@@ -495,6 +495,159 @@ export async function runConsoleSmoke({ base, ok, token, fakeAycdKey }) {
     await page.evaluate(`document.querySelector('#aycd-remove').click(); true`);
     const keyGone = await waitFor(async () => (await api("GET", "/integrations/aycd")).json?.configured === false);
     ok("AYCD Remove clears the stored key", Boolean(keyGone));
+
+    // ---- Task 7: team member creation, against a REAL scratch team server ----
+    if (teamBase && teamOwnerToken) {
+      // Point this scratch API's "team" settings at the scratch team server
+      // THROUGH the console's own Settings → Team field (its change handler
+      // calls refreshTeamSession() — app.js is an ES module, so its functions
+      // are not reachable from a bare page.evaluate() call). Sign-in itself
+      // goes through the API directly, then the same field is re-touched to
+      // force a second refresh now that a session exists.
+      await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" })); true`);
+      // Atomic click+set: the dashboard re-renders the settings view on SSE
+      // events, so a click in one evaluate and a set in the next can land on a
+      // wiped DOM. Retry the whole thing until the change handler fires.
+      const serverUrlSet = await waitFor(() => page.evaluate(`(() => {
+        document.querySelector('#settings-nav button[data-section="team"]')?.click();
+        const el = document.querySelector('#set-team-serverUrl');
+        if (!el) return false;
+        el.value = ${JSON.stringify(teamBase)};
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`), 15_000);
+      ok("console settings: team serverUrl set through the console's own field", Boolean(serverUrlSet));
+      await waitFor(() => page.evaluate(`document.querySelector('#settings-status')?.textContent?.includes('team.serverUrl saved')`));
+
+      const signin = await api("POST", "/team/signin", { email: "owner@e2e-smoke.test", password: "e2e-owner-password-1" });
+      ok("console settings: signed in to the scratch team server as owner", signin.status === 200, JSON.stringify(signin.json));
+
+      // Re-touch the same field (same value) so its change handler fires
+      // refreshTeamSession() again, now that this machine has a session.
+      await page.evaluate(`(() => { document.querySelector('#set-team-serverUrl')?.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      // Click ONCE, then poll WITHOUT clicking: the team panel fills
+      // asynchronously after refreshTeamSession(), and every nav click resets
+      // it to "loading…" again — poll-clicking can starve the fill forever.
+      await page.evaluate(`document.querySelector('#settings-nav button[data-section="team"]')?.click(); true`);
+      const teamPanelUp = await waitFor(() => page.evaluate(`Boolean(document.querySelector('#team-create-form'))`), 15_000);
+      ok("Settings → Team shows the owner panel with 'Add a member directly'", Boolean(teamPanelUp));
+
+      // Create a member directly (temporary password, never emailed).
+      // Fill+submit against the now-stable panel (no nav clicks — same race).
+      const memberEmail = "e2e-kid@example.test";
+      const tempPassword = "e2e-temp-password-1";
+      const createSubmitted = await waitFor(() => page.evaluate(`(() => {
+        const email = document.querySelector('#team-create-email');
+        const form = document.querySelector('#team-create-form');
+        if (!email || !form) return false;
+        email.value = ${JSON.stringify(memberEmail)};
+        document.querySelector('#team-create-name').value = "E2E Kid";
+        document.querySelector('#team-create-password').value = ${JSON.stringify(tempPassword)};
+        form.requestSubmit();
+        return true;
+      })()`), 15_000);
+      ok("console: member-create form submitted", Boolean(createSubmitted));
+      const createdOut = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#team-create-out')?.textContent; return t && /Created/.test(t) ? t : undefined; })()`));
+      ok("console creates the member and shows the temporary password exactly once", Boolean(createdOut), String(createdOut).slice(0, 80));
+      const shownPassword = await page.evaluate(`document.querySelector('#team-create-out .team-code')?.textContent`);
+      ok("the password shown is exactly what the owner typed — never echoed by the server", shownPassword === tempPassword, String(shownPassword));
+
+      // The member signs in with it, directly against the team server (the
+      // console itself is single-seat — this proves the account really works).
+      const memberSignin = await fetch(`${teamBase}/auth/signin`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: memberEmail, password: tempPassword }),
+      });
+      const memberAuth = await memberSignin.json().catch(() => ({}));
+      ok("the member signs in with the temporary password", memberSignin.status === 200, `status ${memberSignin.status}`);
+
+      // Change the password (as the member would, right after first sign-in) —
+      // through the server directly with the member's own token, matching
+      // what the console's "Change password" form calls.
+      const chosenPassword = "e2e-chosen-password-9";
+      const changeRes = await fetch(`${teamBase}/auth/password`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${memberAuth.token ?? ""}` },
+        body: JSON.stringify({ currentPassword: tempPassword, newPassword: chosenPassword }),
+      });
+      ok("the member changes their password", changeRes.status === 200, `status ${changeRes.status}`);
+      const oldDead = await fetch(`${teamBase}/auth/signin`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: memberEmail, password: tempPassword }),
+      });
+      const newWorks = await fetch(`${teamBase}/auth/signin`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: memberEmail, password: chosenPassword }),
+      });
+      ok("the old temporary password is dead; the chosen one signs in", oldDead.status === 401 && newWorks.status === 200,
+        `old=${oldDead.status} new=${newWorks.status}`);
+
+      // The console's OWN Change-password form, end to end: sign the member
+      // in on this machine, change the password there, confirm it rejects a
+      // wrong current password first.
+      await api("POST", "/team/signin", { email: memberEmail, password: chosenPassword });
+      // Same cache-refresh nudge as above: re-touching the serverUrl field
+      // fires refreshTeamSession() so the console sees the new session.
+      await page.evaluate(`(() => { document.querySelector('#set-team-serverUrl')?.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      // Session-transition race: the card still shows the OWNER until the
+      // refresh lands, and the owner's card has the same password form —
+      // submitting into it means the error lands on an element that the
+      // member re-render then wipes. Wait for the MEMBER to be the signed-in
+      // identity before touching the form.
+      const memberView = await waitFor(() => page.evaluate(`document.querySelector('#integrations-info')?.textContent?.includes(${JSON.stringify(memberEmail)})`), 15_000);
+      ok("console: the signed-in identity is now the member", Boolean(memberView));
+      await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" })); true`);
+      // Click once, wait for the member's password form WITHOUT poll-clicking
+      // (same asynchronous-fill race as the owner panel above).
+      await page.evaluate(`document.querySelector('#settings-nav button[data-section="team"]')?.click(); true`);
+      const pwFormUp = await waitFor(() => page.evaluate(`Boolean(document.querySelector('#team-password-form'))`), 15_000);
+      ok("console: member password form shown", Boolean(pwFormUp));
+      const wrongSubmitted = await waitFor(() => page.evaluate(`(() => {
+        const cur = document.querySelector('#team-password-current');
+        const form = document.querySelector('#team-password-form');
+        if (!cur || !form) return false;
+        cur.value = "wrong-password-entirely";
+        document.querySelector('#team-password-new').value = "another-password-11";
+        form.requestSubmit();
+        return true;
+      })()`), 15_000);
+      ok("console: wrong-password form submitted", Boolean(wrongSubmitted));
+      /* The draft/status now survive settings re-renders, so the error the
+         relay returns ("current password is wrong") must be visible. */
+      const wrongMsg = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#team-password-status')?.textContent; return t && /wrong/i.test(t) ? t : undefined; })()`));
+      ok("console: wrong current password is refused with a plain message", Boolean(wrongMsg), String(wrongMsg));
+      const changedSubmitted = await waitFor(() => page.evaluate(`(() => {
+        const cur = document.querySelector('#team-password-current');
+        const form = document.querySelector('#team-password-form');
+        if (!cur || !form) return false;
+        cur.value = ${JSON.stringify(chosenPassword)};
+        document.querySelector('#team-password-new').value = "final-password-12";
+        form.requestSubmit();
+        return true;
+      })()`), 15_000);
+      ok("console: change-password form submitted", Boolean(changedSubmitted));
+      const changedMsg = await waitFor(() => page.evaluate(`(() => { const t = document.querySelector('#team-password-status')?.textContent; return t === "Password changed." ? t : undefined; })()`));
+      ok("console: Change password form works end to end", Boolean(changedMsg));
+      const finalSignin = await fetch(`${teamBase}/auth/signin`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: memberEmail, password: "final-password-12" }),
+      });
+      ok("the password set through the console form actually works", finalSignin.status === 200, `status ${finalSignin.status}`);
+
+      // Back to the owner session and clean up.
+      await api("POST", "/team/signin", { email: "owner@e2e-smoke.test", password: "e2e-owner-password-1" });
+      const owned = await api("GET", "/team/members");
+      const kid = (owned.json?.members ?? []).find((m) => m.email === memberEmail);
+      if (kid) await api("DELETE", `/team/members/${kid.id}`);
+      await api("POST", "/team/signout");
+      await api("PATCH", "/settings/sections/team", { serverUrl: null });
+    } else {
+      console.log("  [SKIP] Task 7 team console checks — no scratch team server base passed");
+    }
 
     // P9 assistant panel: opens from the launcher, offers 3 example
     // commands, and reports the local model's state (no model is needed

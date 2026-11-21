@@ -253,6 +253,11 @@ export class TeamServerClient {
     return this.json("GET", "/auth/me");
   }
 
+  /** A signed-in member changes their own password; every other session for the account dies. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ token: string; expiresAt: string }> {
+    return this.json("POST", "/auth/password", { currentPassword, newPassword });
+  }
+
   async signOut(): Promise<void> {
     await this.json("POST", "/auth/signout");
   }
@@ -267,6 +272,11 @@ export class TeamServerClient {
 
   async removeMember(id: string): Promise<void> {
     await this.json("DELETE", `/team/members/${encodeURIComponent(id)}`);
+  }
+
+  /** The owner creates a member directly with an email + temporary password. */
+  async createMember(email: string, password: string, displayName?: string): Promise<{ account: TeamAccount }> {
+    return this.json("POST", "/team/members", { email, password, ...(displayName ? { displayName } : {}) });
   }
 
   async createInvite(role: TeamTier): Promise<{ code: string; invite: TeamInvite }> {

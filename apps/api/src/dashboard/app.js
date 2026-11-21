@@ -3246,6 +3246,16 @@ $("#team-signin-form").addEventListener("submit", async (ev) => {
   }
 });
 
+/* The change-password draft + status survive settings re-renders (SSE
+   events rebuild this card), so an in-flight change isn't wiped mid-request
+   and a typed password doesn't vanish under the user. */
+let teamPwDraft = { current: "", next: "", status: "" };
+
+function paintTeamPw() {
+  const el = $("#team-password-status");
+  if (el) el.textContent = teamPwDraft.status;
+}
+
 function renderTeamCard(box) {
   const s = teamSession;
   if (!s?.configured) {
@@ -3265,6 +3275,14 @@ function renderTeamCard(box) {
   box.innerHTML = `<div class="info-card" id="team-card"><h4>Team server</h4>
       <p>Signed in as <b>${esc(a.displayName)}</b> (${esc(a.email)}) — <span class="tier-badge">${esc(TIER_LABEL[a.tier] ?? a.tier)}</span></p>
       <button type="button" id="team-signout">Sign out of team</button>
+      <details style="margin-top:8px"><summary style="cursor:pointer">Change password</summary>
+        <form id="team-password-form" class="actions" style="margin-top:8px" autocomplete="off">
+          <label>Current <input id="team-password-current" type="password" required maxlength="500" autocomplete="current-password" /></label>
+          <label>New (min 10 chars) <input id="team-password-new" type="password" required minlength="10" maxlength="500" autocomplete="new-password" /></label>
+          <button type="submit" class="primary">Change</button>
+        </form>
+        <p class="hint" id="team-password-status"></p>
+      </details>
     </div>${a.tier === "owner" ? `<div class="info-card" id="team-panel"><h4>Team</h4><div id="team-panel-body">loading…</div></div>` : ""}`;
   $("#team-signout").addEventListener("click", async () => {
     try {
@@ -3275,19 +3293,51 @@ function renderTeamCard(box) {
     teamPromptDismissed = true;
     await refreshTeamSession();
   });
+  $("#team-password-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    teamPwDraft.status = "Changing…";
+    paintTeamPw();
+    try {
+      await api("/team/password", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword: $("#team-password-current").value, newPassword: $("#team-password-new").value }),
+      });
+      teamPwDraft = { current: "", next: "", status: "Password changed." };
+      $("#team-password-form")?.reset();
+      paintTeamPw();
+      toast("team password changed");
+    } catch (err) {
+      /* plain text: "current password is wrong", too-short, etc. */
+      teamPwDraft.status = err.message;
+      paintTeamPw();
+    }
+  });
+  /* Restore the draft after (re-)rendering; open the section if it carries a
+     status the user should see (e.g. an error that arrived mid-render). */
+  $("#team-password-current").value = teamPwDraft.current;
+  $("#team-password-new").value = teamPwDraft.next;
+  $("#team-password-status").textContent = teamPwDraft.status;
+  if (teamPwDraft.status) $("#team-password-form")?.closest("details")?.setAttribute("open", "");
+  $("#team-password-current").addEventListener("input", (e) => { teamPwDraft.current = e.target.value; });
+  $("#team-password-new").addEventListener("input", (e) => { teamPwDraft.next = e.target.value; });
   if (a.tier === "owner") renderTeamPanel();
 }
 
 async function renderTeamPanel(notice = "") {
-  const body = $("#team-panel-body");
-  if (!body) return;
+  // Fetch FIRST, then resolve the container: the settings view re-renders on
+  // SSE events, so a #team-panel-body captured before these awaits can be
+  // detached by the time we write into it (listeners would then bind to a
+  // form that document-level querySelector can't see).
   let members, invites;
   try {
     [members, invites] = await Promise.all([api("/team/members"), api("/team/invites")]);
   } catch (err) {
-    body.innerHTML = `<p style="color:var(--red)">${esc(err.message)}</p>`;
+    const b = $("#team-panel-body");
+    if (b) b.innerHTML = `<p style="color:var(--red)">${esc(err.message)}</p>`;
     return;
   }
+  const body = $("#team-panel-body");
+  if (!body || !body.isConnected) return;
   const tierSelect = (m) =>
     `<select data-tm="role">${["L1", "L2", "L3"].map((t) => `<option value="${t}" ${m.tier === t ? "selected" : ""}>${t} · ${TIER_LABEL[t]}</option>`).join("")}</select>`;
   const memberRows = members.members
@@ -3307,7 +3357,17 @@ async function renderTeamPanel(notice = "") {
   body.innerHTML = `
     <p class="hint">${members.members.length} of ${members.cap} members · ${open.length} outstanding invite${open.length === 1 ? "" : "s"}</p>
     <table class="grid team-table"><thead><tr><th>Email</th><th>Name</th><th>Tier</th><th>Status</th><th></th></tr></thead><tbody>${memberRows}</tbody></table>
+    <h4 style="margin-top:14px">Add a member directly</h4>
+    <p class="hint">Create the account yourself with a temporary password — hand it over in person, by phone, or in a private message. QueuePilot never sends email.</p>
+    <form id="team-create-form" class="actions" autocomplete="off">
+      <label>Email <input id="team-create-email" type="email" required maxlength="320" /></label>
+      <label>Name <input id="team-create-name" maxlength="120" placeholder="optional" /></label>
+      <label>Temporary password (min 10) <input id="team-create-password" type="password" required minlength="10" maxlength="500" autocomplete="new-password" /></label>
+      <button type="submit" class="primary">Create member</button>
+    </form>
+    <div id="team-create-out"></div>
     <h4 style="margin-top:14px">Invite a team member</h4>
+    <p class="hint">A copyable link/code they redeem themselves — also never emailed by QueuePilot.</p>
     <div class="actions">
       <select id="team-invite-role"><option value="L1">L1 · Staff (run warmups/tasks)</option><option value="L2">L2 · Editor (edit, no add/delete)</option><option value="L3">L3 · Manager (add/delete)</option></select>
       <button type="button" class="primary" id="team-invite-go">Create invite</button>
@@ -3346,7 +3406,41 @@ async function renderTeamPanel(notice = "") {
       }
     }),
   );
-  $("#team-invite-go").addEventListener("click", async () => {
+  body.querySelector("#team-create-form")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const email = $("#team-create-email").value.trim();
+    const password = $("#team-create-password").value;
+    const displayName = $("#team-create-name").value.trim();
+    try {
+      const r = await api("/team/members", {
+        method: "POST",
+        body: JSON.stringify({ email, password, ...(displayName ? { displayName } : {}) }),
+      });
+      // renderTeamPanel() rebuilds the whole panel (fresh member list, fresh
+      // #team-create-out) — refresh FIRST, then show the one-time password
+      // message, same order as the invite-code flow above.
+      await renderTeamPanel();
+      // The password was typed by the owner into this form — it is never
+      // returned by the server and never shown again after this message.
+      $("#team-create-out").innerHTML = `
+        <p>Created <b>${esc(r.account.displayName)}</b> (${esc(r.account.email)}). Give them this temporary password now —
+        it is not stored anywhere else and QueuePilot will not show it again:</p>
+        <div class="actions"><span class="team-code">${esc(password)}</span>
+          <button type="button" id="team-create-copy">Copy</button></div>
+        <p class="hint">They should change it right after signing in (Settings → Team → Change password).</p>`;
+      $("#team-create-copy").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(password);
+          toast("temporary password copied");
+        } catch {
+          toast("copy failed — select the password and copy it by hand", "error");
+        }
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+  body.querySelector("#team-invite-go")?.addEventListener("click", async () => {
     try {
       const r = await api("/team/invites", { method: "POST", body: JSON.stringify({ role: $("#team-invite-role").value }) });
       await renderTeamPanel();

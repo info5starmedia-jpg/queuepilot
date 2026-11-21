@@ -43,6 +43,11 @@ const scratch = mkdtempSync(path.join(tmpdir(), "qp-e2e-"));
 /** Stand-in for AYCD Inbox: never the real key, never AYCD servers. */
 let fakeInbox = null;
 const FAKE_AYCD_KEY = "fake-inbox-key-1234";
+/** Task 7: a real, scratch team server (own port, own SQLite file). */
+let teamServer = null;
+const TEAM_PORT = 51988;
+const TEAM_BOOTSTRAP_CODE = "e2e-bootstrap-code-1";
+const teamDbPath = path.join(scratch, "team-server.db");
 let failures = 0;
 let api = null;
 /** P0 audit item 3: the token is auto-generated into the data dir. */
@@ -92,6 +97,46 @@ async function main() {
 
   // ---- phase 1: boot --------------------------------------------------
   console.log("\nphase 1: boot");
+  // A real, scratch team server (Task 7: admin-create + password change,
+  // exercised end to end through the console — never the live team server).
+  teamServer = spawn(
+    process.execPath,
+    ["--import", "tsx", "src/main.ts"],
+    {
+      cwd: path.resolve(import.meta.dirname, "../apps/server"),
+      env: {
+        ...process.env,
+        QUEUEPILOT_TEAM_PORT: String(TEAM_PORT),
+        QUEUEPILOT_TEAM_DB: teamDbPath,
+        QUEUEPILOT_SERVER_BOOTSTRAP_CODE: TEAM_BOOTSTRAP_CODE,
+        /* The smoke signs in >5×/min from 127.0.0.1 (owner + member + old/new
+           password checks); the production auth rate limiter must not flake
+           it. Scratch server only — the live server never sets this. */
+        QP_DISABLE_AUTH_RATE_LIMIT: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let teamLog = "";
+  teamServer.stdout.on("data", (d) => (teamLog += d));
+  teamServer.stderr.on("data", (d) => (teamLog += d));
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${TEAM_PORT}/health`);
+      if (r.ok) break;
+    } catch { /* not up yet */ }
+    await new Promise((res) => setTimeout(res, 300));
+  }
+  const TEAM_BASE = `http://127.0.0.1:${TEAM_PORT}`;
+  const teamOwner = { email: "owner@e2e-smoke.test", password: "e2e-owner-password-1", displayName: "Owner" };
+  const bootRes = await fetch(`${TEAM_BASE}/auth/bootstrap`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: TEAM_BOOTSTRAP_CODE, ...teamOwner }),
+  });
+  ok("scratch team server boots and bootstraps an owner", bootRes.status === 201, `status ${bootRes.status}`);
+  const { token: teamOwnerToken } = await bootRes.json().catch(() => ({}));
+
   // Stand-in for AYCD Inbox so the console AYCD card can be exercised without
   // the owner's real key and without touching AYCD's servers. Contract from
   // aycd-inbox.ts: GET /api/v1/user/verify, header `Authorization: Token <key>`.
@@ -188,7 +233,7 @@ async function main() {
 
   // ---- phase 4b: console (real dashboard in a headless browser) -------
   console.log("\nphase 4b: console buttons in a real browser");
-  await runConsoleSmoke({ fakeAycdKey: FAKE_AYCD_KEY, base: BASE, ok, token: AUTO_TOKEN() });
+  await runConsoleSmoke({ fakeAycdKey: FAKE_AYCD_KEY, base: BASE, ok, token: AUTO_TOKEN(), teamBase: TEAM_BASE, teamOwnerToken });
 
   // ---- phase 5: real launch (optional) --------------------------------
   if (WITH_LAUNCH) {
@@ -255,7 +300,14 @@ async function main() {
   } catch { /* dead */ }
   ok("API process exits on SIGTERM", gone);
   fakeInbox?.close();
-  rmSync(scratch, { recursive: true, force: true });
+  teamServer?.kill("SIGTERM");
+  /* The API's children can pin files for a moment after SIGTERM; retry like
+     console-smoke does instead of crashing the run on a Windows file lock. */
+  try {
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 });
+  } catch (err) {
+    console.log(`  [warn] scratch dir removal: ${err.message}`);
+  }
   ok("scratch data dir removed", !existsSync(scratch));
 
   return finish();
@@ -270,6 +322,6 @@ function finish() {
 
 main().catch((err) => {
   console.error("e2e-smoke crashed:", err);
-  try { api?.kill(); fakeInbox?.close(); rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { api?.kill(); fakeInbox?.close(); teamServer?.kill(); rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ }
   process.exit(1);
 });

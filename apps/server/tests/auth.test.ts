@@ -135,6 +135,88 @@ describe("hosted team auth", () => {
     expect(dup.status).toBe(400); // code already consumed
   });
 
+  // ---- Task 7: the owner creates a member directly (no email is ever sent) ----
+
+  it("owner creates a member with a temporary password; the password never comes back", async () => {
+    const owner = await bootstrapOwner(base);
+    const res = await fetch(`${base}/team/members`, json(authed(owner), { email: "Kid@Example.com", password: "temp-password-1", displayName: "Kid" }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { account: { email: string; tier: string; active: boolean } };
+    expect(body.account.email).toBe("kid@example.com"); // normalised
+    expect(body.account).toMatchObject({ tier: "L1", active: true });
+    // Nothing in the response (or the members listing) echoes the password.
+    expect(JSON.stringify(body)).not.toContain("temp-password-1");
+    const listed = await (await fetch(`${base}/team/members`, authed(owner))).text();
+    expect(listed).not.toContain("temp-password-1");
+    expect(listed).not.toContain("password_hash");
+
+    // The member signs in with the temporary password straight away.
+    const signin = await fetch(`${base}/auth/signin`, json({}, { email: "kid@example.com", password: "temp-password-1" }));
+    expect(signin.status).toBe(200);
+  });
+
+  it("a member changes the temporary password; old sessions die, the new password works", async () => {
+    const owner = await bootstrapOwner(base);
+    await fetch(`${base}/team/members`, json(authed(owner), { email: "kid@example.com", password: "temp-password-1", displayName: "Kid" }));
+    const first = (await (await fetch(`${base}/auth/signin`, json({}, { email: "kid@example.com", password: "temp-password-1" }))).json()) as { token: string };
+
+    // Wrong current password is refused.
+    const wrong = await fetch(`${base}/auth/password`, json(authed(first.token), { currentPassword: "not-it-at-all", newPassword: "chosen-password-9" }));
+    expect(wrong.status).toBe(401);
+    // Too short is refused.
+    const short = await fetch(`${base}/auth/password`, json(authed(first.token), { currentPassword: "temp-password-1", newPassword: "short" }));
+    expect(short.status).toBe(400);
+
+    const change = await fetch(`${base}/auth/password`, json(authed(first.token), { currentPassword: "temp-password-1", newPassword: "chosen-password-9" }));
+    expect(change.status).toBe(200);
+    const { token: fresh } = (await change.json()) as { changed: boolean; token: string };
+
+    // The old session is gone; the returned one works.
+    expect((await fetch(`${base}/auth/me`, authed(first.token))).status).toBe(401);
+    expect((await fetch(`${base}/auth/me`, authed(fresh))).status).toBe(200);
+    // Only the new password signs in.
+    expect((await fetch(`${base}/auth/signin`, json({}, { email: "kid@example.com", password: "temp-password-1" }))).status).toBe(401);
+    expect((await fetch(`${base}/auth/signin`, json({}, { email: "kid@example.com", password: "chosen-password-9" }))).status).toBe(200);
+  });
+
+  it("creating a member is owner-only, validated, and refuses a duplicate email", async () => {
+    const owner = await bootstrapOwner(base);
+    const member = await inviteMember(base, owner, "L3", "m3@example.com");
+    // A member (even L3) cannot create accounts.
+    expect((await fetch(`${base}/team/members`, json(authed(member), { email: "x@example.com", password: "temp-password-1" }))).status).toBe(403);
+    // Unauthenticated is refused before anything else.
+    expect((await fetch(`${base}/team/members`, json({}, { email: "y@example.com", password: "temp-password-1" }))).status).toBe(401);
+    // Validation: bad email, short password.
+    expect((await fetch(`${base}/team/members`, json(authed(owner), { email: "not-an-email", password: "temp-password-1" }))).status).toBe(400);
+    expect((await fetch(`${base}/team/members`, json(authed(owner), { email: "z@example.com", password: "short" }))).status).toBe(400);
+    // Duplicate email (the invited member's).
+    expect((await fetch(`${base}/team/members`, json(authed(owner), { email: "m3@example.com", password: "temp-password-1" }))).status).toBe(409);
+  });
+
+  it("directly-created members count against the 10-member cap, invites included", async () => {
+    const owner = await bootstrapOwner(base);
+    // owner + 9 created members = 10.
+    for (let i = 0; i < 9; i++) {
+      const r = await fetch(`${base}/team/members`, json(authed(owner), { email: `c${i}@example.com`, password: "temp-password-1" }));
+      expect(r.status).toBe(201);
+    }
+    const over = await fetch(`${base}/team/members`, json(authed(owner), { email: "one-too-many@example.com", password: "temp-password-1" }));
+    expect(over.status).toBe(409);
+    expect(((await over.json()) as { error: { code: string } }).error.code).toBe("TEAM_FULL");
+    // An outstanding invite also blocks (it is reserved head-room).
+    expect((await fetch(`${base}/team/invites`, json(authed(owner), { role: "L1" }))).status).toBe(409);
+  });
+
+  it("device keys have no password to change", async () => {
+    const owner = await bootstrapOwner(base);
+    // The owner session mints a device key for one of his own machines.
+    const mint = await fetch(`${base}/tokens`, json(authed(owner), { name: "pc", role: "operator" }));
+    expect(mint.status).toBe(201);
+    const { token } = (await mint.json()) as { token: string };
+    const res = await fetch(`${base}/auth/password`, json(authed(token), { currentPassword: "x", newPassword: "chosen-password-9" }));
+    expect(res.status).toBe(403);
+  });
+
   it("team is capped at 10 members", async () => {
     const owner = await bootstrapOwner(base); // 1
     for (let i = 0; i < 9; i++) {

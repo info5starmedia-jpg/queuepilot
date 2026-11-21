@@ -261,6 +261,15 @@ export class AuthStore {
     return true;
   }
 
+  /**
+   * Replace an account's password (the owner hands out a temporary one; the
+   * member changes it after signing in). Only the hash is stored.
+   */
+  async setPassword(id: string, password: string): Promise<boolean> {
+    const hash = await argon2Hash(password);
+    return this.db.prepare("UPDATE accounts SET password_hash = ? WHERE id = ?").run(hash, id).changes > 0;
+  }
+
   async verifyPassword(email: string, password: string): Promise<AccountRecord | null> {
     const row = this.db.prepare("SELECT * FROM accounts WHERE email = ?").get(email) as
       | AccountRow

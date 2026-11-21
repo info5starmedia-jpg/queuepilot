@@ -90,8 +90,12 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
   });
 
   // ---- tiny in-memory rate limiter for the public auth routes ----
+  // QP_DISABLE_AUTH_RATE_LIMIT=1 is for scratch/e2e servers only (a smoke run
+  // legitimately signs in more than 5×/min from 127.0.0.1). Live never sets it.
+  const rateLimitOff = process.env.QP_DISABLE_AUTH_RATE_LIMIT === "1";
   const rateHits = new Map<string, { count: number; resetAt: number }>();
   function rateLimited(key: string, limit: number, windowMs: number): boolean {
+    if (rateLimitOff) return false;
     const now = Date.now();
     const hit = rateHits.get(key);
     if (!hit || hit.resetAt <= now) {
@@ -336,6 +340,35 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
     return reply.code(201).send({ token, expiresAt, account: publicAccount(account) });
   });
 
+  /**
+   * A signed-in member changes their own password (first thing after the
+   * owner hands them a temporary one). Every existing session for the
+   * account is dropped and a fresh one is returned, so a leaked temporary
+   * password cannot keep a session alive.
+   */
+  app.post("/auth/password", async (req, reply) => {
+    const auth = req.teamAuth;
+    if (auth.role !== null || !auth.accountId) {
+      return forbidden(reply, "a signed-in account (device keys have no password)");
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : null;
+    const newPassword = typeof body.newPassword === "string" ? body.newPassword : null;
+    if (!currentPassword || !newPassword || newPassword.length < 10) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {currentPassword, newPassword (min 10 chars)}" },
+      });
+    }
+    const account = authStore.getAccount(auth.accountId);
+    if (!account || !(await authStore.verifyPassword(account.email, currentPassword))) {
+      return reply.code(401).send({ error: { code: "INVALID_CREDENTIALS", message: "current password is wrong" } });
+    }
+    await authStore.setPassword(account.id, newPassword);
+    authStore.deleteSessionsFor(account.id);
+    const { token, expiresAt } = authStore.createSession(account.id);
+    return { changed: true, token, expiresAt };
+  });
+
   app.post("/auth/signout", async (req) => {
     const header = req.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
@@ -385,6 +418,41 @@ export function buildTeamServerApp(config: TeamServerConfig): TeamServerApp {
   app.get("/team/members", async (req, reply) => {
     if (!requireOwner(req, reply)) return;
     return { members: authStore.listAccounts().map(publicAccount), cap: TEAM_MEMBER_CAP };
+  });
+
+  /**
+   * The owner creates a member directly, handing them the email + temporary
+   * password himself (owner decision 2026-11-20: no email is ever sent).
+   * The password is never returned or stored in clear — the owner typed it.
+   */
+  app.post("/team/members", async (req, reply) => {
+    if (!requireOwner(req, reply)) return;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : null;
+    const password = typeof body.password === "string" ? body.password : null;
+    const displayName =
+      typeof body.displayName === "string" && body.displayName.trim() ? body.displayName.trim() : email ? email.split("@")[0]! : null;
+    if (!email || !EMAIL_RE.test(email) || email.length > 254 || !password || password.length < 10 || !displayName) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "body must be {email, password (min 10 chars), displayName?}" },
+      });
+    }
+    if (authStore.getAccountByEmail(email)) {
+      return reply.code(409).send({ error: { code: "EMAIL_TAKEN", message: "an account with this email already exists" } });
+    }
+    // Outstanding invites count too, exactly as /auth/redeem counts them.
+    const outstanding = authStore.listInvites().filter((i) => i.usedAt === null && Date.parse(i.expiresAt) > Date.now()).length;
+    if (authStore.memberCount() + outstanding >= TEAM_MEMBER_CAP) {
+      return reply.code(409).send({ error: { code: "TEAM_FULL", message: `team is capped at ${TEAM_MEMBER_CAP} members` } });
+    }
+    let account: AccountRecord;
+    try {
+      account = await authStore.createAccount(email, password, displayName, "L1");
+    } catch {
+      return reply.code(409).send({ error: { code: "EMAIL_TAKEN", message: "an account with this email already exists" } });
+    }
+    // publicAccount never carries the password or its hash.
+    return reply.code(201).send({ account: publicAccount(account) });
   });
 
   app.post("/team/invites", async (req, reply) => {

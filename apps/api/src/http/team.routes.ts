@@ -30,6 +30,15 @@ const SignInSchema = z.object({
 });
 const TierSchema = z.enum(["L1", "L2", "L3"]);
 const InviteSchema = z.object({ role: TierSchema });
+const CreateMemberSchema = z.object({
+  email: z.string().min(1).max(320),
+  password: z.string().min(10).max(500),
+  displayName: z.string().min(1).max(120).optional(),
+});
+const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(500),
+  newPassword: z.string().min(10).max(500),
+});
 const MemberPatchSchema = z
   .object({ role: TierSchema.optional(), active: z.boolean().optional() })
   .refine((v) => v.role !== undefined || v.active !== undefined, { message: "role or active is required" });
@@ -122,6 +131,25 @@ export function registerTeamRoutes(app: FastifyInstance, deps: { settings: Setti
     }
   });
 
+  /** The signed-in member changes their own password (first sign-in after an admin-create, or any time). */
+  app.post("/team/password", async (req, reply) => {
+    const { currentPassword, newPassword } = ChangePasswordSchema.parse(req.body);
+    const c = client(reply);
+    if (!c) return reply;
+    try {
+      const out = await c.changePassword(currentPassword, newPassword);
+      // The server returns a fresh session token for the credential this
+      // request just used — keep this machine signed in with it.
+      settings.patch("team", { sessionToken: out.token, sessionExpiresAt: out.expiresAt });
+      return { changed: true };
+    } catch (err) {
+      if (err instanceof TeamServerError && err.status === 401) {
+        return reply.code(400).send({ error: { code: "INVALID_CREDENTIALS", message: "current password is wrong" } });
+      }
+      return relayError(reply, err);
+    }
+  });
+
   app.post("/team/signout", async () => {
     const team = settings.get("team");
     if (team.serverUrl && team.sessionToken) {
@@ -173,6 +201,23 @@ export function registerTeamRoutes(app: FastifyInstance, deps: { settings: Setti
     if (!c) return reply;
     try {
       return await c.listInvites();
+    } catch (err) {
+      return relayError(reply, err);
+    }
+  });
+
+  /**
+   * The owner creates a member directly: email + a temporary password he
+   * hands over himself (owner decision 2026-11-20: QueuePilot never sends
+   * email). The password is shown to the owner once by this same request
+   * and never stored or returned again.
+   */
+  app.post("/team/members", async (req, reply) => {
+    const { email, password, displayName } = CreateMemberSchema.parse(req.body);
+    const c = client(reply);
+    if (!c) return reply;
+    try {
+      return reply.code(201).send(await c.createMember(email, password, displayName));
     } catch (err) {
       return relayError(reply, err);
     }
