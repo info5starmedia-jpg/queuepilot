@@ -39,6 +39,8 @@ export interface AgentToolDeps {
   warmups: WarmupService;
   plugins: PluginRegistry;
   engineUpdate?: EngineUpdateService;
+  /** Engine runtime + installed version for app_overview. */
+  engineHealth?: { health: () => { runtime?: string; binaryPresent?: boolean; installs?: Array<{ version?: string }> } };
   /** The scripting gate: plugin toggles run plugin code. Throws when closed. */
   assertScriptingEnabled: () => void;
 }
@@ -108,6 +110,38 @@ const ProxyRef = z.string().min(1).max(200).describe("proxy name, host:port, or 
 export function buildAgentTools(d: AgentToolDeps): AgentTool[] {
   const tools: AgentTool[] = [
     // ------------------------------------------------------------ read
+    {
+      name: "app_overview",
+      category: "read",
+      description:
+        "A snapshot of this QueuePilot install in one call: how many profiles (and how many are running right now), how many proxies and proxy groups, how many warmup recipes and plugins, and which browser engine is installed. Use this FIRST for any 'how many' or 'what do I have' question.",
+      schema: z.object({}).strict(),
+      describe: () => "reading the app overview",
+      run: async () => {
+        const profiles = d.profiles.list({});
+        const running = profiles.filter((p) => d.lifecycle.activeRun(p.id) !== null);
+        const proxies = d.proxies.list();
+        const engine = d.engineHealth?.health?.();
+        return {
+          profiles: {
+            total: profiles.length,
+            running: running.length,
+            runningNames: running.slice(0, 20).map((p) => p.name),
+            byStatus: profiles.reduce<Record<string, number>>((acc, p) => {
+              const s = String(p.status ?? "idle");
+              acc[s] = (acc[s] ?? 0) + 1;
+              return acc;
+            }, {}),
+          },
+          proxies: { total: proxies.length, distinctProxyGroups: new Set(proxies.map((p) => p.group ?? "default")).size },
+          warmupRecipes: d.warmups.list().length,
+          plugins: d.plugins.list().length,
+          engine: engine
+            ? { runtime: engine.runtime ?? null, installed: engine.binaryPresent ?? false, version: engine.installs?.[0]?.version ?? null }
+            : null,
+        };
+      },
+    },
     {
       name: "list_profiles",
       category: "read",

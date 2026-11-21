@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { FakeBrowserRuntime } from "../src/application/runtime/fake.browser-runtime.js";
 import { createProvider, OllamaProvider, type ChatMessage, type ModelProvider, type ProviderReply, type ToolSpec } from "../src/application/agent/provider.js";
-import { AgentService, type AgentEvent } from "../src/application/agent/agent.service.js";
+import { AgentService, SYSTEM_PROMPT, type AgentEvent } from "../src/application/agent/agent.service.js";
 import { buildAgentTools, scrubSecrets, toolSpecs } from "../src/application/agent/agent-tools.js";
 import { WarmupService } from "../src/application/warmups/warmup.service.js";
 import { makeTestContext, type TestContext } from "./helpers.js";
@@ -307,6 +307,93 @@ describe("guardrails", () => {
     const agent = agentFor(ctx, provider);
     const events = await run(agent, agent.createChat().id, "enable plugin x");
     expect(events.find((e) => e.type === "tool_result")).toMatchObject({ ok: false, summary: "scripting endpoints are disabled" });
+  });
+
+  // ---- Task 5: the owner asked "how many proxies do I have listed" ----
+
+  it("app_overview answers counts in ONE call: profiles (and running), proxies, recipes, plugins, engine", async () => {
+    const ctx = makeTestContext();
+    ctx.profiles.create({ name: "p-one", generateFingerprint: true });
+    const two = ctx.profiles.create({ name: "p-two", generateFingerprint: true });
+    const seed: Array<[string, string]> = [["px-a", "203.0.113.1"], ["px-b", "203.0.113.2"], ["px-c", "203.0.113.3"]];
+    for (const [n, host] of seed) {
+      ctx.proxies.create({ name: n, type: "http", host, port: 8080 });
+    }
+    await ctx.lifecycle.start(two.id);
+
+    const { provider } = scripted([call("app_overview"), say("You have 3 proxies.")]);
+    const agent = agentFor(ctx, provider);
+    const events = await run(agent, agent.createChat().id, "how many proxies do I have listed");
+
+    const result = events.find((e) => e.type === "tool_result");
+    expect(result).toMatchObject({ tool: "app_overview", ok: true });
+
+    // The model is handed the real numbers.
+    const tools = buildAgentTools({
+      profiles: ctx.profiles,
+      proxies: ctx.proxies,
+      lifecycle: ctx.lifecycle,
+      warmups: new WarmupService(ctx.lifecycle, ctx.dataDir),
+      plugins: ctx.plugins,
+      engineHealth: { health: () => ({ runtime: "fake", binaryPresent: true, installs: [{ version: "0.5.6-qp.2" }] }) },
+      assertScriptingEnabled: () => {},
+    });
+    const overview = tools.find((t) => t.name === "app_overview")!;
+    const snapshot = (await overview.run({})) as {
+      profiles: { total: number; running: number; runningNames: string[]; byStatus: Record<string, number> };
+      proxies: { total: number; groups: number };
+      warmupRecipes: number;
+      plugins: number;
+      engine: { runtime: string | null; installed: boolean; version: string | null } | null;
+    };
+    expect(snapshot.proxies.total).toBe(3);
+    expect(snapshot.profiles.total).toBe(2);
+    expect(snapshot.profiles.running).toBe(1);
+    expect(snapshot.profiles.runningNames).toEqual(["p-two"]);
+    expect(snapshot.engine).toMatchObject({ runtime: "fake", installed: true, version: "0.5.6-qp.2" });
+    expect(typeof snapshot.warmupRecipes).toBe("number");
+    await ctx.lifecycle.stop(two.id);
+  });
+
+  it("app_overview is a read tool, takes no arguments and leaks no credentials", async () => {
+    const ctx = makeTestContext();
+    ctx.proxies.create({ name: "secret-px", type: "http", host: "203.0.113.9", port: 8080, username: "u", password: "pw" });
+    const tools = buildAgentTools({
+      profiles: ctx.profiles,
+      proxies: ctx.proxies,
+      lifecycle: ctx.lifecycle,
+      warmups: new WarmupService(ctx.lifecycle, ctx.dataDir),
+      plugins: ctx.plugins,
+      assertScriptingEnabled: () => {},
+    });
+    const overview = tools.find((t) => t.name === "app_overview")!;
+    expect(overview.category).toBe("read");
+    const spec = toolSpecs([overview])[0]!;
+    expect(spec.parameters).toMatchObject({ properties: {} });
+    const out = JSON.stringify(scrubSecrets(await overview.run({})));
+    expect(out).not.toContain("pw");
+    expect(out).not.toContain("secret-px"); // counts only, no names of proxies
+  });
+
+  it("the system prompt tells the model what it can answer and do, in plain words", () => {
+    // Capability awareness: the owner expects it to know the basics.
+    for (const phrase of ["How many profiles, proxies", "app_overview answers all of this in one call", "Start and stop a profile"]) {
+      expect(SYSTEM_PROMPT).toContain(phrase);
+    }
+    // And what it cannot do, so it says so instead of inventing an answer.
+    expect(SYSTEM_PROMPT).toContain("no tool for cookies, passwords");
+    expect(SYSTEM_PROMPT).toContain("call app_overview first");
+  });
+
+  it("an unreachable model is reported in plain language, not 'fetch failed'", async () => {
+    // Nothing is listening on this loopback port.
+    const provider = createProvider({ kind: "ollama", url: "http://127.0.0.1:1", model: "qwen2.5:7b-instruct" });
+    await expect(provider.chat([{ role: "user", content: "hi" }], [])).rejects.toThrow(
+      /local AI model is not reachable at http:\/\/127\.0\.0\.1:1 — is Ollama running\?/,
+    );
+    const status = await provider.status();
+    expect(status.reachable).toBe(false);
+    expect(status.error).toMatch(/is Ollama installed and running\?/);
   });
 
   it("HTTP: browser-originated calls to /agent are refused; commands stream NDJSON", async () => {

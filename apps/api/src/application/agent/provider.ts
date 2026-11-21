@@ -97,7 +97,22 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async chat(messages: ChatMessage[], tools: ToolSpec[], opts: ChatOptions = {}): Promise<ProviderReply> {
-    const res = await this.fetchImpl(this.endpoint("/api/chat"), {
+    let res: Response;
+    try {
+      res = await this.rawChat(messages, tools, opts);
+    } catch (err) {
+      // A connection failure here is the common "nothing is running" case:
+      // say that in plain words instead of surfacing "fetch failed".
+      if (err instanceof Error && err.name === "AbortError") throw err;
+      throw new Error(
+        `the local AI model is not reachable at ${this.url} — is Ollama running? (start it, then try again)`,
+      );
+    }
+    return this.readChat(res, opts);
+  }
+
+  private async rawChat(messages: ChatMessage[], tools: ToolSpec[], opts: ChatOptions): Promise<Response> {
+    return this.fetchImpl(this.endpoint("/api/chat"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: opts.signal ?? null,
@@ -110,6 +125,9 @@ export class OllamaProvider implements ModelProvider {
         tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } })),
       }),
     });
+  }
+
+  private async readChat(res: Response, opts: ChatOptions): Promise<ProviderReply> {
     if (res.status === 401) {
       throw new Error(`Ollama refused the model call (401): "${this.model}" needs the Ollama app signed in to ollama.com (run "ollama signin")`);
     }

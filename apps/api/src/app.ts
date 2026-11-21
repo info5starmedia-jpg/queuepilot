@@ -267,6 +267,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       warmups,
       plugins: deps.plugins,
       engineUpdate,
+      engineHealth: deps.engineHealth,
       assertScriptingEnabled: scriptingGate(deps.settingsStore, { hasApiToken: Boolean(deps.config.apiToken) }),
     });
     registerAgentRoutes(app, new AgentService(deps.config.dataDir, tools, providerFor), providerFor);
